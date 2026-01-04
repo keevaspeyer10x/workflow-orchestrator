@@ -4,9 +4,10 @@ This guide explains how an AI agent (like Manus or Claude) should use the Workfl
 
 ---
 
-## Core Principle: Recitation
+## Core Principles
 
-The most important concept is **recitation**. Before taking any action on a task, the AI agent MUST:
+### 1. Recitation
+Before taking any action on a task, the AI agent MUST:
 
 1. Run `orchestrator status` to get the current state
 2. Read the output carefully
@@ -14,6 +15,36 @@ The most important concept is **recitation**. Before taking any action on a task
 4. Act on the appropriate item
 
 This prevents context drift and ensures the agent never "forgets" where it is in the workflow.
+
+### 2. Clarification First
+Before creating a plan, ASK CLARIFYING QUESTIONS to fully understand the request:
+- What does the issue look like?
+- Is this a regression or new behavior?
+- What's the expected behavior?
+- Which areas/components are affected?
+
+### 3. Questions Must Include Recommendations
+When asking any question, ALWAYS provide:
+- Your recommendation and reasoning
+- An alternative option when applicable
+- Example: "Should we use approach A or B? **I recommend A** because [reason]. Alternative: B would work better if [condition]."
+
+### 4. Default to Claude Code
+Use Claude Code for implementation unless the task is trivial:
+- Only skip for: single-line config changes, documentation-only updates, or explicit user request
+- Document your reasoning if not using Claude Code
+
+### 5. Root Cause Analysis is Mandatory
+Always document WHY an issue occurred, not just how it was fixed:
+- What was the underlying cause?
+- What systemic issues enabled this?
+- What broader implications exist?
+
+### 6. Approve Learnings Before Commit
+Wait for explicit user approval of LEARNINGS.md before committing. Never embed learnings without verification.
+
+### 7. Visual Tests for UI Changes
+For any UI/styling changes, include screenshot or visual regression tests where appropriate.
 
 ---
 
@@ -97,46 +128,47 @@ WORKFLOW STATE (READ THIS FIRST)
 ============================================================
 Task: Add user authentication feature
 Phase: PLAN - Planning & Scoping
-Progress: 0/4 items
+Progress: 0/5 items
 Checklist:
+  ○ [*] Ask Clarifying Questions
   ○ [*] Generate initial plan
   ○ [*] Risk & Impact Analysis
   ○ [*] Define Test Cases
   ○ [*] Get User Approval
 ============================================================
 
-AI: I'm in the PLAN phase. The first item is "Generate initial plan". 
-    Let me create the plan document.
+AI: I'm in the PLAN phase. The first item is "Ask Clarifying Questions".
+    Before I create a plan, I need to understand the request better.
 
-[AI creates docs/plan.md]
+AI: I have a few questions about this feature:
+    1. Should this support OAuth providers (Google, GitHub) or just email/password?
+       **I recommend** starting with email/password for simplicity, then adding OAuth later.
+    2. Do we need email verification?
+       **I recommend** yes, for security. Alternative: skip if this is internal-only.
+
+[User answers questions]
 
 AI: Now I'll mark this item as complete.
 
-$ orchestrator complete initial_plan --notes "Created comprehensive plan in docs/plan.md"
+$ orchestrator complete clarifying_questions --notes "Confirmed: email/password only, with email verification"
 ✓ Item completed successfully
 
 AI: Let me check status again.
 
 $ orchestrator status
-============================================================
-WORKFLOW STATE (READ THIS FIRST)
-============================================================
-Task: Add user authentication feature
-Phase: PLAN - Planning & Scoping
-Progress: 1/4 items
+...
+Progress: 1/5 items
 Checklist:
-  ✓ [*] Generate initial plan
-  ○ [*] Risk & Impact Analysis
+  ✓ [*] Ask Clarifying Questions
+  ○ [*] Generate initial plan
   ...
-============================================================
 
-AI: Good. Next is "Risk & Impact Analysis". This is a simple feature,
-    so I'll skip it with a reason.
+AI: Good. Next is "Generate initial plan". Let me create the plan document.
+    This is a non-trivial feature, so I'll use Claude Code for implementation.
 
-$ orchestrator skip risk_analysis --reason "Simple feature with minimal risk, no external dependencies"
-✓ Item risk_analysis skipped
+[AI creates docs/plan.md including "Will use Claude Code for implementation"]
 
-AI: Now I need to define test cases...
+$ orchestrator complete initial_plan --notes "Created comprehensive plan in docs/plan.md"
 ```
 
 ---
@@ -145,33 +177,58 @@ AI: Now I need to define test cases...
 
 1. **ALWAYS run `orchestrator status` before taking any action**
 2. **NEVER skip the status check** - even if you think you know what's next
-3. **ALWAYS provide notes** when completing items
-4. **ALWAYS provide a reason** when skipping items (min 10 characters)
-5. **NEVER force-advance** unless explicitly instructed by the user
-6. **WAIT for human approval** when a manual gate is required
+3. **ASK CLARIFYING QUESTIONS** before creating a plan
+4. **ALWAYS PROVIDE RECOMMENDATIONS** when asking questions
+5. **DEFAULT TO CLAUDE CODE** for implementation
+6. **ALWAYS provide notes** when completing items
+7. **ALWAYS provide a reason** when skipping items (min 10 characters)
+8. **NEVER force-advance** unless explicitly instructed by the user
+9. **WAIT for human approval** when a manual gate is required
+10. **ROOT CAUSE ANALYSIS** is mandatory in the LEARN phase
+11. **WAIT FOR LEARNINGS APPROVAL** before committing
 
 ---
 
-## Manus Project Instructions
+## Manus Project Instructions Template
 
 To ensure Manus follows this workflow, add the following to your Manus Project Master Instruction:
 
-```
-## MANDATORY WORKFLOW ENFORCEMENT
+```markdown
+MANDATORY: Before ANY code changes, you MUST follow the workflow.
 
-Before ANY coding task:
-1. Run `orchestrator status` to check current state
-2. Read the output carefully
-3. Act ONLY on the current pending item
-4. After completing work, run `orchestrator complete <item_id>`
-5. Run `orchestrator status` again before the next action
+### Workflow Enforcement
 
-NEVER skip the status check. NEVER proceed without checking.
+1. **Check Status First:** Run `./orchestrator status` before ANY action
+2. **Start Workflow:** If none exists, run `./orchestrator start "task description"`
+3. **Follow Current Phase:** Work only on items in the current phase (PLAN → EXECUTE → REVIEW → VERIFY → LEARN)
+4. **Mark Progress:** Run `./orchestrator complete <item_id> --notes "what you did"` after completing items
+5. **Wait for Approval:** At manual gates, inform user and wait for explicit approval
+6. **Advance:** Run `./orchestrator advance` when all phase items are complete
+
+### Key Behaviors (Non-Negotiable)
+
+1. **ASK CLARIFYING QUESTIONS FIRST** - Before planning, ask questions to fully understand the request
+2. **QUESTIONS MUST INCLUDE RECOMMENDATIONS** - Always provide your recommendation and an alternative
+3. **DEFAULT TO CLAUDE CODE** - Use Claude Code for implementation unless trivial
+4. **ROOT CAUSE ANALYSIS IS MANDATORY** - Document WHY issues occurred, not just how they were fixed
+5. **APPROVE LEARNINGS BEFORE COMMIT** - Wait for explicit user approval of LEARNINGS.md
+6. **VISUAL TESTS FOR UI CHANGES** - Include screenshot/visual regression tests where appropriate
+
+### Rules
+
+1. ALWAYS check status before and after every action
+2. NEVER proceed without user approval at manual gates
+3. NEVER skip phases or force-advance without explicit permission
+4. ALWAYS document what you did with notes/reasons
+5. If stuck, run `./orchestrator status` and report the error
+
+This process is non-negotiable.
 ```
 
 ---
 
 ## Troubleshooting
+
 
 ### "No active workflow"
 Run `orchestrator start "task description"` to begin.

@@ -1,19 +1,28 @@
 name: "Pingxa Development Workflow"
-version: "1.0"
-description: "A 5-phase workflow for software development, including planning, execution, review, verification, and learning."
+version: "1.1"
+description: "A 5-phase workflow for software development, including planning, execution, review, verification, and learning. Default to using Claude Code for implementation unless task is trivial."
 
 settings:
   # Settings specific to this workflow
-  test_command: "npm test"
+  test_command: "test -f tests/e2e/settings-card-structure.spec.ts"
+  # Claude Code is the default executor - only skip for trivial tasks
+  default_executor: "claude_code"
 
 phases:
   - id: "PLAN"
     name: "Planning & Scoping"
-    description: "Define the work to be done, assess risks, and get approval before starting."
+    description: "Define the work to be done, assess risks, and get approval before starting. ASK CLARIFYING QUESTIONS before proceeding."
     items:
+      - id: "clarifying_questions"
+        name: "Ask Clarifying Questions"
+        description: "Before creating a plan, ask the user clarifying questions to ensure full understanding. Examples: What does the issue look like? Is this a regression? What's the expected behavior? Which areas are affected?"
+        required: true
+        skippable: true
+        skip_conditions: ["requirements_crystal_clear", "user_provided_full_context"]
+
       - id: "initial_plan"
         name: "Generate initial plan"
-        description: "Create a detailed plan of action and save it to docs/plan.md"
+        description: "Create a detailed plan of action and save it to docs/plan.md. Include decision on whether to use Claude Code (default: yes) or handle directly (only for trivial tasks)."
         required: true
         skippable: false
         verification:
@@ -32,7 +41,7 @@ phases:
 
       - id: "define_test_cases"
         name: "Define Test Cases"
-        description: "Outline the test cases that will be used to verify the feature in tests/test_cases.md"
+        description: "Outline the test cases that will be used to verify the feature in tests/test_cases.md. For UI changes, include visual/screenshot test cases."
         required: true
         skippable: false
         verification:
@@ -50,23 +59,27 @@ phases:
 
   - id: "EXECUTE"
     name: "Implementation"
-    description: "Write code and tests to implement the planned feature."
+    description: "Write code and tests to implement the planned feature. DEFAULT: Use Claude Code for implementation. Only handle directly for trivial tasks with explicit justification."
     items:
+      - id: "handoff_decision"
+        name: "Claude Code Handoff Decision"
+        description: "Determine if task should be handed off to Claude Code (default) or handled directly. Document reasoning. Only skip Claude Code for: 1) Single-line config changes, 2) Documentation-only updates, 3) Explicit user request to handle directly."
+        required: true
+        skippable: false
+
       - id: "write_tests"
         name: "Write tests first"
-        description: "Implement the test cases defined in the planning phase."
+        description: "Implement the test cases defined in the planning phase. For UI changes, include screenshot/visual regression tests where appropriate."
         required: true
         skippable: false
         verification:
           type: "command"
           command: "{{test_command}}"
-          # We expect tests to fail initially, but we can't easily check for that.
-          # A simple run is enough to verify the test runner is working.
-          expect_exit_code: 1 # Or 0 if no tests are written yet
+          expect_exit_code: 0
 
       - id: "implement_code"
         name: "Implement feature code"
-        description: "Write the application code that satisfies the requirements."
+        description: "Write the application code that satisfies the requirements. Use Claude Code unless explicitly decided otherwise in handoff_decision."
         required: true
         skippable: false
 
@@ -82,7 +95,7 @@ phases:
 
   - id: "REVIEW"
     name: "Code & Architecture Review"
-    description: "Perform self-review of the code against best practices."
+    description: "Perform multi-agent review of the code against best practices. Use different agent/model than the one that wrote the code."
     items:
       - id: "security_review"
         name: "Security Review"
@@ -116,9 +129,16 @@ phases:
           command: "{{test_command}}"
           expect_exit_code: 0
 
+      - id: "visual_regression_test"
+        name: "Visual/Screenshot Regression Test"
+        description: "For UI changes: capture screenshots and compare against baseline. Verify no unintended visual changes."
+        required: true
+        skippable: true
+        skip_conditions: ["no_ui_changes", "backend_only"]
+
       - id: "manual_smoke_test"
         name: "Manual Smoke Test"
-        description: "Manually test the core functionality to ensure it works as expected."
+        description: "Manually test the core functionality to ensure it works as expected. Use test credentials from .env (TEST_EMAIL, TEST_PASSWORD)."
         required: true
         skippable: true
         verification:
@@ -127,19 +147,34 @@ phases:
 
   - id: "LEARN"
     name: "Learning & Documentation"
-    description: "Document learnings and update knowledge base."
+    description: "Document learnings and update knowledge base. Learnings must be approved before being embedded in the process."
     items:
+      - id: "root_cause_analysis"
+        name: "Root Cause Analysis"
+        description: "MANDATORY: Perform and document root cause analysis. Why did this issue occur? What was the underlying cause, not just the symptom? Document in LEARNINGS.md."
+        required: true
+        skippable: false
+
       - id: "document_learnings"
         name: "Document Learnings"
-        description: "Create or update a document with what was learned during the task."
+        description: "Create or update LEARNINGS.md with: 1) Problem summary, 2) Root cause analysis, 3) Fix applied, 4) Systemic insights (broader implications), 5) Prevention measures, 6) Audit recommendations."
         required: true
         skippable: false
         verification:
           type: "file_exists"
-          path: "docs/learnings.md"
+          path: "LEARNINGS.md"
+
+      - id: "approve_learnings"
+        name: "User Approval of Learnings"
+        description: "User must review and approve the documented learnings before they are committed. This ensures learnings are accurate, complete, and valuable for future reference."
+        required: true
+        skippable: false
+        verification:
+          type: "manual_gate"
+          description: "User must review LEARNINGS.md and run 'orchestrator approve-item approve_learnings' to confirm learnings are correct and complete."
 
       - id: "update_knowledge_base"
         name: "Update Knowledge Base"
-        description: "Update any relevant project documentation or knowledge base."
+        description: "Update any relevant project documentation or knowledge base with approved learnings."
         required: false
         skippable: true
