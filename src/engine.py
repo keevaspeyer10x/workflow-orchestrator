@@ -66,9 +66,11 @@ class WorkflowEngine:
             if key in self.workflow_def.settings:
                 value = str(self.workflow_def.settings[key])
                 if sanitize_for_shell:
-                    # Sanitize for shell safety - only allow alphanumeric, dash, underscore, dot, slash
+                    # Sanitize for shell safety - allow common command characters
+                    # Spaces are OK (we use shlex.split), but block dangerous chars
                     import re as regex
-                    if not regex.match(r'^[a-zA-Z0-9_./-]+$', value):
+                    dangerous_chars = r'[;&|`$(){}\[\]<>\\!\n\r]'
+                    if regex.search(dangerous_chars, value):
                         raise ValueError(f"Unsafe characters in setting '{key}': {value}")
                 return value
             return match.group(0)  # Leave unchanged if not found
