@@ -183,6 +183,8 @@ class WorkflowState(BaseModel):
     updated_at: datetime = Field(default_factory=_utc_now)
     completed_at: Optional[datetime] = None
     metadata: dict = Field(default_factory=dict)
+    # Version-locked workflow definition - stored at workflow start to prevent schema drift
+    workflow_definition: Optional[dict] = None
     
     def get_current_phase(self) -> Optional[PhaseState]:
         """Get the current phase state."""

@@ -158,11 +158,24 @@ class WorkflowEngine:
         
         self.state = WorkflowState(**data)
         
-        # Try to load workflow definition from stored path
+        # PRIORITY 1: Use version-locked workflow definition from state (prevents schema drift)
+        if self.state and self.state.workflow_definition:
+            try:
+                self.workflow_def = WorkflowDef(**self.state.workflow_definition)
+                logger.debug("Loaded version-locked workflow definition from state")
+                return self.state
+            except Exception as e:
+                logger.warning(f"Failed to load stored workflow definition: {e}")
+                # Fall through to load from file
+        
+        # PRIORITY 2: Fallback to loading from YAML file (for backwards compatibility)
         if self.state and self.state.metadata.get("workflow_yaml_path"):
             yaml_path = Path(self.state.metadata["workflow_yaml_path"])
             if yaml_path.exists():
                 self.load_workflow_def(str(yaml_path))
+                # Warn about potential schema drift
+                if self.state.workflow_definition is None:
+                    logger.warning("Workflow state missing version-locked definition. Using current workflow.yaml which may have changed.")
             elif (self.working_dir / "workflow.yaml").exists():
                 # Fallback to default location
                 self.load_workflow_def(str(self.working_dir / "workflow.yaml"))
@@ -258,6 +271,10 @@ class WorkflowEngine:
         with open(yaml_path_resolved, 'rb') as f:
             yaml_checksum = hashlib.sha256(f.read()).hexdigest()[:16]
         
+        # Store version-locked workflow definition to prevent schema drift
+        # This ensures the workflow runs with the same rules it started with
+        workflow_def_dict = self.workflow_def.model_dump(mode='json')
+        
         self.state = WorkflowState(
             workflow_id=workflow_id,
             workflow_type=self.workflow_def.name,
@@ -266,6 +283,7 @@ class WorkflowEngine:
             project=project,
             current_phase_id=first_phase.id,
             phases=phases,
+            workflow_definition=workflow_def_dict,  # Version-locked definition
             metadata={
                 "workflow_yaml_path": str(yaml_path_resolved),
                 "workflow_yaml_checksum": yaml_checksum
