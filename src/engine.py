@@ -10,10 +10,14 @@ import subprocess
 import re
 import hashlib
 import fcntl
+import logging
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional, Tuple
 import uuid
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 from .schema import (
     WorkflowDef, WorkflowState, PhaseState, ItemState,
@@ -23,6 +27,11 @@ from .schema import (
 
 # Template pattern for {{variable}} substitution
 _TEMPLATE_PATTERN = re.compile(r"\{\{(\w+)\}\}")
+
+# Constants
+COMMAND_TIMEOUT_SECONDS = 300  # 5 minutes
+OUTPUT_TRUNCATE_LENGTH = 1000  # Max chars for stdout/stderr
+MIN_SKIP_REASON_LENGTH = 10  # Minimum characters for skip reason
 
 
 class WorkflowEngine:
@@ -70,7 +79,7 @@ class WorkflowEngine:
     # Datetime Parsing
     # ========================================================================
     
-    def _parse_datetime(self, value) -> Optional[datetime]:
+    def _parse_datetime(self, value, field_name: str = "unknown") -> Optional[datetime]:
         """Parse a datetime from string or return as-is if already datetime."""
         if value is None:
             return None
@@ -80,8 +89,10 @@ class WorkflowEngine:
             try:
                 # Handle ISO format with or without timezone
                 return datetime.fromisoformat(value.replace('Z', '+00:00'))
-            except ValueError:
+            except ValueError as e:
+                logger.warning(f"Failed to parse datetime for field '{field_name}': {value} - {e}")
                 return None
+        logger.warning(f"Unexpected type for datetime field '{field_name}': {type(value)}")
         return None
     
     def _parse_state_datetimes(self, data: dict) -> dict:
@@ -90,21 +101,21 @@ class WorkflowEngine:
         
         for field in datetime_fields:
             if field in data and data[field]:
-                data[field] = self._parse_datetime(data[field])
+                data[field] = self._parse_datetime(data[field], field)
         
         # Parse phases
         if 'phases' in data:
             for phase_id, phase_data in data['phases'].items():
                 for field in datetime_fields:
                     if field in phase_data and phase_data[field]:
-                        phase_data[field] = self._parse_datetime(phase_data[field])
+                        phase_data[field] = self._parse_datetime(phase_data[field], f"phases.{phase_id}.{field}")
                 
                 # Parse items within phases
                 if 'items' in phase_data:
                     for item_id, item_data in phase_data['items'].items():
                         for field in datetime_fields:
                             if field in item_data and item_data[field]:
-                                item_data[field] = self._parse_datetime(item_data[field])
+                                item_data[field] = self._parse_datetime(item_data[field], f"phases.{phase_id}.items.{item_id}.{field}")
         
         return data
     
@@ -191,13 +202,17 @@ class WorkflowEngine:
         if not self.log_file.exists():
             return []
         events = []
+        line_num = 0
         with open(self.log_file, 'r') as f:
             for line in f:
+                line_num += 1
                 if line.strip():
                     try:
                         events.append(WorkflowEvent(**json.loads(line)))
-                    except Exception:
-                        pass  # Skip malformed lines
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Malformed JSON in log file at line {line_num}: {e}")
+                    except Exception as e:
+                        logger.warning(f"Failed to parse event at line {line_num}: {e}")
         return events[-limit:]
     
     def reload(self):
@@ -481,8 +496,8 @@ class WorkflowEngine:
         if item_state.status in [ItemStatus.COMPLETED, ItemStatus.SKIPPED]:
             return False, f"Item {item_id} is already {item_state.status.value}"
         
-        if not reason or len(reason.strip()) < 10:
-            return False, "Skip reason must be at least 10 characters"
+        if not reason or len(reason.strip()) < MIN_SKIP_REASON_LENGTH:
+            return False, f"Skip reason must be at least {MIN_SKIP_REASON_LENGTH} characters"
         
         item_state.status = ItemStatus.SKIPPED
         item_state.skipped_at = datetime.now(timezone.utc)
@@ -675,6 +690,8 @@ class WorkflowEngine:
                 return False, f"File not found: {verification.path}", result
         
         elif verification.type == VerificationType.COMMAND:
+            import shlex
+            
             # Substitute template variables with shell sanitization
             try:
                 command = self._substitute_template(verification.command, sanitize_for_shell=True)
@@ -683,30 +700,35 @@ class WorkflowEngine:
                 result["blocked"] = True
                 return False, f"Command blocked: {e}", result
             
-            # Additional safety: block dangerous shell patterns
-            dangerous_patterns = ['$(', '`', '&&', '||', ';', '|', '>', '<', '\n', '\r']
-            for pattern in dangerous_patterns:
-                if pattern in command:
-                    result["error"] = f"Dangerous pattern detected: {pattern}"
-                    result["blocked"] = True
-                    return False, f"Command blocked: contains dangerous pattern '{pattern}'", result
+            # Parse command into args list for shell=False execution
+            try:
+                command_args = shlex.split(command)
+            except ValueError as e:
+                result["error"] = f"Invalid command syntax: {e}"
+                result["blocked"] = True
+                return False, f"Command blocked: invalid syntax - {e}", result
+            
+            if not command_args:
+                result["error"] = "Empty command"
+                result["blocked"] = True
+                return False, "Command blocked: empty command", result
             
             try:
-                # Use shell=True but with sanitized command
-                # Note: For maximum security, consider using shell=False with shlex.split()
+                # Use shell=False for security - command is parsed into args
                 proc = subprocess.run(
-                    command,
-                    shell=True,
+                    command_args,
+                    shell=False,
                     cwd=self.working_dir,
                     capture_output=True,
                     text=True,
-                    timeout=300  # 5 minute timeout
+                    timeout=COMMAND_TIMEOUT_SECONDS
                 )
                 result["command"] = command
+                result["command_args"] = command_args
                 result["original_command"] = verification.command
                 result["exit_code"] = proc.returncode
-                result["stdout"] = proc.stdout[:1000] if proc.stdout else ""
-                result["stderr"] = proc.stderr[:1000] if proc.stderr else ""
+                result["stdout"] = proc.stdout[:OUTPUT_TRUNCATE_LENGTH] if proc.stdout else ""
+                result["stderr"] = proc.stderr[:OUTPUT_TRUNCATE_LENGTH] if proc.stderr else ""
                 
                 if proc.returncode == verification.expect_exit_code:
                     return True, f"Command passed (exit code {proc.returncode})", result
@@ -714,7 +736,10 @@ class WorkflowEngine:
                     return False, f"Command failed (exit code {proc.returncode}, expected {verification.expect_exit_code})", result
             except subprocess.TimeoutExpired:
                 result["error"] = "Command timed out"
-                return False, "Command timed out after 5 minutes", result
+                return False, f"Command timed out after {COMMAND_TIMEOUT_SECONDS} seconds", result
+            except FileNotFoundError:
+                result["error"] = f"Command not found: {command_args[0]}"
+                return False, f"Command not found: {command_args[0]}", result
             except Exception as e:
                 result["error"] = str(e)
                 return False, f"Command error: {e}", result
@@ -856,3 +881,110 @@ class WorkflowEngine:
                 "is_current": self.state.current_phase_id == phase_def.id if self.state else False
             })
         return phases
+
+    # ========================================================================
+    # Workflow Discovery and Cleanup
+    # ========================================================================
+    
+    @staticmethod
+    def find_workflows(search_dir: str = ".", max_depth: int = 3) -> list[dict]:
+        """
+        Find all workflow state files in the given directory and subdirectories.
+        Returns a list of workflow summaries for discovery across sessions.
+        """
+        import os
+        workflows = []
+        search_path = Path(search_dir).resolve()
+        
+        for root, dirs, files in os.walk(search_path):
+            # Check depth
+            depth = len(Path(root).relative_to(search_path).parts)
+            if depth > max_depth:
+                dirs.clear()  # Don't descend further
+                continue
+            
+            if ".workflow_state.json" in files:
+                state_file = Path(root) / ".workflow_state.json"
+                try:
+                    with open(state_file, 'r') as f:
+                        data = json.load(f)
+                    
+                    workflows.append({
+                        "path": str(state_file),
+                        "directory": str(root),
+                        "workflow_id": data.get("workflow_id", "unknown"),
+                        "task": data.get("task_description", "No description"),
+                        "status": data.get("status", "unknown"),
+                        "current_phase": data.get("current_phase_id", "unknown"),
+                        "project": data.get("project"),
+                        "created_at": data.get("created_at"),
+                        "updated_at": data.get("updated_at")
+                    })
+                except Exception as e:
+                    logger.warning(f"Failed to read workflow state at {state_file}: {e}")
+        
+        # Sort by updated_at descending (most recent first)
+        workflows.sort(key=lambda w: w.get("updated_at") or "", reverse=True)
+        return workflows
+    
+    def cleanup_abandoned(self, max_age_days: int = 7) -> list[dict]:
+        """
+        Clean up abandoned workflows (active workflows older than max_age_days).
+        Returns list of cleaned up workflows.
+        """
+        from datetime import timedelta
+        
+        cleaned = []
+        cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+        
+        # Only clean up the current directory's workflow
+        if not self.state_file.exists():
+            return cleaned
+        
+        try:
+            state = self.load_state()
+            if not state:
+                return cleaned
+            
+            # Only clean up ACTIVE workflows that are stale
+            if state.status == WorkflowStatus.ACTIVE:
+                updated_at = state.updated_at
+                if updated_at and updated_at < cutoff:
+                    # Mark as abandoned
+                    state.status = WorkflowStatus.ABANDONED
+                    state.metadata["abandoned_reason"] = f"Auto-cleanup: inactive for {max_age_days}+ days"
+                    state.metadata["abandoned_at"] = datetime.now(timezone.utc).isoformat()
+                    self.state = state
+                    self.save_state()
+                    
+                    self.log_event(WorkflowEvent(
+                        event_type=EventType.WORKFLOW_ABANDONED,
+                        workflow_id=state.workflow_id,
+                        message=f"Auto-abandoned: inactive for {max_age_days}+ days"
+                    ))
+                    
+                    cleaned.append({
+                        "workflow_id": state.workflow_id,
+                        "task": state.task_description,
+                        "last_updated": updated_at.isoformat() if updated_at else None
+                    })
+        except Exception as e:
+            logger.error(f"Failed to cleanup workflow: {e}")
+        
+        return cleaned
+    
+    @staticmethod
+    def cleanup_all_abandoned(search_dir: str = ".", max_age_days: int = 7, max_depth: int = 3) -> list[dict]:
+        """
+        Find and clean up all abandoned workflows in the search directory.
+        """
+        all_cleaned = []
+        workflows = WorkflowEngine.find_workflows(search_dir, max_depth)
+        
+        for wf in workflows:
+            if wf["status"] == "active":
+                engine = WorkflowEngine(wf["directory"])
+                cleaned = engine.cleanup_abandoned(max_age_days)
+                all_cleaned.extend(cleaned)
+        
+        return all_cleaned

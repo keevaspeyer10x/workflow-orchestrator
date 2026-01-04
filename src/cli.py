@@ -275,8 +275,9 @@ def cmd_validate(args):
         sys.exit(1)
     
     try:
-        with open(yaml_path) as f:
-            data = yaml.safe_load(f)
+        with open(yaml_path, encoding='utf-8') as f:
+            yaml_content = f.read()
+            data = yaml.safe_load(yaml_content)
         
         # Validate against schema
         workflow_def = WorkflowDef(**data)
@@ -295,7 +296,6 @@ def cmd_validate(args):
         # Check for template variables without settings
         if workflow_def.settings:
             import re
-            yaml_content = open(yaml_path).read()
             template_vars = set(re.findall(r'\{\{(\w+)\}\}', yaml_content))
             missing_vars = template_vars - set(workflow_def.settings.keys())
             if missing_vars:
@@ -395,6 +395,78 @@ def cmd_handoff(args):
         print("=" * 60)
         print("\nTo execute: orchestrator handoff --execute")
         print("Or copy the above prompt to Claude Code manually.")
+
+
+def cmd_list(args):
+    """List all workflows in the directory tree."""
+    workflows = WorkflowEngine.find_workflows(args.search_dir, args.depth)
+    
+    if args.active_only:
+        workflows = [w for w in workflows if w['status'] == 'active']
+    
+    if args.json:
+        print(json.dumps(workflows, indent=2, default=str))
+        return
+    
+    if not workflows:
+        print("No workflows found.")
+        return
+    
+    print(f"Found {len(workflows)} workflow(s):\n")
+    
+    for wf in workflows:
+        status_icon = "●" if wf['status'] == 'active' else \
+                      "✓" if wf['status'] == 'completed' else \
+                      "✗" if wf['status'] == 'abandoned' else "○"
+        
+        print(f"{status_icon} {wf['workflow_id']}")
+        print(f"  Task: {wf['task'][:60]}{'...' if len(wf['task']) > 60 else ''}")
+        print(f"  Status: {wf['status']} | Phase: {wf['current_phase']}")
+        print(f"  Directory: {wf['directory']}")
+        if wf['updated_at']:
+            print(f"  Updated: {wf['updated_at']}")
+        print()
+
+
+def cmd_cleanup(args):
+    """Clean up abandoned workflows."""
+    if args.dry_run:
+        # Just show what would be cleaned
+        workflows = WorkflowEngine.find_workflows(args.search_dir, args.depth)
+        active = [w for w in workflows if w['status'] == 'active']
+        
+        from datetime import datetime, timezone, timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(days=args.max_age)
+        
+        stale = []
+        for wf in active:
+            if wf['updated_at']:
+                try:
+                    updated = datetime.fromisoformat(wf['updated_at'].replace('Z', '+00:00'))
+                    if updated < cutoff:
+                        stale.append(wf)
+                except (ValueError, TypeError):
+                    # Skip workflows with invalid date formats
+                    pass
+        
+        if not stale:
+            print(f"No stale workflows found (older than {args.max_age} days).")
+            return
+        
+        print(f"Would clean up {len(stale)} stale workflow(s):\n")
+        for wf in stale:
+            print(f"  - {wf['workflow_id']}: {wf['task'][:40]}...")
+            print(f"    Last updated: {wf['updated_at']}")
+        print("\nRun without --dry-run to actually clean up.")
+    else:
+        cleaned = WorkflowEngine.cleanup_all_abandoned(args.search_dir, args.max_age, args.depth)
+        
+        if not cleaned:
+            print(f"No stale workflows found (older than {args.max_age} days).")
+        else:
+            print(f"Cleaned up {len(cleaned)} workflow(s):")
+            for wf in cleaned:
+                print(f"  - {wf['workflow_id']}: {wf['task'][:40]}...")
 
 
 def cmd_generate_md(args):
@@ -605,6 +677,22 @@ Examples:
     # Generate-md command
     genmd_parser = subparsers.add_parser('generate-md', help='Generate WORKFLOW.md from current state')
     genmd_parser.set_defaults(func=cmd_generate_md)
+    
+    # List command (NEW)
+    list_parser = subparsers.add_parser('list', help='Find all workflows in directory tree')
+    list_parser.add_argument('--search-dir', '-s', default='.', help='Directory to search (default: current)')
+    list_parser.add_argument('--depth', '-d', type=int, default=3, help='Max search depth (default: 3)')
+    list_parser.add_argument('--json', action='store_true', help='Output as JSON')
+    list_parser.add_argument('--active-only', action='store_true', help='Show only active workflows')
+    list_parser.set_defaults(func=cmd_list)
+    
+    # Cleanup command (NEW)
+    cleanup_parser = subparsers.add_parser('cleanup', help='Clean up abandoned workflows')
+    cleanup_parser.add_argument('--search-dir', '-s', default='.', help='Directory to search (default: current)')
+    cleanup_parser.add_argument('--max-age', '-a', type=int, default=7, help='Max age in days for active workflows (default: 7)')
+    cleanup_parser.add_argument('--depth', '-d', type=int, default=3, help='Max search depth (default: 3)')
+    cleanup_parser.add_argument('--dry-run', action='store_true', help='Show what would be cleaned without doing it')
+    cleanup_parser.set_defaults(func=cmd_cleanup)
     
     args = parser.parse_args()
     
