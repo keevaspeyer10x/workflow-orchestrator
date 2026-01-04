@@ -1,0 +1,145 @@
+name: "Pingxa Development Workflow"
+version: "1.0"
+description: "A 5-phase workflow for software development, including planning, execution, review, verification, and learning."
+
+settings:
+  # Settings specific to this workflow
+  test_command: "npm test"
+
+phases:
+  - id: "PLAN"
+    name: "Planning & Scoping"
+    description: "Define the work to be done, assess risks, and get approval before starting."
+    items:
+      - id: "initial_plan"
+        name: "Generate initial plan"
+        description: "Create a detailed plan of action and save it to docs/plan.md"
+        required: true
+        skippable: false
+        verification:
+          type: "file_exists"
+          path: "docs/plan.md"
+
+      - id: "risk_analysis"
+        name: "Risk & Impact Analysis"
+        description: "Document potential risks and their impact in docs/risk_analysis.md"
+        required: true
+        skippable: true
+        skip_conditions: ["simple_bug_fix", "trivial_change"]
+        verification:
+          type: "file_exists"
+          path: "docs/risk_analysis.md"
+
+      - id: "define_test_cases"
+        name: "Define Test Cases"
+        description: "Outline the test cases that will be used to verify the feature in tests/test_cases.md"
+        required: true
+        skippable: false
+        verification:
+          type: "file_exists"
+          path: "tests/test_cases.md"
+
+      - id: "user_approval"
+        name: "Get User Approval"
+        description: "The user must approve the plan before execution can begin."
+        required: true
+        skippable: false
+        verification:
+          type: "manual_gate"
+          description: "User must run 'orchestrator approve' to proceed."
+
+  - id: "EXECUTE"
+    name: "Implementation"
+    description: "Write code and tests to implement the planned feature."
+    items:
+      - id: "write_tests"
+        name: "Write tests first"
+        description: "Implement the test cases defined in the planning phase."
+        required: true
+        skippable: false
+        verification:
+          type: "command"
+          command: "{{test_command}}"
+          # We expect tests to fail initially, but we can't easily check for that.
+          # A simple run is enough to verify the test runner is working.
+          expect_exit_code: 1 # Or 0 if no tests are written yet
+
+      - id: "implement_code"
+        name: "Implement feature code"
+        description: "Write the application code that satisfies the requirements."
+        required: true
+        skippable: false
+
+      - id: "all_tests_pass"
+        name: "Ensure all tests pass"
+        description: "Run the test suite and ensure all tests pass after implementation."
+        required: true
+        skippable: false
+        verification:
+          type: "command"
+          command: "{{test_command}}"
+          expect_exit_code: 0
+
+  - id: "REVIEW"
+    name: "Code & Architecture Review"
+    description: "Perform self-review of the code against best practices."
+    items:
+      - id: "security_review"
+        name: "Security Review"
+        description: "Check for common security vulnerabilities (e.g., OWASP Top 10)."
+        required: true
+        skippable: true
+
+      - id: "architecture_review"
+        name: "Architecture Review"
+        description: "Ensure the implementation aligns with the project's architecture."
+        required: true
+        skippable: true
+
+      - id: "quality_review"
+        name: "Code Quality Review"
+        description: "Check for code smells, readability, and maintainability."
+        required: true
+        skippable: true
+
+  - id: "VERIFY"
+    name: "Final Verification"
+    description: "Perform final checks to ensure the feature is ready for release."
+    items:
+      - id: "full_test_suite"
+        name: "Run full test suite again"
+        description: "Ensure no regressions were introduced during review."
+        required: true
+        skippable: false
+        verification:
+          type: "command"
+          command: "{{test_command}}"
+          expect_exit_code: 0
+
+      - id: "manual_smoke_test"
+        name: "Manual Smoke Test"
+        description: "Manually test the core functionality to ensure it works as expected."
+        required: true
+        skippable: true
+        verification:
+          type: "manual_gate"
+          description: "User to confirm manual smoke test passed."
+
+  - id: "LEARN"
+    name: "Learning & Documentation"
+    description: "Document learnings and update knowledge base."
+    items:
+      - id: "document_learnings"
+        name: "Document Learnings"
+        description: "Create or update a document with what was learned during the task."
+        required: true
+        skippable: false
+        verification:
+          type: "file_exists"
+          path: "docs/learnings.md"
+
+      - id: "update_knowledge_base"
+        name: "Update Knowledge Base"
+        description: "Update any relevant project documentation or knowledge base."
+        required: false
+        skippable: true

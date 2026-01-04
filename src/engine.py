@@ -1,0 +1,858 @@
+"""
+Workflow Engine - Core Logic
+
+This module implements the workflow state machine, validation, and transitions.
+"""
+
+import json
+import yaml
+import subprocess
+import re
+import hashlib
+import fcntl
+from pathlib import Path
+from datetime import datetime, timezone
+from typing import Optional, Tuple
+import uuid
+
+from .schema import (
+    WorkflowDef, WorkflowState, PhaseState, ItemState,
+    WorkflowEvent, EventType, ItemStatus, PhaseStatus, WorkflowStatus,
+    VerificationType, ChecklistItemDef
+)
+
+# Template pattern for {{variable}} substitution
+_TEMPLATE_PATTERN = re.compile(r"\{\{(\w+)\}\}")
+
+
+class WorkflowEngine:
+    """
+    The core workflow engine that manages state transitions and verification.
+    """
+    
+    def __init__(self, working_dir: str = "."):
+        self.working_dir = Path(working_dir).resolve()
+        self.state_file = self.working_dir / ".workflow_state.json"
+        self.log_file = self.working_dir / ".workflow_log.jsonl"
+        self.workflow_def: Optional[WorkflowDef] = None
+        self.state: Optional[WorkflowState] = None
+    
+    # ========================================================================
+    # Template Substitution
+    # ========================================================================
+    
+    def _substitute_template(self, text: str, sanitize_for_shell: bool = False) -> str:
+        """
+        Substitute {{var}} with values from workflow settings.
+        
+        Args:
+            text: The text containing template variables
+            sanitize_for_shell: If True, sanitize values to prevent shell injection
+        """
+        if not text or not self.workflow_def or not self.workflow_def.settings:
+            return text
+        
+        def replace(match):
+            key = match.group(1)
+            if key in self.workflow_def.settings:
+                value = str(self.workflow_def.settings[key])
+                if sanitize_for_shell:
+                    # Sanitize for shell safety - only allow alphanumeric, dash, underscore, dot, slash
+                    import re as regex
+                    if not regex.match(r'^[a-zA-Z0-9_./-]+$', value):
+                        raise ValueError(f"Unsafe characters in setting '{key}': {value}")
+                return value
+            return match.group(0)  # Leave unchanged if not found
+        
+        return _TEMPLATE_PATTERN.sub(replace, text)
+    
+    # ========================================================================
+    # Datetime Parsing
+    # ========================================================================
+    
+    def _parse_datetime(self, value) -> Optional[datetime]:
+        """Parse a datetime from string or return as-is if already datetime."""
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            try:
+                # Handle ISO format with or without timezone
+                return datetime.fromisoformat(value.replace('Z', '+00:00'))
+            except ValueError:
+                return None
+        return None
+    
+    def _parse_state_datetimes(self, data: dict) -> dict:
+        """Recursively parse datetime strings in state data."""
+        datetime_fields = ['created_at', 'updated_at', 'completed_at', 'started_at', 'skipped_at']
+        
+        for field in datetime_fields:
+            if field in data and data[field]:
+                data[field] = self._parse_datetime(data[field])
+        
+        # Parse phases
+        if 'phases' in data:
+            for phase_id, phase_data in data['phases'].items():
+                for field in datetime_fields:
+                    if field in phase_data and phase_data[field]:
+                        phase_data[field] = self._parse_datetime(phase_data[field])
+                
+                # Parse items within phases
+                if 'items' in phase_data:
+                    for item_id, item_data in phase_data['items'].items():
+                        for field in datetime_fields:
+                            if field in item_data and item_data[field]:
+                                item_data[field] = self._parse_datetime(item_data[field])
+        
+        return data
+    
+    # ========================================================================
+    # Loading and Saving
+    # ========================================================================
+    
+    def load_workflow_def(self, yaml_path: str) -> WorkflowDef:
+        """Load a workflow definition from a YAML file."""
+        try:
+            with open(yaml_path, 'r') as f:
+                data = yaml.safe_load(f)
+            if data is None:
+                raise ValueError(f"Empty or invalid YAML file: {yaml_path}")
+            self.workflow_def = WorkflowDef(**data)
+            return self.workflow_def
+        except FileNotFoundError:
+            raise ValueError(f"Workflow file not found: {yaml_path}")
+        except yaml.YAMLError as e:
+            raise ValueError(f"Invalid YAML syntax in {yaml_path}: {e}")
+        except Exception as e:
+            raise ValueError(f"Failed to load workflow from {yaml_path}: {e}")
+    
+    def load_state(self) -> Optional[WorkflowState]:
+        """Load the current workflow state from the state file."""
+        if not self.state_file.exists():
+            return None
+        
+        with open(self.state_file, 'r') as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+            try:
+                data = json.load(f)
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        
+        # Parse datetime strings
+        data = self._parse_state_datetimes(data)
+        
+        self.state = WorkflowState(**data)
+        
+        # Try to load workflow definition from stored path
+        if self.state and self.state.metadata.get("workflow_yaml_path"):
+            yaml_path = Path(self.state.metadata["workflow_yaml_path"])
+            if yaml_path.exists():
+                self.load_workflow_def(str(yaml_path))
+            elif (self.working_dir / "workflow.yaml").exists():
+                # Fallback to default location
+                self.load_workflow_def(str(self.working_dir / "workflow.yaml"))
+        
+        return self.state
+    
+    def save_state(self):
+        """Save the current workflow state to the state file (with file locking)."""
+        if not self.state:
+            return
+        
+        self.state.update_timestamp()
+        
+        # Write to temp file first, then atomic rename
+        # Keep lock until after rename to prevent race condition
+        temp_file = self.state_file.with_suffix('.tmp')
+        
+        with open(temp_file, 'w') as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                json.dump(self.state.model_dump(mode='json'), f, indent=2, default=str)
+                f.flush()  # Ensure data is written before rename
+                # Atomic rename while still holding lock
+                temp_file.replace(self.state_file)
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    
+    def log_event(self, event: WorkflowEvent):
+        """Append an event to the log file (with file locking)."""
+        with open(self.log_file, 'a') as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                f.write(json.dumps(event.model_dump(mode='json'), default=str) + '\n')
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    
+    def get_events(self, limit: int = 100) -> list[WorkflowEvent]:
+        """Read recent events from the log file."""
+        if not self.log_file.exists():
+            return []
+        events = []
+        with open(self.log_file, 'r') as f:
+            for line in f:
+                if line.strip():
+                    try:
+                        events.append(WorkflowEvent(**json.loads(line)))
+                    except Exception:
+                        pass  # Skip malformed lines
+        return events[-limit:]
+    
+    def reload(self):
+        """Reload state and workflow definition from disk."""
+        self.load_state()
+    
+    # ========================================================================
+    # Workflow Lifecycle
+    # ========================================================================
+    
+    def start_workflow(self, yaml_path: str, task_description: str, project: Optional[str] = None) -> WorkflowState:
+        """Start a new workflow instance."""
+        # Load the workflow definition
+        yaml_path_resolved = Path(yaml_path).resolve()
+        self.load_workflow_def(str(yaml_path_resolved))
+        
+        # Validate workflow has at least one phase
+        if not self.workflow_def.phases:
+            raise ValueError("Workflow definition must have at least one phase")
+        
+        # Check if there's already an active workflow
+        existing = self.load_state()
+        if existing and existing.status == WorkflowStatus.ACTIVE:
+            raise ValueError(f"Active workflow already exists: {existing.workflow_id}. Complete or abandon it first.")
+        
+        # Create new state
+        workflow_id = f"wf_{uuid.uuid4().hex[:8]}"
+        first_phase = self.workflow_def.phases[0]
+        
+        # Initialize phase states
+        phases = {}
+        for phase_def in self.workflow_def.phases:
+            items = {item.id: ItemState(id=item.id) for item in phase_def.items}
+            phases[phase_def.id] = PhaseState(id=phase_def.id, items=items)
+        
+        # Set first phase as active
+        phases[first_phase.id].status = PhaseStatus.ACTIVE
+        phases[first_phase.id].started_at = datetime.now(timezone.utc)
+        
+        # Calculate YAML checksum
+        with open(yaml_path_resolved, 'rb') as f:
+            yaml_checksum = hashlib.sha256(f.read()).hexdigest()[:16]
+        
+        self.state = WorkflowState(
+            workflow_id=workflow_id,
+            workflow_type=self.workflow_def.name,
+            workflow_version=self.workflow_def.version,
+            task_description=task_description,
+            project=project,
+            current_phase_id=first_phase.id,
+            phases=phases,
+            metadata={
+                "workflow_yaml_path": str(yaml_path_resolved),
+                "workflow_yaml_checksum": yaml_checksum
+            }
+        )
+        
+        self.save_state()
+        
+        # Log events
+        self.log_event(WorkflowEvent(
+            event_type=EventType.WORKFLOW_STARTED,
+            workflow_id=workflow_id,
+            message=f"Started workflow: {task_description}",
+            details={"project": project, "workflow_type": self.workflow_def.name}
+        ))
+        self.log_event(WorkflowEvent(
+            event_type=EventType.PHASE_STARTED,
+            workflow_id=workflow_id,
+            phase_id=first_phase.id,
+            message=f"Started phase: {first_phase.name}"
+        ))
+        
+        return self.state
+    
+    def complete_workflow(self, notes: Optional[str] = None) -> WorkflowState:
+        """Mark the workflow as completed."""
+        if not self.state:
+            raise ValueError("No active workflow")
+        
+        self.state.status = WorkflowStatus.COMPLETED
+        self.state.completed_at = datetime.now(timezone.utc)
+        if notes:
+            self.state.metadata["completion_notes"] = notes
+        
+        self.save_state()
+        self.log_event(WorkflowEvent(
+            event_type=EventType.WORKFLOW_COMPLETED,
+            workflow_id=self.state.workflow_id,
+            message="Workflow completed",
+            details={"notes": notes}
+        ))
+        
+        return self.state
+    
+    def abandon_workflow(self, reason: str) -> WorkflowState:
+        """Abandon the current workflow."""
+        if not self.state:
+            raise ValueError("No active workflow")
+        
+        self.state.status = WorkflowStatus.ABANDONED
+        self.state.metadata["abandon_reason"] = reason
+        
+        self.save_state()
+        self.log_event(WorkflowEvent(
+            event_type=EventType.WORKFLOW_ABANDONED,
+            workflow_id=self.state.workflow_id,
+            message=f"Workflow abandoned: {reason}"
+        ))
+        
+        return self.state
+    
+    # ========================================================================
+    # Item Operations
+    # ========================================================================
+    
+    def get_item_def(self, item_id: str, phase_id: Optional[str] = None) -> Optional[ChecklistItemDef]:
+        """Get the definition of an item from the workflow definition."""
+        if not self.workflow_def:
+            return None
+        
+        # If phase specified, only look there
+        if phase_id:
+            phase = self.workflow_def.get_phase(phase_id)
+            if phase:
+                for item in phase.items:
+                    if item.id == item_id:
+                        return item
+            return None
+        
+        # Otherwise search all phases
+        for phase in self.workflow_def.phases:
+            for item in phase.items:
+                if item.id == item_id:
+                    return item
+        return None
+    
+    def get_item_state(self, item_id: str, phase_id: Optional[str] = None) -> Optional[ItemState]:
+        """Get the current state of an item."""
+        if not self.state:
+            return None
+        
+        # If phase specified, only look there
+        if phase_id:
+            phase = self.state.phases.get(phase_id)
+            return phase.items.get(item_id) if phase else None
+        
+        # Otherwise search all phases
+        for phase in self.state.phases.values():
+            if item_id in phase.items:
+                return phase.items[item_id]
+        return None
+    
+    def get_item_state_in_current_phase(self, item_id: str) -> Optional[ItemState]:
+        """Get item state only if it's in the current phase."""
+        if not self.state:
+            return None
+        phase_state = self.state.phases.get(self.state.current_phase_id)
+        if phase_state and item_id in phase_state.items:
+            return phase_state.items[item_id]
+        return None
+    
+    def _validate_item_in_current_phase(self, item_id: str) -> Tuple[Optional[ChecklistItemDef], Optional[ItemState], Optional[str]]:
+        """
+        Validate that an item exists in the current phase.
+        Returns (item_def, item_state, error_message).
+        """
+        if not self.state or not self.workflow_def:
+            return None, None, "No active workflow"
+        
+        item_state = self.get_item_state_in_current_phase(item_id)
+        if not item_state:
+            # Check if item exists in another phase
+            if self.get_item_state(item_id):
+                return None, None, f"Item '{item_id}' exists but is not in current phase '{self.state.current_phase_id}'"
+            return None, None, f"Item not found: {item_id}"
+        
+        item_def = self.get_item_def(item_id, self.state.current_phase_id)
+        if not item_def:
+            return None, None, f"Item definition not found: {item_id}"
+        
+        return item_def, item_state, None
+    
+    def start_item(self, item_id: str) -> ItemState:
+        """Mark an item as in progress."""
+        item_def, item_state, error = self._validate_item_in_current_phase(item_id)
+        if error:
+            raise ValueError(error)
+        
+        if item_state.status not in [ItemStatus.PENDING, ItemStatus.FAILED]:
+            raise ValueError(f"Item {item_id} cannot be started (status: {item_state.status.value})")
+        
+        item_state.status = ItemStatus.IN_PROGRESS
+        item_state.started_at = datetime.now(timezone.utc)
+        
+        self.save_state()
+        self.log_event(WorkflowEvent(
+            event_type=EventType.ITEM_STARTED,
+            workflow_id=self.state.workflow_id,
+            phase_id=self.state.current_phase_id,
+            item_id=item_id,
+            message=f"Started item: {item_id}"
+        ))
+        
+        return item_state
+    
+    def complete_item(self, item_id: str, notes: Optional[str] = None, skip_verification: bool = False) -> Tuple[bool, str]:
+        """
+        Attempt to complete an item. Runs verification if configured.
+        Returns (success, message).
+        """
+        item_def, item_state, error = self._validate_item_in_current_phase(item_id)
+        if error:
+            raise ValueError(error)
+        
+        if item_state.status == ItemStatus.COMPLETED:
+            return True, "Item already completed"
+        
+        if item_state.status == ItemStatus.SKIPPED:
+            return False, "Item was skipped, cannot complete"
+        
+        # Run verification if configured and not skipped
+        if not skip_verification and item_def.verification.type != VerificationType.NONE:
+            # Handle manual gates specially
+            if item_def.verification.type == VerificationType.MANUAL_GATE:
+                return False, f"Item '{item_id}' requires manual approval. Use 'orchestrator approve-item {item_id}' to approve."
+            
+            success, message, result = self._run_verification(item_def)
+            item_state.verification_result = result
+            
+            if not success:
+                item_state.status = ItemStatus.FAILED
+                item_state.retry_count += 1
+                self.save_state()
+                self.log_event(WorkflowEvent(
+                    event_type=EventType.VERIFICATION_FAILED,
+                    workflow_id=self.state.workflow_id,
+                    phase_id=self.state.current_phase_id,
+                    item_id=item_id,
+                    message=f"Verification failed: {message}",
+                    details=result
+                ))
+                return False, f"Verification failed: {message}"
+            
+            self.log_event(WorkflowEvent(
+                event_type=EventType.VERIFICATION_PASSED,
+                workflow_id=self.state.workflow_id,
+                phase_id=self.state.current_phase_id,
+                item_id=item_id,
+                message="Verification passed",
+                details=result
+            ))
+        
+        # Mark as completed
+        item_state.status = ItemStatus.COMPLETED
+        item_state.completed_at = datetime.now(timezone.utc)
+        if notes:
+            item_state.notes = notes
+        
+        self.save_state()
+        self.log_event(WorkflowEvent(
+            event_type=EventType.ITEM_COMPLETED,
+            workflow_id=self.state.workflow_id,
+            phase_id=self.state.current_phase_id,
+            item_id=item_id,
+            message=f"Completed item: {item_id}",
+            details={"notes": notes}
+        ))
+        
+        return True, "Item completed successfully"
+    
+    def skip_item(self, item_id: str, reason: str) -> Tuple[bool, str]:
+        """Skip an item with a documented reason."""
+        item_def, item_state, error = self._validate_item_in_current_phase(item_id)
+        if error:
+            raise ValueError(error)
+        
+        if not item_def.skippable:
+            return False, f"Item {item_id} is not skippable"
+        
+        if item_state.status in [ItemStatus.COMPLETED, ItemStatus.SKIPPED]:
+            return False, f"Item {item_id} is already {item_state.status.value}"
+        
+        if not reason or len(reason.strip()) < 10:
+            return False, "Skip reason must be at least 10 characters"
+        
+        item_state.status = ItemStatus.SKIPPED
+        item_state.skipped_at = datetime.now(timezone.utc)
+        item_state.skip_reason = reason
+        
+        self.save_state()
+        self.log_event(WorkflowEvent(
+            event_type=EventType.ITEM_SKIPPED,
+            workflow_id=self.state.workflow_id,
+            phase_id=self.state.current_phase_id,
+            item_id=item_id,
+            message=f"Skipped item: {item_id}",
+            details={"reason": reason}
+        ))
+        
+        return True, f"Item {item_id} skipped"
+    
+    def approve_item(self, item_id: str, notes: Optional[str] = None) -> Tuple[bool, str]:
+        """Approve a manual gate item."""
+        item_def, item_state, error = self._validate_item_in_current_phase(item_id)
+        if error:
+            raise ValueError(error)
+        
+        # Verify this is a manual gate item
+        if item_def.verification.type != VerificationType.MANUAL_GATE:
+            return False, f"Item '{item_id}' is not a manual gate item"
+        
+        if item_state.status == ItemStatus.COMPLETED:
+            return True, "Item already approved"
+        
+        # Mark as completed with approval info
+        item_state.status = ItemStatus.COMPLETED
+        item_state.completed_at = datetime.now(timezone.utc)
+        item_state.verification_result = {
+            "approved": True,
+            "approved_at": datetime.now(timezone.utc).isoformat(),
+            "type": "manual_gate"
+        }
+        if notes:
+            item_state.notes = notes
+        
+        self.save_state()
+        self.log_event(WorkflowEvent(
+            event_type=EventType.ITEM_COMPLETED,
+            workflow_id=self.state.workflow_id,
+            phase_id=self.state.current_phase_id,
+            item_id=item_id,
+            message=f"Approved manual gate: {item_id}",
+            details={"notes": notes, "approved": True},
+            actor="human"
+        ))
+        
+        return True, f"Item '{item_id}' approved"
+    
+    # ========================================================================
+    # Phase Operations
+    # ========================================================================
+    
+    def can_advance_phase(self) -> Tuple[bool, list[str], list[str]]:
+        """
+        Check if the current phase can be advanced.
+        Returns (can_advance, blockers, skipped_items).
+        """
+        if not self.state or not self.workflow_def:
+            return False, ["No active workflow"], []
+        
+        phase_def = self.workflow_def.get_phase(self.state.current_phase_id)
+        phase_state = self.state.phases.get(self.state.current_phase_id)
+        
+        if not phase_def or not phase_state:
+            return False, ["Invalid phase"], []
+        
+        blockers = []
+        skipped = []
+        
+        for item_def in phase_def.items:
+            item_state = phase_state.items.get(item_def.id)
+            if not item_state:
+                continue
+            
+            if item_state.status == ItemStatus.SKIPPED:
+                skipped.append(f"{item_def.id}: {item_state.skip_reason}")
+            elif item_def.required and item_state.status != ItemStatus.COMPLETED:
+                blockers.append(f"{item_def.id} ({item_state.status.value})")
+        
+        # Check for manual gate
+        if phase_def.exit_gate == "human_approval":
+            if not self.state.metadata.get(f"phase_{phase_def.id}_approved"):
+                blockers.append("Awaiting human approval")
+        
+        return len(blockers) == 0, blockers, skipped
+    
+    def advance_phase(self, force: bool = False) -> Tuple[bool, str]:
+        """
+        Advance to the next phase.
+        Returns (success, message).
+        """
+        if not self.state or not self.workflow_def:
+            return False, "No active workflow"
+        
+        can_advance, blockers, skipped = self.can_advance_phase()
+        
+        if not can_advance and not force:
+            return False, f"Cannot advance. Blockers: {', '.join(blockers)}"
+        
+        # Mark current phase as completed
+        current_phase = self.state.phases.get(self.state.current_phase_id)
+        if current_phase:
+            current_phase.status = PhaseStatus.COMPLETED
+            current_phase.completed_at = datetime.now(timezone.utc)
+        
+        self.log_event(WorkflowEvent(
+            event_type=EventType.PHASE_COMPLETED,
+            workflow_id=self.state.workflow_id,
+            phase_id=self.state.current_phase_id,
+            message=f"Completed phase: {self.state.current_phase_id}",
+            details={"skipped_items": skipped, "forced": force}
+        ))
+        
+        # Get next phase
+        next_phase_def = self.workflow_def.get_next_phase(self.state.current_phase_id)
+        
+        if not next_phase_def:
+            # This was the last phase - complete the workflow
+            return True, "All phases completed. Use 'finish' to complete the workflow."
+        
+        # Advance to next phase
+        self.state.current_phase_id = next_phase_def.id
+        next_phase_state = self.state.phases.get(next_phase_def.id)
+        if next_phase_state:
+            next_phase_state.status = PhaseStatus.ACTIVE
+            next_phase_state.started_at = datetime.now(timezone.utc)
+        
+        self.save_state()
+        self.log_event(WorkflowEvent(
+            event_type=EventType.PHASE_STARTED,
+            workflow_id=self.state.workflow_id,
+            phase_id=next_phase_def.id,
+            message=f"Started phase: {next_phase_def.name}"
+        ))
+        
+        return True, f"Advanced to phase: {next_phase_def.name}"
+    
+    def approve_phase(self, phase_id: Optional[str] = None) -> Tuple[bool, str]:
+        """Human approval for a phase gate."""
+        if not self.state:
+            return False, "No active workflow"
+        
+        phase_id = phase_id or self.state.current_phase_id
+        self.state.metadata[f"phase_{phase_id}_approved"] = True
+        self.state.metadata[f"phase_{phase_id}_approved_at"] = datetime.now(timezone.utc).isoformat()
+        
+        self.save_state()
+        self.log_event(WorkflowEvent(
+            event_type=EventType.HUMAN_OVERRIDE,
+            workflow_id=self.state.workflow_id,
+            phase_id=phase_id,
+            message=f"Human approved phase: {phase_id}",
+            actor="human"
+        ))
+        
+        return True, f"Phase {phase_id} approved"
+    
+    # ========================================================================
+    # Verification
+    # ========================================================================
+    
+    def _run_verification(self, item_def: ChecklistItemDef) -> Tuple[bool, str, dict]:
+        """
+        Run verification for an item.
+        Returns (success, message, details).
+        """
+        verification = item_def.verification
+        result = {"type": verification.type.value, "timestamp": datetime.now(timezone.utc).isoformat()}
+        
+        if verification.type == VerificationType.FILE_EXISTS:
+            # Path traversal protection
+            path = (self.working_dir / verification.path).resolve()
+            if not str(path).startswith(str(self.working_dir)):
+                result["blocked"] = True
+                result["reason"] = "path_traversal"
+                return False, f"Path traversal blocked: {verification.path}", result
+            
+            exists = path.exists()
+            result["path"] = str(path)
+            result["exists"] = exists
+            if exists:
+                return True, f"File exists: {verification.path}", result
+            else:
+                return False, f"File not found: {verification.path}", result
+        
+        elif verification.type == VerificationType.COMMAND:
+            # Substitute template variables with shell sanitization
+            try:
+                command = self._substitute_template(verification.command, sanitize_for_shell=True)
+            except ValueError as e:
+                result["error"] = str(e)
+                result["blocked"] = True
+                return False, f"Command blocked: {e}", result
+            
+            # Additional safety: block dangerous shell patterns
+            dangerous_patterns = ['$(', '`', '&&', '||', ';', '|', '>', '<', '\n', '\r']
+            for pattern in dangerous_patterns:
+                if pattern in command:
+                    result["error"] = f"Dangerous pattern detected: {pattern}"
+                    result["blocked"] = True
+                    return False, f"Command blocked: contains dangerous pattern '{pattern}'", result
+            
+            try:
+                # Use shell=True but with sanitized command
+                # Note: For maximum security, consider using shell=False with shlex.split()
+                proc = subprocess.run(
+                    command,
+                    shell=True,
+                    cwd=self.working_dir,
+                    capture_output=True,
+                    text=True,
+                    timeout=300  # 5 minute timeout
+                )
+                result["command"] = command
+                result["original_command"] = verification.command
+                result["exit_code"] = proc.returncode
+                result["stdout"] = proc.stdout[:1000] if proc.stdout else ""
+                result["stderr"] = proc.stderr[:1000] if proc.stderr else ""
+                
+                if proc.returncode == verification.expect_exit_code:
+                    return True, f"Command passed (exit code {proc.returncode})", result
+                else:
+                    return False, f"Command failed (exit code {proc.returncode}, expected {verification.expect_exit_code})", result
+            except subprocess.TimeoutExpired:
+                result["error"] = "Command timed out"
+                return False, "Command timed out after 5 minutes", result
+            except Exception as e:
+                result["error"] = str(e)
+                return False, f"Command error: {e}", result
+        
+        elif verification.type == VerificationType.MANUAL_GATE:
+            # Manual gates should be handled via approve_item, not complete_item
+            result["awaiting_approval"] = True
+            return False, "Awaiting manual approval. Use 'orchestrator approve-item <item_id>' to approve.", result
+        
+        # No verification configured
+        return True, "No verification required", result
+    
+    # ========================================================================
+    # Status and Reporting
+    # ========================================================================
+    
+    def get_status(self) -> dict:
+        """Get a comprehensive status report."""
+        if not self.state or not self.workflow_def:
+            return {"status": "no_active_workflow"}
+        
+        phase_def = self.workflow_def.get_phase(self.state.current_phase_id)
+        phase_state = self.state.phases.get(self.state.current_phase_id)
+        
+        can_advance, blockers, skipped = self.can_advance_phase()
+        
+        # Build checklist status (with enum values, not enum objects)
+        checklist = []
+        if phase_def and phase_state:
+            for item_def in phase_def.items:
+                item_state = phase_state.items.get(item_def.id)
+                checklist.append({
+                    "id": item_def.id,
+                    "name": item_def.name,
+                    "required": item_def.required,
+                    "skippable": item_def.skippable,
+                    "status": item_state.status.value if item_state else "unknown",
+                    "verification_type": item_def.verification.type.value,
+                    "skip_reason": item_state.skip_reason if item_state else None
+                })
+        
+        # Count progress
+        completed = sum(1 for i in checklist if i["status"] == "completed")
+        total_required = sum(1 for i in checklist if i["required"])
+        
+        return {
+            "workflow_id": self.state.workflow_id,
+            "workflow_type": self.state.workflow_type,
+            "task": self.state.task_description,
+            "project": self.state.project,
+            "status": self.state.status.value,
+            "current_phase": {
+                "id": self.state.current_phase_id,
+                "name": phase_def.name if phase_def else "Unknown",
+                "progress": f"{completed}/{len(checklist)} items"
+            },
+            "phases": self.get_all_phases(),
+            "checklist": checklist,
+            "can_advance": can_advance,
+            "blockers": blockers,
+            "skipped_items": skipped,
+            "created_at": self.state.created_at.isoformat() if self.state.created_at else None,
+            "updated_at": self.state.updated_at.isoformat() if self.state.updated_at else None
+        }
+    
+    def get_recitation_text(self) -> str:
+        """
+        Get a text summary suitable for recitation into LLM context.
+        This is the key mechanism for keeping the workflow in recent attention.
+        """
+        if not self.state or not self.workflow_def:
+            return "No active workflow. Start one with: orchestrator start <task>"
+        
+        status = self.get_status()
+        
+        lines = [
+            "=" * 60,
+            "WORKFLOW STATE (READ THIS FIRST)",
+            "=" * 60,
+            f"Task: {status['task']}",
+            f"Phase: {status['current_phase']['id']} - {status['current_phase']['name']}",
+            f"Progress: {status['current_phase']['progress']}",
+            "",
+            "Checklist:"
+        ]
+        
+        next_pending_item = None
+        for item in status['checklist']:
+            status_val = item['status']
+            marker = "✓" if status_val == "completed" else \
+                     "⊘" if status_val == "skipped" else \
+                     "●" if status_val == "in_progress" else \
+                     "○"
+            req = "*" if item['required'] else " "
+            # Include item ID for AI to use
+            lines.append(f"  {marker} [{req}] {item['id']} — {item['name']}")
+            if item['skip_reason']:
+                lines.append(f"       └─ Skipped: {item['skip_reason']}")
+            
+            # Track first pending item for next action
+            if not next_pending_item and status_val in ["pending", "failed"]:
+                next_pending_item = item
+        
+        lines.append("")
+        
+        if status['can_advance']:
+            lines.append("✓ Ready to advance to next phase")
+            lines.append("")
+            lines.append("NEXT_ACTION: orchestrator advance")
+        else:
+            lines.append("Blockers:")
+            for b in status['blockers']:
+                lines.append(f"  - {b}")
+            lines.append("")
+            
+            # Suggest next action
+            if next_pending_item:
+                if next_pending_item.get('verification_type') == 'manual_gate':
+                    lines.append(f"NEXT_ACTION: orchestrator approve-item {next_pending_item['id']}")
+                else:
+                    lines.append(f"NEXT_ACTION: orchestrator complete {next_pending_item['id']} --notes \"<what you did>\"")
+        
+        lines.append("=" * 60)
+        
+        return "\n".join(lines)
+    
+    def get_all_phases(self) -> list[dict]:
+        """Get all phases from the workflow definition (for dashboard)."""
+        if not self.workflow_def:
+            return []
+        
+        phases = []
+        for phase_def in self.workflow_def.phases:
+            phase_state = self.state.phases.get(phase_def.id) if self.state else None
+            phases.append({
+                "id": phase_def.id,
+                "name": phase_def.name,
+                "status": phase_state.status.value if phase_state else "pending",
+                "is_current": self.state.current_phase_id == phase_def.id if self.state else False
+            })
+        return phases

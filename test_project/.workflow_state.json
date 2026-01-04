@@ -1,0 +1,212 @@
+{
+  "workflow_id": "wf_d6fb0ed2",
+  "workflow_type": "Pingxa Development Workflow",
+  "workflow_version": "1.0",
+  "task_description": "Final test of fixed system",
+  "project": null,
+  "status": "active",
+  "current_phase_id": "PLAN",
+  "phases": {
+    "PLAN": {
+      "id": "PLAN",
+      "status": "active",
+      "started_at": "2026-01-04T02:21:04.901042Z",
+      "completed_at": null,
+      "items": {
+        "initial_plan": {
+          "id": "initial_plan",
+          "status": "pending",
+          "started_at": null,
+          "completed_at": null,
+          "skipped_at": null,
+          "skip_reason": null,
+          "notes": null,
+          "verification_result": null,
+          "retry_count": 0
+        },
+        "risk_analysis": {
+          "id": "risk_analysis",
+          "status": "pending",
+          "started_at": null,
+          "completed_at": null,
+          "skipped_at": null,
+          "skip_reason": null,
+          "notes": null,
+          "verification_result": null,
+          "retry_count": 0
+        },
+        "define_test_cases": {
+          "id": "define_test_cases",
+          "status": "pending",
+          "started_at": null,
+          "completed_at": null,
+          "skipped_at": null,
+          "skip_reason": null,
+          "notes": null,
+          "verification_result": null,
+          "retry_count": 0
+        },
+        "user_approval": {
+          "id": "user_approval",
+          "status": "pending",
+          "started_at": null,
+          "completed_at": null,
+          "skipped_at": null,
+          "skip_reason": null,
+          "notes": null,
+          "verification_result": null,
+          "retry_count": 0
+        }
+      }
+    },
+    "EXECUTE": {
+      "id": "EXECUTE",
+      "status": "pending",
+      "started_at": null,
+      "completed_at": null,
+      "items": {
+        "write_tests": {
+          "id": "write_tests",
+          "status": "pending",
+          "started_at": null,
+          "completed_at": null,
+          "skipped_at": null,
+          "skip_reason": null,
+          "notes": null,
+          "verification_result": null,
+          "retry_count": 0
+        },
+        "implement_code": {
+          "id": "implement_code",
+          "status": "pending",
+          "started_at": null,
+          "completed_at": null,
+          "skipped_at": null,
+          "skip_reason": null,
+          "notes": null,
+          "verification_result": null,
+          "retry_count": 0
+        },
+        "all_tests_pass": {
+          "id": "all_tests_pass",
+          "status": "pending",
+          "started_at": null,
+          "completed_at": null,
+          "skipped_at": null,
+          "skip_reason": null,
+          "notes": null,
+          "verification_result": null,
+          "retry_count": 0
+        }
+      }
+    },
+    "REVIEW": {
+      "id": "REVIEW",
+      "status": "pending",
+      "started_at": null,
+      "completed_at": null,
+      "items": {
+        "security_review": {
+          "id": "security_review",
+          "status": "pending",
+          "started_at": null,
+          "completed_at": null,
+          "skipped_at": null,
+          "skip_reason": null,
+          "notes": null,
+          "verification_result": null,
+          "retry_count": 0
+        },
+        "architecture_review": {
+          "id": "architecture_review",
+          "status": "pending",
+          "started_at": null,
+          "completed_at": null,
+          "skipped_at": null,
+          "skip_reason": null,
+          "notes": null,
+          "verification_result": null,
+          "retry_count": 0
+        },
+        "quality_review": {
+          "id": "quality_review",
+          "status": "pending",
+          "started_at": null,
+          "completed_at": null,
+          "skipped_at": null,
+          "skip_reason": null,
+          "notes": null,
+          "verification_result": null,
+          "retry_count": 0
+        }
+      }
+    },
+    "VERIFY": {
+      "id": "VERIFY",
+      "status": "pending",
+      "started_at": null,
+      "completed_at": null,
+      "items": {
+        "full_test_suite": {
+          "id": "full_test_suite",
+          "status": "pending",
+          "started_at": null,
+          "completed_at": null,
+          "skipped_at": null,
+          "skip_reason": null,
+          "notes": null,
+          "verification_result": null,
+          "retry_count": 0
+        },
+        "manual_smoke_test": {
+          "id": "manual_smoke_test",
+          "status": "pending",
+          "started_at": null,
+          "completed_at": null,
+          "skipped_at": null,
+          "skip_reason": null,
+          "notes": null,
+          "verification_result": null,
+          "retry_count": 0
+        }
+      }
+    },
+    "LEARN": {
+      "id": "LEARN",
+      "status": "pending",
+      "started_at": null,
+      "completed_at": null,
+      "items": {
+        "document_learnings": {
+          "id": "document_learnings",
+          "status": "pending",
+          "started_at": null,
+          "completed_at": null,
+          "skipped_at": null,
+          "skip_reason": null,
+          "notes": null,
+          "verification_result": null,
+          "retry_count": 0
+        },
+        "update_knowledge_base": {
+          "id": "update_knowledge_base",
+          "status": "pending",
+          "started_at": null,
+          "completed_at": null,
+          "skipped_at": null,
+          "skip_reason": null,
+          "notes": null,
+          "verification_result": null,
+          "retry_count": 0
+        }
+      }
+    }
+  },
+  "created_at": "2026-01-04T02:21:04.901201Z",
+  "updated_at": "2026-01-04T02:21:04.901213Z",
+  "completed_at": null,
+  "metadata": {
+    "workflow_yaml_path": "/home/ubuntu/workflow-orchestrator/test_project/workflow.yaml",
+    "workflow_yaml_checksum": "6cae1aa757f2b8e7"
+  }
+}
