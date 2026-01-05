@@ -1,6 +1,14 @@
-name: "Pingxa Development Workflow"
-version: "1.1"
-description: "A 5-phase workflow for software development, including planning, execution, review, verification, and learning. Default to using Claude Code for implementation unless task is trivial."
+name: "Development Workflow"
+version: "2.0"
+description: |
+  A 6-phase workflow for software development:
+  DEFINE → PLAN → EXECUTE → REVIEW → VERIFY → LEARN
+
+  Starts with product definition to ensure clear requirements before planning.
+  Calibrates process to task complexity (trivial → complex).
+
+  Use /spec command for guided definition protocol.
+  Use 'orchestrator start "[task]" -w define.yaml' for standalone PRD generation.
 
 settings:
   # Settings specific to this workflow
@@ -9,50 +17,139 @@ settings:
   default_executor: "claude_code"
 
 phases:
-  - id: "PLAN"
-    name: "Planning & Scoping"
-    description: "Define the work to be done, assess risks, and get approval before starting. If docs/SPEC.md exists, use it as the source of truth. Otherwise, ASK CLARIFYING QUESTIONS before proceeding."
+  # ============================================================
+  # PHASE 0: DEFINE - Product definition before planning
+  # ============================================================
+  - id: "DEFINE"
+    name: "Product Definition"
+    description: |
+      Define WHAT we're building before planning HOW.
+      Calibrate process to complexity. Require approval before PLAN.
+    executor: "claude_code"
     items:
-      - id: "review_specification"
-        name: "Review Specification (if exists)"
+      - id: "assess_complexity"
+        name: "Assess Task Complexity"
         description: |
-          Check if docs/SPEC.md exists from a prior /spec session.
+          Evaluate the request to determine appropriate process:
 
-          If YES: Use it as the source of truth. The spec contains:
-          - Validated outcome and success criteria
-          - Approved user journey
-          - Approved design artifact
-          - Edge cases and acceptance criteria
+          TRIVIAL (skip DEFINE entirely):
+          - Single change, obvious implementation
+          - Examples: "Change button color", "Fix typo"
+          - → Skip to PLAN phase
 
-          Skip clarifying_questions and proceed to plan generation.
+          SIMPLE (abbreviated definition):
+          - Small feature, clear outcome, 1 journey
+          - Examples: "Add export button", "Show user count"
+          - → Quick outcome check + show intent + proceed
 
-          If NO: Continue with clarifying_questions to understand requirements.
-          Consider running /spec first for complex features.
+          MODERATE (standard definition):
+          - Medium feature, some ambiguity, 1-2 journeys
+          - Examples: "Add dashboard", "Implement notifications"
+          - → Run /spec or define workflow
+
+          COMPLEX (full definition):
+          - Large feature, multiple journeys, high stakes
+          - Examples: "Build auth system", "Add payment flow"
+          - → Run full /spec with all critiques
+
+          Communicate: "This looks like a [TIER] task. I recommend [process]."
+          Allow user to override.
+        required: true
+        skippable: false
+        verification:
+          type: "none"
+
+      - id: "check_existing_spec"
+        name: "Check for Existing Specification"
+        description: |
+          Check if docs/SPEC.md already exists from a prior /spec session.
+
+          If YES: Review it and confirm still valid.
+          If NO and MODERATE/COMPLEX: Run /spec or define.yaml workflow.
+          If NO and SIMPLE: Do quick inline definition.
+          If TRIVIAL: Skip to PLAN.
         required: false
         skippable: true
         skip_conditions:
-          - "no_spec_exists"
-          - "spec_not_applicable"
-          - "simple_bug_fix"
+          - "trivial_task"
         verification:
           type: "file_exists"
           path: "docs/SPEC.md"
 
-      - id: "clarifying_questions"
-        name: "Ask Clarifying Questions"
+      - id: "inline_definition"
+        name: "Quick Definition (Simple tasks)"
         description: |
-          If no spec exists, ask clarifying questions before planning:
-          - What does the issue look like? Is this a regression?
-          - What's the expected behavior?
-          - Which areas are affected?
-          - What does success look like?
+          For SIMPLE tasks without existing spec, do inline definition:
 
-          For complex features, recommend: "Consider running /spec first
-          for a structured specification process."
+          1. Confirm outcome: "You want [X] so that [Y]. Correct?"
+          2. Show intent: "Here's what I'm planning: [artifact]"
+          3. Get approval: "Look right?"
+
+          Skip for TRIVIAL (no definition needed) or if spec exists.
+        required: false
+        skippable: true
+        skip_conditions:
+          - "trivial_task"
+          - "spec_exists"
+          - "moderate_or_complex_task"
+        verification:
+          type: "none"
+
+      - id: "run_full_definition"
+        name: "Run Full Definition Process (Moderate/Complex)"
+        description: |
+          For MODERATE or COMPLEX tasks, run the full definition process.
+
+          Option A: Run /spec slash command (interactive)
+          Option B: Run define workflow: orchestrator start "[task]" -w define.yaml
+
+          The definition process covers:
+          - Outcome discovery (job-to-be-done)
+          - User journey mapping
+          - Data requirements
+          - Research & patterns
+          - Edge cases
+          - Design artifact
+          - Stakeholder critique
+
+          Output: docs/SPEC.md
+        required: false
+        skippable: true
+        skip_conditions:
+          - "trivial_task"
+          - "simple_task"
+          - "spec_exists"
+        verification:
+          type: "file_exists"
+          path: "docs/SPEC.md"
+
+      - id: "definition_approval"
+        name: "Approve Definition"
+        description: |
+          User approves the product definition before proceeding to PLAN.
+
+          For TRIVIAL: "Got it, proceeding to plan [change]."
+          For SIMPLE: "Confirmed: [outcome]. Proceeding to plan."
+          For MODERATE/COMPLEX: "Spec approved. Proceeding to plan implementation."
+
+          This gate ensures clear requirements before technical planning.
         required: true
         skippable: true
-        skip_conditions: ["requirements_crystal_clear", "user_provided_full_context", "spec_exists"]
+        skip_conditions:
+          - "trivial_task"
+        verification:
+          type: "manual_gate"
+          description: "User approves definition before planning"
 
+  # ============================================================
+  # PHASE 1: PLAN - Technical planning and approach
+  # ============================================================
+  - id: "PLAN"
+    name: "Planning & Scoping"
+    description: |
+      Plan HOW to implement the defined requirements.
+      Uses docs/SPEC.md as source of truth if available.
+    items:
       - id: "initial_plan"
         name: "Generate initial plan"
         description: "Create a detailed plan of action and save it to docs/plan.md. Include decision on whether to use Claude Code (default: yes) or handle directly (only for trivial tasks)."

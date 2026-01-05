@@ -1,18 +1,82 @@
-name: "Product Specification"
-version: "1.0"
+name: "Product Definition"
+version: "1.1"
 description: |
-  Outcome-first specification workflow. Deeply understand outcomes, journeys,
-  and data requirements before designing any solution. The UI/UX is a delivery
-  mechanism for outcomes, not a starting point.
+  Standalone PRD (Product Requirements Document) generation workflow.
+
+  Use this workflow to:
+  - Generate PRDs for product planning
+  - Define features before implementation
+  - Create specifications that feed into development workflows
+
+  Calibrates to complexity:
+  - TRIVIAL: Skip this workflow entirely
+  - SIMPLE: Abbreviated process (ASSESS → DESIGN → SPECIFY)
+  - MODERATE: Standard process (all phases, focused critique)
+  - COMPLEX: Full process (all phases, full critique)
 
   Use with: /spec slash command for guided protocol
   Output: docs/SPEC.md with approved specification
+
+  After completion, start implementation with:
+    orchestrator start "[Feature]" -w workflow.yaml
 
 settings:
   spec_output: "docs/SPEC.md"
   default_executor: "claude_code"
 
 phases:
+  # ============================================================
+  # PHASE 0: ASSESS - Determine complexity and calibrate process
+  # ============================================================
+  - id: "ASSESS"
+    name: "Complexity Assessment"
+    description: |
+      Assess task complexity to calibrate the definition process.
+
+      TRIVIAL: Skip this workflow - just do the task
+      SIMPLE: Use abbreviated process
+      MODERATE: Use standard process
+      COMPLEX: Use full process with all critiques
+    executor: "claude_code"
+    items:
+      - id: "assess_complexity"
+        name: "Assess Task Complexity"
+        description: |
+          Evaluate the request against these criteria:
+
+          1. User journeys involved: 1 = simple, 3+ = complex
+          2. Systems/components affected: 1 = simple, 3+ = complex
+          3. Outcome clarity: clear = simple, ambiguous = complex
+          4. Existing patterns: yes = simpler, no = complex
+          5. Blast radius if wrong: low = simple, high = complex
+
+          Assign a tier:
+          - TRIVIAL: Single change, obvious implementation
+          - SIMPLE: Small feature, clear outcome, 1 journey
+          - MODERATE: Medium feature, some ambiguity, 1-2 journeys
+          - COMPLEX: Large feature, multiple journeys, high stakes
+
+          Communicate to user:
+          "This looks like a [TIER] task. I'll use [process level].
+          Does that seem right?"
+
+          Allow user to override if needed.
+        required: true
+        verification:
+          type: "none"
+
+      - id: "complexity_confirmation"
+        name: "Confirm Complexity Tier"
+        description: |
+          User confirms the assessed complexity tier.
+
+          For TRIVIAL: Exit this workflow, proceed to implementation.
+          For SIMPLE/MODERATE/COMPLEX: Continue with appropriate process.
+        required: true
+        verification:
+          type: "manual_gate"
+          description: "User confirms complexity assessment"
+
   # ============================================================
   # PHASE 1: DISCOVER - Understand outcomes, not surface requests
   # ============================================================
