@@ -694,8 +694,10 @@ class WorkflowEngine:
         result = {"type": verification.type.value, "timestamp": datetime.now(timezone.utc).isoformat()}
         
         if verification.type == VerificationType.FILE_EXISTS:
+            # Substitute template variables in path
+            file_path = self._substitute_template(verification.path)
             # Path traversal protection
-            path = (self.working_dir / verification.path).resolve()
+            path = (self.working_dir / file_path).resolve()
             if not str(path).startswith(str(self.working_dir)):
                 result["blocked"] = True
                 result["reason"] = "path_traversal"
