@@ -1,0 +1,198 @@
+name: "General Development Workflow"
+version: "2.0"
+description: "A general-purpose 5-phase workflow for software development tasks. Works with any project type (Node.js, Python, etc.). Default to using Claude Code for implementation unless task is trivial."
+
+settings:
+  # Configurable settings - override these per-project
+  # Test command - defaults to checking if package.json exists (always passes for Node projects)
+  # Override with actual test command: "npm test", "pytest", "go test ./...", etc.
+  test_command: "npm run build"
+  
+  # Build/compile command (optional, for compiled languages)
+  build_command: "npm run build"
+  
+  # Lint command (optional)
+  lint_command: "npm run lint"
+  
+  # Documentation directory
+  docs_dir: "docs"
+  
+  # Tests directory  
+  tests_dir: "tests"
+  
+  # Claude Code is the default executor - only skip for trivial tasks
+  default_executor: "claude_code"
+
+phases:
+  - id: "PLAN"
+    name: "Planning & Scoping"
+    description: "Define the work to be done, assess risks, and get approval before starting. ASK CLARIFYING QUESTIONS before proceeding."
+    items:
+      - id: "clarifying_questions"
+        name: "Ask Clarifying Questions"
+        description: "Before creating a plan, ask the user clarifying questions to ensure full understanding. Provide RECOMMENDED ANSWERS with each question. Examples: What does the issue look like? Is this a regression? What's the expected behavior? Which areas are affected?"
+        required: true
+        skippable: true
+        skip_conditions: ["requirements_crystal_clear", "user_provided_full_context"]
+
+      - id: "initial_plan"
+        name: "Generate initial plan"
+        description: "Create a detailed plan of action and save it to {{docs_dir}}/plan.md. Include decision on whether to use Claude Code (default: yes) or handle directly (only for trivial tasks)."
+        required: true
+        skippable: false
+        verification:
+          type: "file_exists"
+          path: "{{docs_dir}}/plan.md"
+
+      - id: "risk_analysis"
+        name: "Risk & Impact Analysis"
+        description: "Document potential risks and their impact in {{docs_dir}}/risk_analysis.md"
+        required: true
+        skippable: true
+        skip_conditions: ["simple_bug_fix", "trivial_change"]
+        verification:
+          type: "file_exists"
+          path: "{{docs_dir}}/risk_analysis.md"
+
+      - id: "define_test_cases"
+        name: "Define Test Cases"
+        description: "Outline the test cases that will be used to verify the feature in {{tests_dir}}/test_cases.md. For UI changes, include visual/screenshot test cases."
+        required: true
+        skippable: false
+        verification:
+          type: "file_exists"
+          path: "{{tests_dir}}/test_cases.md"
+
+      - id: "user_approval"
+        name: "Get User Approval"
+        description: "The user must approve the plan before execution can begin."
+        required: true
+        skippable: false
+        verification:
+          type: "manual_gate"
+          description: "User must run 'orchestrator approve-item user_approval' to proceed."
+
+  - id: "EXECUTE"
+    name: "Implementation"
+    description: "Write code and tests to implement the planned feature. DEFAULT: Use Claude Code for implementation. Only handle directly for trivial tasks with explicit justification."
+    items:
+      - id: "handoff_decision"
+        name: "Claude Code Handoff Decision"
+        description: "Determine if task should be handed off to Claude Code (default) or handled directly. Document reasoning. Only skip Claude Code for: 1) Single-line config changes, 2) Documentation-only updates, 3) Explicit user request to handle directly."
+        required: true
+        skippable: false
+
+      - id: "implement_code"
+        name: "Implement feature code"
+        description: "Write the application code that satisfies the requirements. Use Claude Code unless explicitly decided otherwise in handoff_decision."
+        required: true
+        skippable: false
+
+      - id: "write_tests"
+        name: "Write tests"
+        description: "Implement the test cases defined in the planning phase. For UI changes, include screenshot/visual regression tests where appropriate."
+        required: true
+        skippable: false
+        verification:
+          type: "command"
+          command: "{{test_command}}"
+          expect_exit_code: 0
+
+      - id: "all_tests_pass"
+        name: "Ensure all tests pass"
+        description: "Run the test suite and ensure all tests pass after implementation."
+        required: true
+        skippable: false
+        verification:
+          type: "command"
+          command: "{{test_command}}"
+          expect_exit_code: 0
+
+  - id: "REVIEW"
+    name: "Code & Architecture Review"
+    description: "Perform multi-agent review of the code against best practices. Use different agent/model than the one that wrote the code."
+    items:
+      - id: "security_review"
+        name: "Security Review"
+        description: "Check for common security vulnerabilities (e.g., OWASP Top 10, injection attacks, auth issues)."
+        required: true
+        skippable: true
+        skip_conditions: ["no_security_impact", "documentation_only"]
+
+      - id: "architecture_review"
+        name: "Architecture Review"
+        description: "Ensure the implementation aligns with the project's architecture and design patterns."
+        required: true
+        skippable: true
+        skip_conditions: ["minor_change", "no_architecture_impact"]
+
+      - id: "quality_review"
+        name: "Code Quality Review"
+        description: "Check for code smells, readability, maintainability, and adherence to coding standards."
+        required: true
+        skippable: true
+        skip_conditions: ["trivial_change"]
+
+  - id: "VERIFY"
+    name: "Final Verification"
+    description: "Perform final checks to ensure the feature is ready for release."
+    items:
+      - id: "full_test_suite"
+        name: "Run full test suite"
+        description: "Ensure no regressions were introduced during review."
+        required: true
+        skippable: false
+        verification:
+          type: "command"
+          command: "{{test_command}}"
+          expect_exit_code: 0
+
+      - id: "visual_regression_test"
+        name: "Visual/Screenshot Regression Test"
+        description: "For UI changes: capture screenshots and compare against baseline. Verify no unintended visual changes."
+        required: true
+        skippable: true
+        skip_conditions: ["no_ui_changes", "backend_only", "api_only"]
+
+      - id: "manual_smoke_test"
+        name: "Manual Smoke Test"
+        description: "Manually test the core functionality to ensure it works as expected."
+        required: true
+        skippable: true
+        verification:
+          type: "manual_gate"
+          description: "User to confirm manual smoke test passed."
+
+  - id: "LEARN"
+    name: "Learning & Documentation"
+    description: "Document learnings and update knowledge base. Learnings must be approved before being embedded in the process."
+    items:
+      - id: "root_cause_analysis"
+        name: "Root Cause Analysis"
+        description: "MANDATORY: Perform and document root cause analysis. Why did this issue occur? What was the underlying cause, not just the symptom? Document in LEARNINGS.md."
+        required: true
+        skippable: false
+
+      - id: "document_learnings"
+        name: "Document Learnings"
+        description: "Create or update LEARNINGS.md with: 1) Problem summary, 2) Root cause analysis, 3) Fix applied, 4) Systemic insights (broader implications), 5) Prevention measures, 6) Audit recommendations."
+        required: true
+        skippable: false
+        verification:
+          type: "file_exists"
+          path: "LEARNINGS.md"
+
+      - id: "approve_learnings"
+        name: "User Approval of Learnings"
+        description: "User must review and approve the documented learnings before they are committed. This ensures learnings are accurate, complete, and valuable for future reference."
+        required: true
+        skippable: false
+        verification:
+          type: "manual_gate"
+          description: "User must review LEARNINGS.md and run 'orchestrator approve-item approve_learnings' to confirm learnings are correct and complete."
+
+      - id: "update_knowledge_base"
+        name: "Update Knowledge Base"
+        description: "Update any relevant project documentation or knowledge base with approved learnings."
+        required: false
+        skippable: true
