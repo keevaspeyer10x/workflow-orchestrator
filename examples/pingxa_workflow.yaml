@@ -11,14 +11,47 @@ settings:
 phases:
   - id: "PLAN"
     name: "Planning & Scoping"
-    description: "Define the work to be done, assess risks, and get approval before starting. ASK CLARIFYING QUESTIONS before proceeding."
+    description: "Define the work to be done, assess risks, and get approval before starting. If docs/SPEC.md exists, use it as the source of truth. Otherwise, ASK CLARIFYING QUESTIONS before proceeding."
     items:
+      - id: "review_specification"
+        name: "Review Specification (if exists)"
+        description: |
+          Check if docs/SPEC.md exists from a prior /spec session.
+
+          If YES: Use it as the source of truth. The spec contains:
+          - Validated outcome and success criteria
+          - Approved user journey
+          - Approved design artifact
+          - Edge cases and acceptance criteria
+
+          Skip clarifying_questions and proceed to plan generation.
+
+          If NO: Continue with clarifying_questions to understand requirements.
+          Consider running /spec first for complex features.
+        required: false
+        skippable: true
+        skip_conditions:
+          - "no_spec_exists"
+          - "spec_not_applicable"
+          - "simple_bug_fix"
+        verification:
+          type: "file_exists"
+          path: "docs/SPEC.md"
+
       - id: "clarifying_questions"
         name: "Ask Clarifying Questions"
-        description: "Before creating a plan, ask the user clarifying questions to ensure full understanding. Examples: What does the issue look like? Is this a regression? What's the expected behavior? Which areas are affected?"
+        description: |
+          If no spec exists, ask clarifying questions before planning:
+          - What does the issue look like? Is this a regression?
+          - What's the expected behavior?
+          - Which areas are affected?
+          - What does success look like?
+
+          For complex features, recommend: "Consider running /spec first
+          for a structured specification process."
         required: true
         skippable: true
-        skip_conditions: ["requirements_crystal_clear", "user_provided_full_context"]
+        skip_conditions: ["requirements_crystal_clear", "user_provided_full_context", "spec_exists"]
 
       - id: "initial_plan"
         name: "Generate initial plan"

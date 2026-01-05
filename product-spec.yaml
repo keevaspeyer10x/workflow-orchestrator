@@ -1,0 +1,398 @@
+name: "Product Specification"
+version: "1.0"
+description: |
+  Outcome-first specification workflow. Deeply understand outcomes, journeys,
+  and data requirements before designing any solution. The UI/UX is a delivery
+  mechanism for outcomes, not a starting point.
+
+  Use with: /spec slash command for guided protocol
+  Output: docs/SPEC.md with approved specification
+
+settings:
+  spec_output: "docs/SPEC.md"
+  default_executor: "claude_code"
+
+phases:
+  # ============================================================
+  # PHASE 1: DISCOVER - Understand outcomes, not surface requests
+  # ============================================================
+  - id: "DISCOVER"
+    name: "Outcome Discovery"
+    description: |
+      Understand what success looks like. Don't ask what they want to build -
+      ask what outcome they're trying to achieve. Ask "why" at least 3 times.
+    executor: "claude_code"
+    items:
+      - id: "capture_job_to_be_done"
+        name: "Identify Job-to-be-Done"
+        description: |
+          Understand the core outcome:
+          - What outcome are you trying to achieve?
+          - How do you do this today? What's painful?
+          - What would make this "worth building"?
+          - Who else is affected by this outcome?
+
+          Ask "why" at least 3 times to get past surface answers.
+
+          Document: Primary outcome, current pain, stakeholders
+        required: true
+        verification:
+          type: "none"
+
+      - id: "define_success_criteria"
+        name: "Define Success Criteria"
+        description: |
+          Establish measurable success:
+          - How will you know this is working?
+          - What metrics or behaviors will change?
+          - What would you show to prove it worked?
+
+          Document: Specific, measurable success criteria
+        required: true
+        verification:
+          type: "none"
+
+      - id: "discovery_checkpoint"
+        name: "Checkpoint: Outcome Understanding"
+        description: |
+          Summarize back to user:
+          "So the core outcome is [X], currently painful because [Y],
+          and we'll know it's working when [Z]. Is that right?"
+
+          Do NOT proceed until outcome is crystal clear.
+        required: true
+        verification:
+          type: "manual_gate"
+          description: "User confirms outcome understanding is correct"
+
+  # ============================================================
+  # PHASE 2: MAP - Understand the user journey in detail
+  # ============================================================
+  - id: "MAP"
+    name: "Journey Mapping"
+    description: |
+      Map the complete path from trigger to outcome. Understand what users
+      know, need, and decide at each step.
+    executor: "claude_code"
+    items:
+      - id: "map_trigger_and_context"
+        name: "Map Trigger & Context"
+        description: |
+          Understand journey initiation:
+          - What triggers the need for this?
+          - What's happening right before?
+          - What does the user already know when they start?
+          - What's their mental state? (Rushed? Relaxed? Frustrated?)
+
+          Document: Trigger event, user context, prior knowledge
+        required: true
+        verification:
+          type: "none"
+
+      - id: "map_journey_steps"
+        name: "Map Journey Steps"
+        description: |
+          Walk through the complete journey:
+          - "What's the very first thing you'd do?"
+          - "Then what? And after that?"
+          - "What information do you need at each step?"
+          - "What decisions do you make along the way?"
+
+          Keep to 5-7 core steps maximum.
+
+          Document: Step sequence with info needs and decisions
+        required: true
+        verification:
+          type: "none"
+
+      - id: "map_success_state"
+        name: "Map Success State & Exit"
+        description: |
+          Understand journey completion:
+          - How do they know they're done?
+          - What do they do with the result?
+          - What happens next after this journey?
+
+          Document: Success indicators, handoff to next action
+        required: true
+        verification:
+          type: "none"
+
+      - id: "journey_checkpoint"
+        name: "Checkpoint: Journey Validation"
+        description: |
+          Present the journey map to user:
+
+          "Here's the journey as I understand it:
+          Trigger: [X]
+          Steps: 1→2→3→4→5
+          Success: [Y]
+
+          Does this match reality?"
+        required: true
+        verification:
+          type: "manual_gate"
+          description: "User confirms journey map is accurate"
+
+  # ============================================================
+  # PHASE 3: ANALYZE - Data requirements and edge cases
+  # ============================================================
+  - id: "ANALYZE"
+    name: "Requirements Analysis"
+    description: |
+      Identify data requirements at each journey step and systematically
+      explore edge cases and failure modes.
+    executor: "claude_code"
+    items:
+      - id: "analyze_data_requirements"
+        name: "Analyze Data Requirements"
+        description: |
+          For each journey step, identify:
+          - What information is REQUIRED to proceed?
+          - What information is HELPFUL but optional?
+          - Where does this data come from?
+          - What validation or constraints apply?
+          - What happens if it's missing or invalid?
+
+          Document: Data matrix (step → required → source → validation)
+        required: true
+        verification:
+          type: "none"
+
+      - id: "explore_edge_cases"
+        name: "Explore Edge Cases"
+        description: |
+          Systematically identify failure modes:
+
+          Error states:
+          - What could go wrong at each step?
+          - What if data is missing/invalid/outdated?
+
+          Boundary conditions:
+          - Empty state (zero items)?
+          - Overload state (thousands of items)?
+          - New user vs experienced user?
+
+          Permission/access:
+          - Who should NOT be able to do this?
+          - What if permissions change mid-journey?
+
+          Document: Edge case matrix with handling approach
+        required: true
+        verification:
+          type: "none"
+
+      - id: "define_recovery_paths"
+        name: "Define Recovery Paths"
+        description: |
+          For each failure mode:
+          - How does the user get back on track?
+          - What do they need to see to understand what went wrong?
+          - Can they undo, retry, or recover?
+
+          Document: Recovery path for each significant failure mode
+        required: true
+        skippable: true
+        skip_conditions:
+          - "simple_feature"
+          - "no_significant_failure_modes"
+        verification:
+          type: "none"
+
+  # ============================================================
+  # PHASE 4: RESEARCH - Learn from existing solutions
+  # ============================================================
+  - id: "RESEARCH"
+    name: "Research & Patterns"
+    description: |
+      Research how similar products solve this problem. Don't reinvent
+      the wheel - learn from others and apply proven patterns.
+    executor: "claude_code"
+    items:
+      - id: "research_competitors"
+        name: "Research Similar Products"
+        description: |
+          Use web search to find and analyze:
+          - 3-5 similar products or features
+          - How they handle this workflow
+          - What they do well
+          - What users complain about
+
+          Document: Product analysis with strengths/weaknesses
+        required: true
+        skippable: true
+        skip_conditions:
+          - "novel_problem_space"
+          - "internal_tool_no_comparables"
+        verification:
+          type: "none"
+
+      - id: "identify_patterns"
+        name: "Identify UX Patterns"
+        description: |
+          From research, identify:
+          - Established patterns users expect
+          - Conventions in this domain
+          - Anti-patterns to avoid
+          - Innovations worth borrowing
+
+          Document: Patterns to apply and rationale
+        required: true
+        skippable: true
+        skip_conditions:
+          - "novel_problem_space"
+          - "internal_tool_no_comparables"
+        verification:
+          type: "none"
+
+      - id: "research_checkpoint"
+        name: "Checkpoint: Research Summary"
+        description: |
+          Share key research insights with user:
+
+          "Based on research, here's what I learned:
+          - [Product X] does [approach], which works because [reason]
+          - Common pattern is [Y], users expect [Z]
+          - We should avoid [anti-pattern] because [reason]
+
+          I'm planning to apply [patterns]. Sound reasonable?"
+        required: true
+        skippable: true
+        skip_conditions:
+          - "research_skipped"
+        verification:
+          type: "manual_gate"
+          description: "User acknowledges research insights"
+
+  # ============================================================
+  # PHASE 5: DESIGN - Now create the solution
+  # ============================================================
+  - id: "DESIGN"
+    name: "Design Synthesis"
+    description: |
+      NOW design the UI/UX as the optimal delivery mechanism for the
+      outcomes you deeply understand. Apply research patterns.
+    executor: "claude_code"
+    items:
+      - id: "create_design_artifact"
+        name: "Create Design Artifact"
+        description: |
+          Based on everything learned, create a CONCRETE artifact:
+
+          - UI Feature → ASCII mockup with interaction flow
+          - API → Example requests/responses
+          - CLI → Example session transcript
+          - Data Pipeline → Input/output examples
+
+          Design principles:
+          1. Shortest path from trigger to success
+          2. Apply patterns from research
+          3. Right information at right time
+          4. Handle edge cases gracefully
+
+          Document: The concrete design artifact
+        required: true
+        verification:
+          type: "none"
+
+      - id: "design_walkthrough"
+        name: "Walk Through Design"
+        description: |
+          Present design to user with a walkthrough:
+
+          "Here's how this would work:
+          1. [Step] - you see [X], you do [Y]
+          2. [Step] - system shows [X], you decide [Y]
+          ...
+
+          Does this achieve the outcome we discussed?
+          What's missing or confusing?"
+
+          This is validation, not design input.
+        required: true
+        verification:
+          type: "none"
+
+      - id: "design_iteration"
+        name: "Iterate on Design"
+        description: |
+          Based on feedback:
+          - Update the design artifact
+          - Show what changed
+          - Validate again
+
+          Repeat until user approves.
+          Maximum 3 iterations - then ship what you have.
+        required: false
+        skippable: true
+        skip_conditions:
+          - "design_approved_first_try"
+        verification:
+          type: "none"
+
+      - id: "design_approval"
+        name: "Approve Final Design"
+        description: |
+          User approves the design artifact as the target for implementation.
+
+          "This design achieves the outcome. Ready to write the spec."
+        required: true
+        verification:
+          type: "manual_gate"
+          description: "User approves design for specification"
+
+  # ============================================================
+  # PHASE 6: SPECIFY - Capture the approved specification
+  # ============================================================
+  - id: "SPECIFY"
+    name: "Write Specification"
+    description: |
+      Capture everything in docs/SPEC.md. The approved design IS the spec.
+      Add acceptance criteria derived from the journey.
+    executor: "claude_code"
+    items:
+      - id: "write_specification"
+        name: "Write docs/SPEC.md"
+        description: |
+          Create docs/SPEC.md with:
+
+          1. Outcome (one sentence job-to-be-done)
+          2. Success Criteria (measurable)
+          3. User Journey (trigger → steps → success)
+          4. Approved Design (the artifact)
+          5. Data Requirements (table)
+          6. Edge Cases & Handling (table)
+          7. Out of Scope (explicit boundaries)
+          8. Acceptance Criteria (Given/When/Then)
+
+          The approved artifact IS the spec - don't over-document.
+        required: true
+        verification:
+          type: "file_exists"
+          path: "docs/SPEC.md"
+
+      - id: "spec_approval"
+        name: "Approve Final Specification"
+        description: |
+          User reviews complete docs/SPEC.md.
+
+          This is the handoff document for implementation.
+        required: true
+        verification:
+          type: "manual_gate"
+          description: "User approves specification for implementation"
+
+      - id: "handoff_instructions"
+        name: "Provide Handoff Instructions"
+        description: |
+          Tell user next steps:
+
+          "Specification complete: docs/SPEC.md
+
+          To implement, start the development workflow:
+            orchestrator start '[Feature name]' -w workflow.yaml
+
+          The PLAN phase will reference this spec."
+        required: true
+        verification:
+          type: "none"
