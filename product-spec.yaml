@@ -342,7 +342,209 @@ phases:
           description: "User approves design for specification"
 
   # ============================================================
-  # PHASE 6: SPECIFY - Capture the approved specification
+  # PHASE 6: CRITIQUE - Adversarial review from multiple perspectives
+  # ============================================================
+  - id: "CRITIQUE"
+    name: "Stakeholder Critique"
+    description: |
+      Before finalizing, critique the design from multiple stakeholder
+      perspectives. Assume each role fully and challenge the spec.
+      Identify gaps, risks, and improvements.
+    executor: "claude_code"
+    items:
+      - id: "critique_senior_engineer"
+        name: "Critique: Senior Software Engineer"
+        description: |
+          Assume the role of a skeptical Senior Software Engineer with 15+
+          years of experience. Review the design critically:
+
+          TECHNICAL FEASIBILITY:
+          - Is this actually buildable as specified?
+          - What technical debt will this create?
+          - What's the complexity vs value tradeoff?
+
+          IMPLEMENTATION CONCERNS:
+          - What edge cases are missing?
+          - Where will this break at scale?
+          - What are the performance implications?
+          - What security vulnerabilities exist?
+
+          MAINTENANCE BURDEN:
+          - How testable is this design?
+          - What will be painful to maintain?
+          - What dependencies does this create?
+
+          QUESTIONS TO ASK:
+          - "What happens when...?"
+          - "Have you considered...?"
+          - "How will this interact with...?"
+
+          Be harsh but constructive. Identify real problems.
+
+          Document: Technical issues, gaps, questions, suggested improvements
+        required: true
+        verification:
+          type: "none"
+
+      - id: "critique_senior_pm"
+        name: "Critique: Senior Product Manager"
+        description: |
+          Assume the role of a demanding Senior Product Manager who has
+          shipped many products. Review the design critically:
+
+          BUSINESS VALUE:
+          - Does this actually solve the stated problem?
+          - Is the scope right? Too big? Too small?
+          - What's the ROI? Is this worth building?
+
+          USER EXPERIENCE:
+          - Will users actually use this?
+          - What friction points exist?
+          - Is this solving a real pain or a perceived one?
+          - What will users complain about?
+
+          SUCCESS METRICS:
+          - How will we know this worked?
+          - Are the success criteria actually measurable?
+          - What leading indicators should we track?
+
+          SCOPE & PRIORITIZATION:
+          - What's the MVP vs nice-to-have?
+          - What should we cut?
+          - What are we missing that's essential?
+
+          RISKS:
+          - What assumptions are we making?
+          - What could make this fail?
+          - What's the competitive risk?
+
+          QUESTIONS TO ASK:
+          - "Why would a user choose this over...?"
+          - "What's the smallest thing we could ship?"
+          - "How does this fit the broader product vision?"
+
+          Document: Business concerns, UX gaps, prioritization issues, questions
+        required: true
+        verification:
+          type: "none"
+
+      - id: "critique_end_user"
+        name: "Critique: Target End User"
+        description: |
+          Assume the role of the actual end user who will use this feature.
+          Consider their real context, constraints, and frustrations:
+
+          FIRST IMPRESSIONS:
+          - Is it obvious what this does?
+          - Can I figure it out without help?
+          - Does this feel like it's for me?
+
+          DAILY REALITY:
+          - Does this fit my actual workflow?
+          - What's my context when I need this?
+          - Am I rushed? Distracted? Stressed?
+
+          FRICTION POINTS:
+          - What will annoy me?
+          - What extra steps feel unnecessary?
+          - Where will I get confused or stuck?
+
+          TRUST & CONFIDENCE:
+          - Will I trust this with my data/work?
+          - How do I know it worked correctly?
+          - What if I make a mistake?
+
+          REAL QUESTIONS:
+          - "Why can't I just...?"
+          - "What if I need to...?"
+          - "Where did my [X] go?"
+
+          Document: Usability concerns, confusion points, workflow friction
+        required: true
+        verification:
+          type: "none"
+
+      - id: "critique_qa_engineer"
+        name: "Critique: QA Engineer"
+        description: |
+          Assume the role of a thorough QA Engineer who breaks things for
+          a living. Look for what will fail:
+
+          TEST COVERAGE:
+          - What's hard to test here?
+          - What states are difficult to reproduce?
+          - What requires manual testing vs automation?
+
+          EDGE CASES:
+          - Empty states, null values, missing data
+          - Boundary conditions (min, max, overflow)
+          - Concurrent users, race conditions
+          - Network failures, timeouts, partial failures
+
+          ERROR SCENARIOS:
+          - Invalid inputs - how are they handled?
+          - Permission denied - what happens?
+          - System errors - is recovery possible?
+
+          REGRESSION RISKS:
+          - What existing features could this break?
+          - What integration points are risky?
+
+          ACCEPTANCE CRITERIA GAPS:
+          - Are the Given/When/Then scenarios complete?
+          - What scenarios are missing?
+          - Are criteria actually testable?
+
+          Document: Testability issues, missing edge cases, acceptance criteria gaps
+        required: true
+        skippable: true
+        skip_conditions:
+          - "simple_feature"
+          - "low_risk_change"
+        verification:
+          type: "none"
+
+      - id: "synthesize_critique"
+        name: "Synthesize Critique Findings"
+        description: |
+          Consolidate all critique findings into actionable items:
+
+          CRITICAL ISSUES (must address):
+          - [Issue] - [Which role identified it] - [Recommendation]
+
+          IMPORTANT CONCERNS (should address):
+          - [Concern] - [Which role identified it] - [Recommendation]
+
+          QUESTIONS REQUIRING ANSWERS:
+          - [Question] - [Why it matters]
+
+          SUGGESTED IMPROVEMENTS:
+          - [Improvement] - [Impact]
+
+          Present to user: "Before we finalize, here's what the critique
+          uncovered. Which of these should we address?"
+        required: true
+        verification:
+          type: "none"
+
+      - id: "critique_resolution"
+        name: "Resolve Critical Issues"
+        description: |
+          Work with user to resolve critical issues from critique:
+
+          For each critical issue:
+          1. Discuss the concern
+          2. Decide: fix now, defer, accept risk, or out of scope
+          3. Update design if needed
+
+          Do not proceed until critical issues are resolved.
+        required: true
+        verification:
+          type: "manual_gate"
+          description: "User confirms critical issues are resolved or accepted"
+
+  # ============================================================
+  # PHASE 7: SPECIFY - Capture the approved specification
   # ============================================================
   - id: "SPECIFY"
     name: "Write Specification"

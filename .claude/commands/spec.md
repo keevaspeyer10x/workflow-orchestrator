@@ -265,6 +265,150 @@ This is reaction, not design input. You're checking your work, not asking them t
 
 ---
 
+## PHASE 7: Stakeholder Critique
+
+**Goal**: Before finalizing, stress-test the design by assuming different stakeholder perspectives.
+
+This is ADVERSARIAL review. Be genuinely critical. Find real problems.
+
+### Critique 1: Senior Software Engineer
+
+Assume the role of a skeptical senior engineer with 15+ years experience. Ask:
+
+**Technical Feasibility**
+- Is this actually buildable as specified?
+- What technical debt will this create?
+- What's the complexity vs value tradeoff?
+
+**Implementation Concerns**
+- What edge cases are missing?
+- Where will this break at scale?
+- What are the performance implications?
+- What security vulnerabilities exist?
+
+**Maintenance Burden**
+- How testable is this design?
+- What will be painful to maintain?
+- What dependencies does this create?
+
+**Questions to Surface**
+- "What happens when...?"
+- "Have you considered...?"
+- "How will this interact with...?"
+
+### Critique 2: Senior Product Manager
+
+Assume the role of a demanding PM who has shipped many products. Ask:
+
+**Business Value**
+- Does this actually solve the stated problem?
+- Is the scope right? Too big? Too small?
+- What's the ROI? Is this worth building?
+
+**User Experience**
+- Will users actually use this?
+- What friction points exist?
+- Is this solving a real pain or a perceived one?
+- What will users complain about?
+
+**Success Metrics**
+- How will we know this worked?
+- Are the success criteria actually measurable?
+- What leading indicators should we track?
+
+**Scope & Prioritization**
+- What's the MVP vs nice-to-have?
+- What should we cut?
+- What are we missing that's essential?
+
+**Questions to Surface**
+- "Why would a user choose this over...?"
+- "What's the smallest thing we could ship?"
+- "How does this fit the broader product vision?"
+
+### Critique 3: Target End User
+
+Assume the role of the actual end user. Consider their real context:
+
+**First Impressions**
+- Is it obvious what this does?
+- Can I figure it out without help?
+- Does this feel like it's for me?
+
+**Daily Reality**
+- Does this fit my actual workflow?
+- What's my context when I need this?
+- Am I rushed? Distracted? Stressed?
+
+**Friction Points**
+- What will annoy me?
+- What extra steps feel unnecessary?
+- Where will I get confused or stuck?
+
+**Trust & Confidence**
+- Will I trust this with my data/work?
+- How do I know it worked correctly?
+- What if I make a mistake?
+
+**Questions to Surface**
+- "Why can't I just...?"
+- "What if I need to...?"
+- "Where did my [X] go?"
+
+### Critique 4: QA Engineer
+
+Assume the role of a thorough QA engineer who breaks things:
+
+**Test Coverage**
+- What's hard to test here?
+- What states are difficult to reproduce?
+- What requires manual testing vs automation?
+
+**Edge Cases**
+- Empty states, null values, missing data
+- Boundary conditions (min, max, overflow)
+- Concurrent users, race conditions
+- Network failures, timeouts, partial failures
+
+**Acceptance Criteria Gaps**
+- Are the Given/When/Then scenarios complete?
+- What scenarios are missing?
+- Are criteria actually testable?
+
+### Synthesize Critique
+
+After all critiques, consolidate findings:
+
+```
+CRITIQUE SYNTHESIS
+==================
+
+CRITICAL ISSUES (must address before proceeding):
+- [Issue] - [Which role] - [Recommendation]
+
+IMPORTANT CONCERNS (should address):
+- [Concern] - [Which role] - [Recommendation]
+
+QUESTIONS REQUIRING ANSWERS:
+- [Question] - [Why it matters]
+
+SUGGESTED IMPROVEMENTS:
+- [Improvement] - [Impact]
+```
+
+### Resolve with User
+
+Present findings: "Before we finalize, here's what the critique uncovered."
+
+For each critical issue:
+1. Discuss the concern
+2. Decide: fix now, defer, accept risk, or mark out of scope
+3. Update design if needed
+
+**Do not proceed to spec until critical issues are resolved.**
+
+---
+
 ## OUTPUT: Write the Specification
 
 When the user approves the design, write `docs/SPEC.md`:
@@ -359,6 +503,8 @@ Or proceed directly to implementation:
 5. **Validate, don't delegate** - Check your design, don't ask them to create it
 6. **Three whys minimum** - Surface answers hide real needs
 7. **Edge cases are requirements** - Not afterthoughts
+8. **Critique before commit** - Stress-test from multiple perspectives before finalizing
+9. **Be genuinely adversarial** - In critique phase, find real problems, not soft concerns
 
 ---
 

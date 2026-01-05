@@ -99,6 +99,31 @@ Patterns and products that informed this design:
 
 ---
 
+## Stakeholder Critique Summary
+
+Issues identified and resolved during adversarial review:
+
+### Critical Issues Addressed
+
+| Issue | Identified By | Resolution |
+|-------|---------------|------------|
+| [Issue 1] | [Senior Engineer / PM / User / QA] | [How it was resolved] |
+| [Issue 2] | [Role] | [Resolution] |
+
+### Accepted Risks
+
+| Risk | Identified By | Rationale for Accepting |
+|------|---------------|------------------------|
+| [Risk 1] | [Role] | [Why we're proceeding anyway] |
+
+### Deferred Concerns
+
+| Concern | Identified By | Deferred To |
+|---------|---------------|-------------|
+| [Concern 1] | [Role] | [When/where it will be addressed] |
+
+---
+
 ## Acceptance Criteria
 
 ### Happy Path
@@ -157,6 +182,8 @@ Feature: [Feature name]
 - [ ] Journey map confirmed accurate
 - [ ] Design artifact approved
 - [ ] Edge cases reviewed
+- [ ] Stakeholder critique completed
+- [ ] Critical issues resolved
 - [ ] Acceptance criteria agreed
 
 **Approved by:** [Name/Role]
