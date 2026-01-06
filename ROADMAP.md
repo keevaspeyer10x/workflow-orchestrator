@@ -80,8 +80,8 @@ This document tracks planned improvements, deferred features, and audit recommen
 ### High Priority
 
 #### VV-001: Auto-load Style Guide in Visual Verification
-**Status:** Planned
-**Complexity:** Low
+**Status:** Planned  
+**Complexity:** Low  
 **Description:** When `style_guide_path` is configured in workflow.yaml, automatically include the style guide content in all visual verification evaluations without requiring explicit calls to `verify_with_style_guide()`.
 
 **Current Behavior:**
@@ -100,8 +100,8 @@ This document tracks planned improvements, deferred features, and audit recommen
 ---
 
 #### VV-002: Workflow Step Integration for Visual Tests
-**Status:** Planned
-**Complexity:** Medium
+**Status:** Planned  
+**Complexity:** Medium  
 **Description:** Wire the visual verification into the `visual_regression_test` workflow step so tests run automatically during the VERIFY phase.
 
 **Current Behavior:**
@@ -128,8 +128,8 @@ This document tracks planned improvements, deferred features, and audit recommen
 ---
 
 #### VV-003: Visual Test Discovery
-**Status:** Planned
-**Complexity:** Low
+**Status:** Planned  
+**Complexity:** Low  
 **Description:** Automatically discover and run all visual test files in the `tests/visual/` directory.
 
 **Current Behavior:**
@@ -150,8 +150,8 @@ This document tracks planned improvements, deferred features, and audit recommen
 ### Medium Priority
 
 #### VV-004: Baseline Screenshot Management
-**Status:** Planned
-**Complexity:** Medium
+**Status:** Planned  
+**Complexity:** Medium  
 **Description:** Store baseline screenshots and compare against them for regression detection.
 
 **Current Behavior:**
@@ -171,8 +171,8 @@ This document tracks planned improvements, deferred features, and audit recommen
 ---
 
 #### VV-005: CI/CD Integration
-**Status:** Planned
-**Complexity:** Medium
+**Status:** Planned  
+**Complexity:** Medium  
 **Description:** GitHub Actions workflow for running visual tests on PR/push.
 
 **Implementation Notes:**
@@ -186,8 +186,8 @@ This document tracks planned improvements, deferred features, and audit recommen
 ### Low Priority
 
 #### VV-006: Cost Tracking for Visual Tests
-**Status:** Planned
-**Complexity:** Low
+**Status:** Planned  
+**Complexity:** Low  
 **Description:** Track Claude API usage and costs for visual verification calls.
 
 **Implementation Notes:**
@@ -200,9 +200,9 @@ This document tracks planned improvements, deferred features, and audit recommen
 ## Security Improvements
 
 ### SEC-001: HTTPS Enforcement
-**Status:** Planned
-**Complexity:** Low
-**Source:** Security Review (Score: 7/10)
+**Status:** Planned  
+**Complexity:** Low  
+**Source:** Security Review (Score: 7/10)  
 **Description:** Validate that `visual_verification_url` uses HTTPS to prevent API key transmission over insecure connections.
 
 **Implementation:**
@@ -214,9 +214,9 @@ if not service_url.startswith('https://'):
 ---
 
 ### SEC-002: Input Validation
-**Status:** Planned
-**Complexity:** Low
-**Source:** Security Review
+**Status:** Planned  
+**Complexity:** Low  
+**Source:** Security Review  
 **Description:** Add validation for URLs, viewport dimensions, and action parameters.
 
 **Implementation Notes:**
@@ -227,9 +227,9 @@ if not service_url.startswith('https://'):
 ---
 
 ### SEC-003: Exception Message Sanitization
-**Status:** Planned
-**Complexity:** Low
-**Source:** Security Review
+**Status:** Planned  
+**Complexity:** Low  
+**Source:** Security Review  
 **Description:** Sanitize exception messages to avoid leaking sensitive information like URLs or headers.
 
 **Implementation Notes:**
@@ -241,9 +241,9 @@ if not service_url.startswith('https://'):
 ## Architecture Improvements
 
 ### ARCH-001: Extract Retry Logic
-**Status:** Planned
-**Complexity:** Low
-**Source:** Architecture Review (Score: 7/10)
+**Status:** Planned  
+**Complexity:** Low  
+**Source:** Architecture Review (Score: 7/10)  
 **Description:** Extract retry logic with exponential backoff into a reusable utility.
 
 **Current State:**
@@ -256,9 +256,9 @@ if not service_url.startswith('https://'):
 ---
 
 ### ARCH-002: HTTP Client Dependency Injection
-**Status:** Planned
-**Complexity:** Medium
-**Source:** Architecture Review
+**Status:** Planned  
+**Complexity:** Medium  
+**Source:** Architecture Review  
 **Description:** Allow injection of HTTP client for better testability.
 
 **Implementation Notes:**
@@ -271,9 +271,9 @@ if not service_url.startswith('https://'):
 ## Workflow Improvements
 
 ### WF-001: Claude Code CLI Installation Check
-**Status:** Planned
-**Complexity:** Low
-**Source:** Visual Verification Service task
+**Status:** Planned  
+**Complexity:** Low  
+**Source:** Visual Verification Service task  
 **Description:** Add setup phase that checks for Claude Code CLI and installs if missing.
 
 **Implementation Notes:**
@@ -284,9 +284,9 @@ if not service_url.startswith('https://'):
 ---
 
 ### WF-002: Available Secrets Documentation
-**Status:** Planned
-**Complexity:** Low
-**Source:** Visual Verification Service task
+**Status:** Planned  
+**Complexity:** Low  
+**Source:** Visual Verification Service task  
 **Description:** Document available environment variables and secrets in workflow initialization.
 
 **Implementation Notes:**
@@ -297,9 +297,9 @@ if not service_url.startswith('https://'):
 ---
 
 ### WF-003: Model Selection Guidance
-**Status:** Planned
-**Complexity:** Low
-**Source:** Visual Verification Service task
+**Status:** Planned  
+**Complexity:** Low  
+**Source:** Visual Verification Service task  
 **Description:** Use "latest generation available" principle for model selection instead of hardcoding specific model names.
 
 **Implementation Notes:**
