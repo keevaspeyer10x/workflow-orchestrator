@@ -24,11 +24,17 @@ from src.providers import get_provider, list_providers, AgentProvider
 from src.environment import detect_environment, get_environment_info, Environment
 from src.checkpoint import CheckpointManager, CheckpointData
 from src.visual_verification import (
-    VisualVerificationClient, 
+    VisualVerificationClient,
     VisualVerificationError,
     create_desktop_viewport,
     create_mobile_viewport,
     format_verification_result
+)
+from src.review import (
+    ReviewRouter,
+    ReviewMethod,
+    check_review_setup,
+    setup_reviews,
 )
 
 VERSION = "1.0.0"
@@ -825,10 +831,10 @@ def cmd_checkpoints(args):
 def cmd_resume(args):
     """Resume from a checkpoint."""
     checkpoint_mgr = CheckpointManager(args.dir or '.')
-    
+
     # Get checkpoint
     checkpoint_id = getattr(args, 'from_checkpoint', None)
-    
+
     if checkpoint_id:
         checkpoint = checkpoint_mgr.get_checkpoint(checkpoint_id)
         if not checkpoint:
@@ -839,20 +845,214 @@ def cmd_resume(args):
         if not checkpoint:
             print("Error: No checkpoints found. Create one with: orchestrator checkpoint")
             sys.exit(1)
-    
+
     # Dry run mode
     if getattr(args, 'dry_run', False):
         print("\n[DRY RUN] Would resume from checkpoint:\n")
         print(checkpoint_mgr.generate_resume_prompt(checkpoint))
         return
-    
+
     # Generate and print resume prompt
     print(checkpoint_mgr.generate_resume_prompt(checkpoint))
-    
+
     # Also show current status
     engine = get_engine(args)
     if engine.state:
         print("\n" + engine.get_recitation_text())
+
+
+# ============================================================================
+# Review Commands (Multi-model AI reviews)
+# ============================================================================
+
+def cmd_review(args):
+    """Run AI code reviews."""
+    working_dir = Path(args.dir or '.')
+
+    try:
+        router = ReviewRouter(
+            working_dir=working_dir,
+            method=args.method if args.method != 'auto' else None
+        )
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+    print(f"Running reviews using {router.method.value} method...\n")
+
+    review_type = args.review_type or 'all'
+
+    if review_type == 'all':
+        results = router.execute_all_reviews()
+    else:
+        results = {review_type: router.execute_review(review_type)}
+
+    if args.json:
+        output = {k: v.to_dict() for k, v in results.items()}
+        print(json.dumps(output, indent=2, default=str))
+        return
+
+    # Pretty print results
+    all_passed = True
+    total_blocking = 0
+
+    for review_name, result in results.items():
+        icon = "✓" if result.success and not result.has_blocking_findings() else "✗"
+        print(f"{icon} {review_name.upper()} REVIEW")
+        print(f"  Model: {result.model_used}")
+        print(f"  Method: {result.method_used}")
+
+        if result.error:
+            print(f"  Error: {result.error}")
+            all_passed = False
+        elif result.findings:
+            print(f"  Findings: {len(result.findings)}")
+            for finding in result.findings[:5]:  # Show first 5
+                severity_icon = "🔴" if finding.severity.is_blocking() else "🟡"
+                print(f"    {severity_icon} [{finding.severity.value.upper()}] {finding.issue[:60]}...")
+                if finding.location:
+                    print(f"       at {finding.location}")
+            if len(result.findings) > 5:
+                print(f"    ... and {len(result.findings) - 5} more")
+
+            if result.has_blocking_findings():
+                all_passed = False
+                total_blocking += result.blocking_count
+        else:
+            print("  Findings: None")
+
+        if result.summary:
+            print(f"  Summary: {result.summary[:100]}...")
+
+        if result.duration_seconds:
+            print(f"  Duration: {result.duration_seconds:.1f}s")
+
+        print()
+
+    # Summary
+    if all_passed:
+        print("✓ ALL REVIEWS PASSED")
+    else:
+        print(f"✗ REVIEWS FOUND {total_blocking} BLOCKING ISSUE(S)")
+        sys.exit(1)
+
+
+def cmd_review_status(args):
+    """Show review infrastructure status."""
+    working_dir = Path(args.dir or '.')
+    setup = check_review_setup(working_dir)
+
+    print("Review Infrastructure Status:")
+    print()
+
+    # CLI tools
+    codex_status = "✓" if setup.codex_cli else "✗"
+    gemini_status = "✓" if setup.gemini_cli else "✗"
+    print(f"  CLI Tools:      {codex_status} codex  {gemini_status} gemini")
+
+    if not setup.codex_cli or not setup.gemini_cli:
+        print("                  Install: npm install -g @openai/codex @google/gemini-cli")
+
+    # API key
+    api_status = "✓" if setup.openrouter_key else "✗"
+    print(f"  API Key:        {api_status} OPENROUTER_API_KEY")
+
+    if not setup.openrouter_key:
+        print("                  Set environment variable for API mode")
+
+    # GitHub Actions
+    actions_status = "✓" if setup.github_actions else "✗"
+    print(f"  GitHub Actions: {actions_status} .github/workflows/ai-reviews.yml")
+
+    # Config files
+    styleguide_status = "✓" if setup.gemini_styleguide else "✗"
+    agents_status = "✓" if setup.agents_md else "✗"
+    print(f"  Config Files:   {styleguide_status} .gemini/styleguide.md  {agents_status} AGENTS.md")
+
+    print()
+
+    # Recommended action
+    if setup.cli_available:
+        print("  ✓ Ready to run reviews using CLI mode (best experience)")
+    elif setup.api_available:
+        print("  ⚠️  CLI tools not installed. Will use API mode (reduced context)")
+        print("     For better reviews, install: npm install -g @openai/codex @google/gemini-cli")
+    else:
+        print("  ✗ No review method available!")
+        print("     Install CLIs or set OPENROUTER_API_KEY")
+
+    if not setup.github_actions:
+        print()
+        print("  💡 GitHub Actions not configured. PRs won't have automated reviews.")
+        print("     Run: orchestrator setup-reviews")
+
+
+def cmd_review_results(args):
+    """Show results of completed reviews."""
+    engine = get_engine(args)
+
+    if not engine.state:
+        print("Error: No active workflow")
+        sys.exit(1)
+
+    # Look for stored review results in item states
+    results = {}
+    for phase_id, phase_state in engine.state.phases.items():
+        for item_id, item_state in phase_state.items.items():
+            if hasattr(item_state, 'review_result') and item_state.review_result:
+                results[item_id] = item_state.review_result
+
+    if not results:
+        print("No review results found.")
+        print("Run: orchestrator review")
+        return
+
+    if args.json:
+        print(json.dumps(results, indent=2, default=str))
+        return
+
+    print(f"Found {len(results)} review result(s):\n")
+    for item_id, result in results.items():
+        print(f"## {item_id}")
+        if isinstance(result, dict):
+            print(f"  Success: {result.get('success', 'unknown')}")
+            print(f"  Model: {result.get('model_used', 'unknown')}")
+            findings = result.get('findings', [])
+            print(f"  Findings: {len(findings)}")
+            if result.get('summary'):
+                print(f"  Summary: {result['summary'][:100]}...")
+        print()
+
+
+def cmd_setup_reviews(args):
+    """Set up review infrastructure in a repository."""
+    working_dir = Path(args.dir or '.')
+
+    print("Setting up review infrastructure...\n")
+
+    results = setup_reviews(
+        working_dir=working_dir,
+        dry_run=args.dry_run,
+        skip_actions=args.skip_actions,
+        force=args.force,
+    )
+
+    if not results:
+        print("All files already exist. Use --force to overwrite.")
+        return
+
+    for path, status in results.items():
+        print(f"  {status}")
+
+    if args.dry_run:
+        print("\n[DRY RUN] No files were written. Remove --dry-run to create files.")
+    else:
+        print("\n✓ Review infrastructure set up!")
+        print("\nNext steps:")
+        print("  1. Add OPENAI_API_KEY to your GitHub repository secrets")
+        print("  2. Customize .gemini/styleguide.md for your project")
+        print("  3. Update AGENTS.md with your project conventions")
+        print("  4. Push to GitHub to enable PR reviews")
 
 
 def main():
@@ -1025,7 +1225,33 @@ Examples:
     resume_parser.add_argument('--from', dest='from_checkpoint', help='Checkpoint ID to resume from (default: latest)')
     resume_parser.add_argument('--dry-run', action='store_true', help='Show resume prompt without executing')
     resume_parser.set_defaults(func=cmd_resume)
-    
+
+    # Review command (Multi-model reviews)
+    review_parser = subparsers.add_parser('review', help='Run AI code reviews')
+    review_parser.add_argument('review_type', nargs='?',
+                               choices=['security', 'consistency', 'quality', 'holistic', 'all'],
+                               default='all', help='Review type to run (default: all)')
+    review_parser.add_argument('--method', '-m', choices=['auto', 'cli', 'api'],
+                               default='auto', help='Execution method (default: auto-detect)')
+    review_parser.add_argument('--json', action='store_true', help='Output as JSON')
+    review_parser.set_defaults(func=cmd_review)
+
+    # Review-status command
+    review_status_parser = subparsers.add_parser('review-status', help='Show review infrastructure status')
+    review_status_parser.set_defaults(func=cmd_review_status)
+
+    # Review-results command
+    review_results_parser = subparsers.add_parser('review-results', help='Show results of completed reviews')
+    review_results_parser.add_argument('--json', action='store_true', help='Output as JSON')
+    review_results_parser.set_defaults(func=cmd_review_results)
+
+    # Setup-reviews command
+    setup_reviews_parser = subparsers.add_parser('setup-reviews', help='Set up review infrastructure in a repository')
+    setup_reviews_parser.add_argument('--dry-run', action='store_true', help='Show what would be created without writing')
+    setup_reviews_parser.add_argument('--skip-actions', action='store_true', help='Skip GitHub Actions workflow creation')
+    setup_reviews_parser.add_argument('--force', '-f', action='store_true', help='Overwrite existing files')
+    setup_reviews_parser.set_defaults(func=cmd_setup_reviews)
+
     args = parser.parse_args()
     
     if not args.command:

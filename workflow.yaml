@@ -41,6 +41,34 @@ settings:
   # Examples: "gpt-4.1-mini" -> use latest GPT, "claude-3" -> use latest Claude
   review_model: "latest_available"
 
+  # Multi-model review configuration
+  # Reviews are ON by default to catch issues in AI-generated code
+  reviews:
+    enabled: true
+    on_by_default: true  # Reviews run automatically in REVIEW phase
+
+    # Execution method: auto | cli | api | github-actions
+    # - cli: Codex CLI + Gemini CLI (full repo access, best experience)
+    # - api: OpenRouter API (context injection, works in Claude Code Web)
+    # - github-actions: Triggered on PR (requires setup-reviews)
+    method: auto
+
+    # Review types and their models
+    # Security + Quality use Codex (code-specialized)
+    # Consistency + Holistic use Gemini (1M context for codebase understanding)
+    types:
+      security_review: codex
+      quality_review: codex
+      consistency_review: gemini
+      holistic_review: gemini
+
+    # GitHub Actions configuration
+    github_actions:
+      required_for_merge: true  # Block PR merge if reviews fail
+
+    # Fallback when preferred method unavailable
+    fallback_to_api: true
+
 phases:
   # ===========================================================================
   # PHASE 0: SETUP (implicit, run before workflow starts)

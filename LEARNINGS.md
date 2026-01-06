@@ -270,3 +270,142 @@ include_extensions = {'.py', '.js', '.yaml', '.md'}
 ---
 
 *Generated: 2026-01-06*
+
+---
+
+# Learnings: Multi-Model Review Routing
+
+## Task Summary
+Implemented automatic routing of REVIEW phase items to different AI models (Codex for security/quality, Gemini for consistency/holistic) to prevent self-review blind spots in AI-generated code.
+
+## Problem Statement
+
+AI coding agents reviewing their own code creates blind spots:
+1. Same reasoning patterns validate same mistakes
+2. No fresh perspective on code quality
+3. Model-specific biases go unchecked
+
+This is critical for "vibe coding" workflows where AI generates code with minimal/zero human review.
+
+## What Was Built
+
+### Four Reviews
+1. **Security Review** (Codex) - OWASP, vulnerabilities, auth issues
+2. **Consistency Review** (Gemini 1M context) - Pattern compliance, existing utilities
+3. **Quality Review** (Codex) - Edge cases, error handling, test coverage
+4. **Holistic Review** (Gemini) - Open-ended "what did the AI miss?"
+
+### Three Execution Modes
+1. **CLI Mode** - Codex CLI + Gemini CLI (full repo access, best experience)
+2. **API Mode** - OpenRouter (context injection, works in Claude Code Web)
+3. **GitHub Actions** - PR gate with full repo access, blocks merge
+
+### New Components
+- `src/review/` module with 8 files
+- CLI commands: `review`, `review-status`, `review-results`, `setup-reviews`
+- GitHub Actions workflow template
+- Gemini styleguide and AGENTS.md templates
+
+## Key Design Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| Four reviews instead of one | Different aspects need different model strengths |
+| Gemini for consistency | 1M context can see entire codebase |
+| Codex for security/quality | Code-specialized model |
+| CLI preferred over API | Full repo access vs truncated context |
+| Reviews on by default | Critical for vibe coding workflows |
+| setup-reviews command | Each repo needs its own GitHub Actions |
+
+## Technical Learnings
+
+### Context Injection for API Mode
+When CLI tools aren't available, we inject context via prompt:
+- Git diff
+- Changed file contents
+- Related files (imports)
+- Architecture docs
+
+This works but is limited by context window and misses full codebase understanding.
+
+### Auto-Detection Pattern
+```python
+def detect_review_method() -> str:
+    if shutil.which("codex") and shutil.which("gemini"):
+        return "cli"
+    if os.environ.get("OPENROUTER_API_KEY"):
+        return "api"
+    return "unavailable"
+```
+
+### Review Prompt Design for AI Code
+Key insight: prompts must emphasize "this is AI-generated code with zero human review":
+- Explicitly state AI agent blind spots
+- Ask for existing code that should have been used
+- Check for pattern violations vs codebase conventions
+
+## What Went Well
+
+1. **Clean module structure** - Each concern in its own file
+2. **Graceful fallback** - CLI → API → unavailable with clear messaging
+3. **Comprehensive tests** - 27 tests covering all core functionality
+4. **Templates for bootstrapping** - setup-reviews creates all needed files
+
+## What Could Be Improved
+
+1. **No CLI tools installed** - Couldn't test CLI mode end-to-end
+2. **OpenRouter not configured** - Couldn't test API mode end-to-end
+3. **Review output parsing** - Regex-based, could be more robust
+4. **No caching** - Same diff re-runs same review
+
+## Recommendations for Future
+
+### Short-term
+1. Add retry logic to CLI executor
+2. Cache review results by git diff hash
+3. Add --verbose flag for debugging
+
+### Medium-term
+1. Integrate with GitHub PR review API
+2. Add review result aggregation dashboard
+3. Support custom review prompts per project
+
+### Long-term
+1. Automatic fix suggestions
+2. Learning from review feedback
+3. Multi-repo review consistency
+
+## Files Created
+
+- `src/review/__init__.py`
+- `src/review/context.py` - Context collector
+- `src/review/router.py` - Method detection and routing
+- `src/review/prompts.py` - Review prompts
+- `src/review/result.py` - Data structures
+- `src/review/setup.py` - Bootstrap command
+- `src/review/cli_executor.py` - CLI execution
+- `src/review/api_executor.py` - API execution
+- `tests/test_review.py` - 27 tests
+
+## Files Modified
+
+- `src/cli.py` - Added review commands
+- `workflow.yaml` - Added reviews settings section
+- `ROADMAP.md` - Added CORE-016 and WF-004
+- `docs/plan.md` - Implementation plan
+- `docs/risk_analysis.md` - Risk assessment
+- `tests/test_cases.md` - Test case definitions
+
+## Metrics
+
+| Metric | Value |
+|--------|-------|
+| New lines of code | ~1,500 |
+| New test cases | 27 |
+| Files created | 9 |
+| Files modified | 7 |
+| Test pass rate | 100% |
+
+---
+
+*Generated: 2026-01-06*

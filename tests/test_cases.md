@@ -1,216 +1,314 @@
-# Test Cases: Visual Verification Integration
+# Test Cases: Multi-Model Review Routing
 
 ## Unit Tests
 
-### TC-VV-001: VisualVerificationClient Initialization
-**Component:** `visual_verification.py`
-**Description:** Client initializes with service URL and API key
-**Input:** `service_url="https://example.com"`, `api_key="test-key"`
-**Expected:** Client object created with correct attributes
+### Context Collector Tests
+
+#### TC-RC-001: Git Diff Extraction
+**Component:** `src/review/context.py`
+**Description:** Extracts git diff between main branch and HEAD
+**Input:** Repository with uncommitted changes
+**Expected:** Returns diff string with added/removed lines
 **Priority:** High
 
-### TC-VV-002: Verify Request Formation
-**Component:** `visual_verification.py`
-**Description:** Verify method forms correct API request
-**Input:** URL, specification, actions list
-**Expected:** POST request to `/verify` with correct payload structure
+#### TC-RC-002: Changed File Content Loading
+**Component:** `src/review/context.py`
+**Description:** Loads full content of files in git diff
+**Input:** Diff showing 3 changed files
+**Expected:** Dict with 3 entries, each containing file content
 **Priority:** High
 
-### TC-VV-003: Desktop Viewport Configuration
-**Component:** `visual_verification.py`
-**Description:** Desktop viewport settings applied correctly
-**Input:** `viewport={width: 1280, height: 720}`
-**Expected:** Request includes correct viewport dimensions
+#### TC-RC-003: Related Files Detection (Python)
+**Component:** `src/review/context.py`
+**Description:** Parses Python imports to find related files
+**Input:** File with `from src.engine import WorkflowEngine`
+**Expected:** Includes `src/engine.py` in related_files
 **Priority:** Medium
 
-### TC-VV-004: Mobile Viewport Configuration
-**Component:** `visual_verification.py`
-**Description:** Mobile viewport settings applied correctly
-**Input:** `viewport={width: 375, height: 812}`
-**Expected:** Request includes correct viewport dimensions
+#### TC-RC-004: Architecture Doc Loading
+**Component:** `src/review/context.py`
+**Description:** Loads ARCHITECTURE.md when present
+**Input:** Repository with docs/ARCHITECTURE.md
+**Expected:** Returns architecture doc content
 **Priority:** Medium
 
-### TC-VV-005: Style Guide Inclusion
-**Component:** `visual_verification.py`
-**Description:** Style guide content appended to specification
-**Input:** Specification + style guide content
-**Expected:** Combined specification includes both
+#### TC-RC-005: Context Size Limiting
+**Component:** `src/review/context.py`
+**Description:** Truncates context when exceeding limit
+**Input:** Large codebase with 200KB of changes
+**Expected:** Context truncated to configured limit with warning
 **Priority:** High
 
-### TC-VV-006: API Error Handling
-**Component:** `visual_verification.py`
-**Description:** Handles API errors gracefully
-**Input:** Service returns 500 error
-**Expected:** Raises VisualVerificationError with details
+#### TC-RC-006: No Git Repository Handling
+**Component:** `src/review/context.py`
+**Description:** Graceful error when not in git repo
+**Input:** Directory without .git
+**Expected:** Raises ReviewContextError with clear message
 **Priority:** High
 
-### TC-VV-007: Retry Logic
-**Component:** `visual_verification.py`
-**Description:** Retries on transient failures
-**Input:** Service fails twice, succeeds third time
-**Expected:** Returns successful result after retries
+### Router Tests
+
+#### TC-RR-001: Model Selection - Security Review
+**Component:** `src/review/router.py`
+**Description:** Routes security_review to Codex
+**Input:** `item_id="security_review"`
+**Expected:** Returns `"openai/gpt-5.2-codex"`
+**Priority:** High
+
+#### TC-RR-002: Model Selection - Architecture Review
+**Component:** `src/review/router.py`
+**Description:** Routes architecture_review to Gemini
+**Input:** `item_id="architecture_review"`
+**Expected:** Returns `"google/gemini-3-pro"`
+**Priority:** High
+
+#### TC-RR-003: Model Selection - Quality Review
+**Component:** `src/review/router.py`
+**Description:** Routes quality_review to Codex
+**Input:** `item_id="quality_review"`
+**Expected:** Returns `"openai/gpt-5.2-codex"`
+**Priority:** High
+
+#### TC-RR-004: Fallback Model Selection
+**Component:** `src/review/router.py`
+**Description:** Uses fallback for unknown items
+**Input:** `item_id="unknown_review"`
+**Expected:** Returns configured fallback model
+**Priority:** High
+
+#### TC-RR-005: Missing Settings Handling
+**Component:** `src/review/router.py`
+**Description:** Works with empty review_models config
+**Input:** Settings without review_models key
+**Expected:** Uses fallback for all items
 **Priority:** Medium
 
-### TC-VV-008: Timeout Handling
-**Component:** `visual_verification.py`
-**Description:** Handles request timeout
-**Input:** Service doesn't respond within timeout
-**Expected:** Raises TimeoutError with clear message
+### Prompt Builder Tests
+
+#### TC-RP-001: Security Review Prompt
+**Component:** `src/review/prompts.py`
+**Description:** Builds security review prompt with context
+**Input:** ReviewContext with diff and changed files
+**Expected:** Prompt contains OWASP checklist and code
+**Priority:** High
+
+#### TC-RP-002: Architecture Review Prompt
+**Component:** `src/review/prompts.py`
+**Description:** Builds architecture prompt with related files
+**Input:** ReviewContext with architecture docs
+**Expected:** Prompt includes arch docs and related files
+**Priority:** High
+
+#### TC-RP-003: Context Injection
+**Component:** `src/review/prompts.py`
+**Description:** Injects all context sections
+**Input:** Full ReviewContext
+**Expected:** Prompt has git_diff, changed_files, related_files sections
+**Priority:** High
+
+### Result Parser Tests
+
+#### TC-RP-101: Parse Security Findings
+**Component:** `src/review/result.py`
+**Description:** Extracts findings from security review output
+**Input:** Model output with CRITICAL and MEDIUM findings
+**Expected:** List of Finding objects with severity, description, location
+**Priority:** High
+
+#### TC-RP-102: Parse Architecture Assessment
+**Component:** `src/review/result.py`
+**Description:** Extracts assessment from architecture review
+**Input:** Model output with "APPROVED_WITH_NOTES"
+**Expected:** ReviewResult with status and findings list
+**Priority:** High
+
+#### TC-RP-103: Handle Malformed Output
+**Component:** `src/review/result.py`
+**Description:** Handles unexpected model output format
+**Input:** Output that doesn't match expected format
+**Expected:** Returns result with raw_output, success=True, findings=[]
 **Priority:** Medium
+
+#### TC-RP-104: Blocking Finding Detection
+**Component:** `src/review/result.py`
+**Description:** Identifies blocking vs advisory findings
+**Input:** Mix of CRITICAL and INFO findings
+**Expected:** `has_blocking_findings()` returns True
+**Priority:** High
 
 ## Integration Tests
 
-### TC-VV-101: Workflow Settings Loading
-**Component:** `engine.py`
-**Description:** Visual verification settings loaded from workflow.yaml
-**Input:** workflow.yaml with visual_verification_url set
-**Expected:** Settings accessible in engine
+### TC-RI-001: OpenRouter Model Execution
+**Component:** `src/review/router.py` + `src/providers/openrouter.py`
+**Description:** Successfully calls OpenRouter with specified model
+**Setup:** Valid OPENROUTER_API_KEY
+**Input:** Simple prompt, model="openai/gpt-5.2-codex"
+**Expected:** Returns ExecutionResult with model_used set
 **Priority:** High
 
-### TC-VV-102: Environment Variable Substitution
-**Component:** `engine.py`
-**Description:** ${VAR} syntax replaced with environment values
-**Input:** `visual_verification_url: "${VISUAL_VERIFICATION_URL}"`
-**Expected:** Actual URL from environment used
+### TC-RI-002: Model Unavailable Fallback
+**Component:** `src/review/router.py`
+**Description:** Falls back when requested model unavailable
+**Setup:** Invalid model ID
+**Input:** model="nonexistent/model"
+**Expected:** Falls back to configured fallback, logs warning
 **Priority:** High
 
-### TC-VV-103: Visual Test File Discovery
-**Component:** `engine.py`
-**Description:** Finds all .md files in tests/visual/
-**Input:** Directory with 3 test files
-**Expected:** All 3 files discovered and loaded
+### TC-RI-003: Full Review Execution
+**Component:** `src/review/*`
+**Description:** End-to-end review with context collection
+**Setup:** Git repo with changes
+**Input:** `execute_review("security_review")`
+**Expected:** Returns ReviewResult with findings
 **Priority:** High
 
-### TC-VV-104: Test Specification Parsing
-**Component:** `engine.py`
-**Description:** Parses test file into structured specification
-**Input:** Test file with URL, actions, checks
-**Expected:** Structured object with all fields
-**Priority:** High
-
-### TC-VV-105: Dual Viewport Execution
-**Component:** `engine.py`
-**Description:** Runs verification for both desktop and mobile
-**Input:** Test with mobile_check_enabled: true
-**Expected:** Two verification calls made
-**Priority:** High
-
-### TC-VV-106: Mobile Check Disabled
-**Component:** `engine.py`
-**Description:** Skips mobile when disabled
-**Input:** Test with mobile_check_enabled: false
-**Expected:** Only desktop verification called
-**Priority:** Medium
-
-### TC-VV-107: Result Aggregation
-**Component:** `engine.py`
-**Description:** Combines desktop and mobile results
-**Input:** Desktop pass, mobile fail
-**Expected:** Overall fail with both results detailed
+### TC-RI-004: Engine Integration
+**Component:** `src/engine.py`
+**Description:** Engine executes review via router
+**Setup:** Workflow in REVIEW phase
+**Input:** `complete_item("security_review")`
+**Expected:** Review executed, result stored in item_state
 **Priority:** High
 
 ## CLI Tests
 
-### TC-VV-201: visual-verify Command
-**Component:** `cli.py`
-**Description:** Manual verification via CLI
-**Input:** `./orchestrator visual-verify --url "..." --spec "..."`
-**Expected:** Runs verification, outputs result
+### TC-CLI-001: Review Command - Single Item
+**Component:** `src/cli.py`
+**Description:** Run specific review via CLI
+**Input:** `./orchestrator review security_review`
+**Expected:** Executes security review, displays results
 **Priority:** High
 
-### TC-VV-202: visual-template Command
-**Component:** `cli.py`
-**Description:** Generate test template
-**Input:** `./orchestrator visual-template "Login Flow"`
-**Expected:** Outputs template with feature name filled in
+### TC-CLI-002: Review Command - All Items
+**Component:** `src/cli.py`
+**Description:** Run all pending reviews
+**Input:** `./orchestrator review --all`
+**Expected:** Executes all REVIEW phase items
+**Priority:** High
+
+### TC-CLI-003: Review Results Display
+**Component:** `src/cli.py`
+**Description:** Display stored review results
+**Input:** `./orchestrator review-results`
+**Expected:** Shows findings from completed reviews
 **Priority:** Medium
 
-### TC-VV-203: visual-verify-all Command
-**Component:** `cli.py`
-**Description:** Run all visual tests
-**Input:** `./orchestrator visual-verify-all`
-**Expected:** Discovers and runs all tests in tests/visual/
+### TC-CLI-004: Auto-Review Flag
+**Component:** `src/cli.py`
+**Description:** Handoff with auto-review
+**Input:** `./orchestrator handoff --auto-review`
+**Expected:** Generates handoff then executes reviews
 **Priority:** High
 
-### TC-VV-204: Missing Service URL Error
-**Component:** `cli.py`
-**Description:** Clear error when service not configured
-**Input:** Run without VISUAL_VERIFICATION_URL set
-**Expected:** Error message with setup instructions
+### TC-CLI-005: Missing API Key Error
+**Component:** `src/cli.py`
+**Description:** Clear error when OpenRouter key missing
+**Input:** Run review without OPENROUTER_API_KEY
+**Expected:** Error with setup instructions
 **Priority:** High
 
-## End-to-End Tests
+## Configuration Tests
 
-### TC-VV-301: Full Workflow with Visual Verification
-**Component:** Full system
-**Description:** Complete workflow including visual_regression_test step
-**Setup:** 
-- visual-verification-service running
-- Test app deployed
-- Visual test file created
-**Steps:**
-1. Start workflow
-2. Complete PLAN, EXECUTE, REVIEW phases
-3. Reach VERIFY phase
-4. visual_regression_test step runs automatically
-**Expected:** Visual verification executes, results displayed
+### TC-CFG-001: Review Models Setting
+**Component:** `workflow.yaml` + `src/schema.py`
+**Description:** Load review_models from settings
+**Input:** workflow.yaml with review_models dict
+**Expected:** Settings accessible, models mapped correctly
 **Priority:** High
 
-### TC-VV-302: Skip Visual Verification
-**Component:** Full system
-**Description:** Can skip visual verification with reason
-**Input:** `./orchestrator skip visual_regression_test --reason "Backend only change"`
-**Expected:** Step skipped, reason logged
+### TC-CFG-002: Default Fallback Model
+**Component:** `src/schema.py`
+**Description:** Default fallback when not configured
+**Input:** workflow.yaml without review_model_fallback
+**Expected:** Uses `anthropic/claude-sonnet-4` as default
 **Priority:** Medium
 
-### TC-VV-303: Visual Test Failure Blocks Workflow
-**Component:** Full system
-**Description:** Failed visual test prevents advancement
-**Setup:** Test that will fail (e.g., broken UI)
-**Expected:** Workflow blocked at visual_regression_test, failure details shown
-**Priority:** High
+### TC-CFG-003: Context Limit Setting
+**Component:** `src/review/context.py`
+**Description:** Respects review_context_limit setting
+**Input:** `review_context_limit: 50000`
+**Expected:** Context truncated at 50K tokens
+**Priority:** Medium
 
 ## Mock Definitions
 
-### Mock: Visual Verification Service
+### Mock: OpenRouter API
 
 ```python
-class MockVisualVerificationService:
+class MockOpenRouterAPI:
     def __init__(self):
         self.calls = []
-    
-    def verify(self, request):
-        self.calls.append(request)
+
+    def chat_completions(self, model: str, messages: list) -> dict:
+        self.calls.append({"model": model, "messages": messages})
+
+        if model == "openai/gpt-5.2-codex":
+            return self._codex_response()
+        elif model == "google/gemini-3-pro":
+            return self._gemini_response()
+        else:
+            return self._fallback_response()
+
+    def _codex_response(self):
         return {
-            "success": True,
-            "passed": True,
-            "evaluation": {
-                "functional": {"passed": True, "feedback": "Feature works as expected"},
-                "design": {"passed": True, "feedback": "Consistent with style guide"},
-                "ux": {"passed": True, "feedback": "Intuitive user journey"},
-                "edge_cases": {"passed": True, "feedback": "Handles errors gracefully"},
-                "mobile": {"passed": True, "feedback": "Responsive design works well"}
-            },
-            "screenshots": ["desktop.png", "mobile.png"]
+            "choices": [{
+                "message": {
+                    "content": """### [SEVERITY: MEDIUM]
+**Finding:** SQL query uses string concatenation
+**Location:** src/db.py:45
+**Evidence:** `query = "SELECT * FROM users WHERE id=" + user_id`
+**Recommendation:** Use parameterized queries
+
+No other security issues identified."""
+                }
+            }],
+            "model": "openai/gpt-5.2-codex",
+            "usage": {"total_tokens": 500}
         }
-    
-    def verify_failure(self, request):
+
+    def _gemini_response(self):
         return {
-            "success": True,
-            "passed": False,
-            "evaluation": {
-                "functional": {"passed": False, "feedback": "Submit button not clickable"},
-                "design": {"passed": True, "feedback": "Consistent with style guide"},
-                "ux": {"passed": True, "feedback": "Intuitive user journey"},
-                "edge_cases": {"passed": False, "feedback": "No error message on invalid input"},
-                "mobile": {"passed": False, "feedback": "Form overflows on mobile"}
-            },
-            "screenshots": ["desktop.png", "mobile.png"]
+            "choices": [{
+                "message": {
+                    "content": """### Overall Assessment: APPROVED_WITH_NOTES
+
+**Summary:** Changes follow existing patterns with minor suggestions.
+
+**Findings:**
+1. Consider extracting common logic into utility function
+
+**Suggestions:**
+- Add docstrings to new public methods"""
+                }
+            }],
+            "model": "google/gemini-3-pro",
+            "usage": {"total_tokens": 300}
         }
+```
+
+### Mock: Git Repository
+
+```python
+class MockGitRepo:
+    def __init__(self, changed_files: dict[str, str]):
+        self.changed_files = changed_files
+
+    def diff(self, base="main") -> str:
+        lines = []
+        for path, content in self.changed_files.items():
+            lines.append(f"diff --git a/{path} b/{path}")
+            lines.append(f"+++ b/{path}")
+            for line in content.split("\n"):
+                lines.append(f"+{line}")
+        return "\n".join(lines)
+
+    def show(self, path: str) -> str:
+        return self.changed_files.get(path, "")
 ```
 
 ## Coverage Requirements
 
-- Minimum 80% code coverage for new modules
+- Minimum 80% code coverage for `src/review/` module
 - 100% coverage for error handling paths
 - All CLI commands must have tests
+- Integration tests require OPENROUTER_API_KEY (skip in CI without key)

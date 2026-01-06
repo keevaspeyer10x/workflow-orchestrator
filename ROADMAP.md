@@ -209,6 +209,76 @@ Follow PEP 8 style guide
 
 ---
 
+#### CORE-016: Multi-Model Review Routing
+**Status:** ✅ Completed (2026-01-06)
+**Complexity:** Medium
+**Priority:** High
+**Source:** Current workflow
+**Description:** Route REVIEW phase items to different AI models to prevent self-review blind spots.
+
+**Problem Solved:**
+The same model that writes code shouldn't review it. Different models have different blind spots and perspectives.
+
+**Hybrid Model Strategy:**
+- `security_review` + `quality_review` → Codex (code-specialized)
+- `consistency_review` + `holistic_review` → Gemini (long context)
+
+**Implementation:**
+- Context collector gathers git diff, changed files, related files
+- Review router with auto-detection: CLI mode (Codex/Gemini CLIs) or API mode (OpenRouter)
+- Four review types: security, consistency, quality, holistic
+- `setup-reviews` command to bootstrap GitHub Actions workflow
+- 27 tests covering all components
+
+**Files:** `src/review/` module (8 files)
+
+---
+
+#### WF-004: Auto-Archive Workflow Documents
+**Status:** Planned
+**Complexity:** Low
+**Priority:** Medium
+**Source:** Current workflow
+**Description:** Automatically archive workflow documents (plan.md, risk_analysis.md) when starting a new workflow.
+
+**Problem Solved:**
+Multiple plan/risk files accumulate, making the repo messy.
+
+**Desired Behavior:**
+1. On `orchestrator start`, check for existing `docs/plan.md`
+2. If exists, move to `docs/archive/YYYY-MM-DD_<task_slug>_plan.md`
+3. Same for `docs/risk_analysis.md` and `tests/test_cases.md`
+4. Log archive action
+
+**Implementation Notes:**
+```python
+def archive_existing_docs(self):
+    """Archive existing workflow docs before starting new workflow."""
+    docs_to_archive = [
+        ("docs/plan.md", "plan"),
+        ("docs/risk_analysis.md", "risk"),
+        ("tests/test_cases.md", "test_cases"),
+    ]
+    archive_dir = self.working_dir / "docs" / "archive"
+    archive_dir.mkdir(exist_ok=True)
+
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    for doc_path, suffix in docs_to_archive:
+        src = self.working_dir / doc_path
+        if src.exists():
+            task_slug = slugify(self.state.task_description[:30])
+            dst = archive_dir / f"{date_str}_{task_slug}_{suffix}.md"
+            src.rename(dst)
+```
+
+**Tasks:**
+- [ ] Add `archive_existing_docs()` method to engine
+- [ ] Call in `start_workflow()` before creating new state
+- [ ] Add `--no-archive` flag to skip
+- [ ] Log archived files
+
+---
+
 ### Medium-term (Medium Effort)
 
 #### CORE-010: Checkpoint Database Backend
@@ -727,6 +797,7 @@ These features were considered but deferred for future consideration:
 | CORE-004 | Task Constraints Flag | 2026-01-06 |
 | CORE-005 | Checkpoint/Resume System | 2026-01-06 |
 | CORE-000 | SOPS Secrets Management (backported) | 2026-01-06 |
+| CORE-016 | Multi-Model Review Routing | 2026-01-06 |
 | - | Visual verification client implementation | 2026-01-06 |
 | - | CLI commands (visual-verify, visual-template) | 2026-01-06 |
 | - | Mobile viewport testing by default | 2026-01-06 |
