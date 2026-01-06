@@ -9,6 +9,7 @@ echo "Enabling automatic updates for this repo..."
 orchestrator setup
 
 echo ""
-echo "Quick start:"
-echo "  orchestrator start \"Your task description\""
-echo "  orchestrator status"
+echo "Ready! You can now say things like:"
+echo "  'Use orchestrator to build a login page'"
+echo "  'Start a workflow for fixing the search bug'"
+echo "  'What's the orchestrator status?'"

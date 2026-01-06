@@ -64,22 +64,19 @@ pip install -e .
 
 ## Quick Start
 
-```bash
-# 1. Install globally (or use pip install -e . for development)
-pip install git+https://github.com/keevaspeyer10x/workflow-orchestrator.git
+**For vibe coders:** Just say to Claude:
+- "Install orchestrator" (first time only)
+- "Use orchestrator to build a user settings page"
+- "Use orchestrator to fix the login bug"
 
-# 2. Initialize workflow in your project (optional - works without this)
-cd your-project
-orchestrator init
+**What happens:** The orchestrator guides you through 5 phases:
+1. **PLAN** - Define the work, get your approval
+2. **EXECUTE** - Write tests first, then code
+3. **REVIEW** - AI reviews the code for security/quality
+4. **VERIFY** - Run tests, manual checks
+5. **LEARN** - Document learnings, commit changes
 
-# 3. Start a workflow
-orchestrator start "Your task description"
-
-# 4. Check status (AI should do this constantly)
-orchestrator status
-```
-
-**Note:** If you don't run `orchestrator init`, the tool uses a bundled 5-phase development workflow (PLAN → EXECUTE → REVIEW → VERIFY → LEARN).
+**For developers:** See [Commands](#commands) below for direct CLI usage.
 
 ## Commands
 

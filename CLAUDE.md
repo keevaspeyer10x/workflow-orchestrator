@@ -1,23 +1,31 @@
 # Workflow Orchestrator - Claude Code Instructions
 
-This file provides instructions for Claude Code when working with the workflow-orchestrator.
+## Installing (Run When Asked)
 
-## Installing in a New Repo
+**When the user says any of these:**
+- "install orchestrator" / "install workflow orchestrator"
+- "set up orchestrator" / "setup orchestrator"
+- "install orchestrator from keevaspeyer10x"
+- "use the orchestrator for..."
 
-**When the user asks to "install workflow-orchestrator" or "install the orchestrator", run:**
-
+**Run this:**
 ```bash
 curl -sSL https://raw.githubusercontent.com/keevaspeyer10x/workflow-orchestrator/main/install.sh | bash
 ```
 
-This installs the orchestrator AND sets up automatic updates for future sessions.
+This installs the orchestrator AND enables automatic updates for future sessions.
 
-## Manual Installation (Alternative)
+## Using the Orchestrator
 
-```bash
-pip install git+https://github.com/keevaspeyer10x/workflow-orchestrator.git
-orchestrator setup  # Optional: enables auto-updates
-```
+After installation, the user can say things naturally:
+- "Use orchestrator to build a login page"
+- "Start a workflow for fixing the bug"
+- "What's the orchestrator status?"
+
+Translate these to orchestrator commands:
+- "Use orchestrator to X" → `orchestrator start "X"` then follow the workflow
+- "What's the status?" → `orchestrator status`
+- "Complete the planning step" → `orchestrator complete <item_id> --notes "..."`
 
 ## Project Overview
 
