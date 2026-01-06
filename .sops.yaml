@@ -1,0 +1,5 @@
+creation_rules:
+  - path_regex: \.manus/secrets\.yaml$
+    age: age1g30eu0w5xsudt5pg0dt28xm2d82dwmvvyznxu60acsm8vv9x4q6se6dkvq
+  - path_regex: \.manus/secrets\.enc\.yaml$
+    age: age1g30eu0w5xsudt5pg0dt28xm2d82dwmvvyznxu60acsm8vv9x4q6se6dkvq
