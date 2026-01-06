@@ -156,7 +156,7 @@ class CLIExecutor:
                 logger.warning(f"Codex returned non-zero: {stderr}")
 
             output = stdout or stderr
-            return output, "codex/gpt-4o"
+            return output, "codex/gpt-5.1-codex-max"
 
         except subprocess.TimeoutExpired:
             if process:
@@ -205,7 +205,7 @@ Analyze the git diff and changed files to provide your review. Output your findi
                 logger.warning(f"Gemini returned non-zero: {stderr}")
 
             output = stdout or stderr
-            return output, "gemini/gemini-2.5-pro"
+            return output, "gemini/gemini-2.5-pro"  # Gemini CLI uses latest model
 
         except subprocess.TimeoutExpired:
             if process:

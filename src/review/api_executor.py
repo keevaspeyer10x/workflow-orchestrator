@@ -19,9 +19,10 @@ logger = logging.getLogger(__name__)
 
 
 # Model mapping for OpenRouter
+# Use latest available models for best review quality
 OPENROUTER_MODELS = {
-    "codex": "openai/gpt-4o",  # Best available code model via OpenRouter
-    "gemini": "google/gemini-2.0-flash-001",  # Gemini via OpenRouter
+    "codex": "openai/gpt-4.5-preview",  # Latest OpenAI model via OpenRouter
+    "gemini": "google/gemini-2.5-pro",  # Latest Gemini model via OpenRouter
 }
 
 
