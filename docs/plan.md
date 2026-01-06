@@ -1,149 +1,173 @@
-# Implementation Plan: Global Installation (Method C)
+# Implementation Plan: OpenRouter Function Calling for Interactive Repo Context
 
 ## Overview
 
-Convert workflow-orchestrator from a repo-based tool to a globally pip-installable package. After implementation, users can install via `pip install git+https://github.com/keevaspeyer10x/workflow-orchestrator.git` and run `orchestrator` from any directory.
+Add function calling support to the OpenRouter provider, enabling AI models to interactively request repo context during execution. This gives API-based models (via Claude Code Web) similar context access capabilities to CLI-based tools, without requiring a local proxy like claudish.
 
-## Target Environments
-- Local Claude Code CLI
-- Claude Code Web
-- Manus
+## Problem Statement
+
+When workflow-orchestrator uses OpenRouter to execute tasks with non-Claude models:
+- Models receive a text prompt but cannot explore the codebase
+- Context must be pre-collected and injected into prompts
+- Models can't ask for more context mid-execution
+- This limits effectiveness compared to tools with native file access
+
+## Solution
+
+Implement OpenRouter function calling to expose these tools:
+- `read_file` - Read file contents
+- `list_files` - List files matching a glob pattern
+- `search_code` - Search for code/text patterns (grep-like)
+
+Models can call these tools during execution, and the orchestrator executes them locally and feeds results back.
+
+---
 
 ## Design Decisions
-1. **Default workflow**: Bundle full 5-phase `workflow.yaml` (PLAN -> EXECUTE -> REVIEW -> VERIFY -> LEARN)
-2. **Init conflict handling**: Prompt user, then backup to `workflow.yaml.bak` before replacing
-3. **State files**: Store in current working directory (`.workflow_state.json`, `.workflow_log.jsonl`)
-4. **Config discovery**: Local `workflow.yaml` > bundled default (no user config dir - keep it simple)
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Tools included | read_file, list_files, search_code | Core exploration needs; no shell for security |
+| Limits | Soft warnings only | Future-proof as models improve; 2MB file warning, 50 call warning |
+| Fallback | Context injection | Graceful degradation for models without function calling |
+| Integration | New method + auto-detect | Backwards compatible; existing code unchanged |
 
 ---
 
 ## Implementation Steps
 
-### Phase 1: Package Structure
+### Phase 1: Tool Definitions
 
-**1.1 Create pyproject.toml**
-- Define package metadata (name: `workflow-orchestrator`)
-- Specify dependencies from requirements.txt
-- Define entry point: `orchestrator = "src.cli:main"`
-- Include package data for bundled workflow.yaml
-- Require Python >= 3.10
+**1.1 Create `src/providers/tools.py`**
+- Define tool schemas in OpenAI function calling format
+- `READ_FILE_TOOL` - path parameter, returns file content
+- `LIST_FILES_TOOL` - pattern parameter, returns matching paths
+- `SEARCH_CODE_TOOL` - pattern + optional path parameters, returns matches
 
-**1.2 Add __main__.py to src/**
-- Enable `python -m src` invocation
-- Call main() from cli.py
+**1.2 Implement tool execution functions**
+- `execute_read_file(path, working_dir)` - Read file, warn if >2MB
+- `execute_list_files(pattern, working_dir)` - Glob match files
+- `execute_search_code(pattern, path, working_dir)` - Grep-like search
+- All functions return structured results with success/error status
 
-**1.3 Update src/__init__.py**
-- Ensure version is defined in one place
-- Export main() function
+### Phase 2: Function Calling Loop
 
-### Phase 2: Configuration Discovery
+**2.1 Add `execute_with_tools()` to `OpenRouterProvider`**
+```python
+def execute_with_tools(self, prompt: str, model: str = None) -> ExecutionResult:
+    """Execute prompt with function calling support."""
+    messages = [{"role": "user", "content": prompt}]
+    tools = get_tool_definitions()
+    call_count = 0
 
-**2.1 Create src/config.py**
-- `find_workflow_path()`: Check for local `workflow.yaml`, fall back to bundled
-- `get_bundled_workflow_path()`: Return path to package data workflow
-- `get_default_workflow_content()`: Return bundled workflow as string
+    while True:
+        response = self._call_api(messages, tools, model)
 
-**2.2 Update src/engine.py**
-- Modify `load_workflow()` to use config discovery
-- When no workflow specified: try local, then bundled default
-- Log which workflow is being used
+        if response.has_tool_calls:
+            call_count += 1
+            if call_count > 50:
+                logger.warning("⚠️ 50+ tool calls - consider optimizing")
 
-### Phase 3: Init Command
+            for tool_call in response.tool_calls:
+                result = execute_tool(tool_call, self.working_dir)
+                messages.append(tool_result_message(tool_call.id, result))
+        else:
+            # Model finished, return final response
+            return ExecutionResult(success=True, output=response.content, ...)
+```
 
-**3.1 Add init command to src/cli.py**
-- `orchestrator init`: Copy bundled workflow to current directory
-- Check if `workflow.yaml` exists
-- If exists: prompt user, backup to `workflow.yaml.bak`, then replace
-- If not exists: copy directly
-- Print success message with next steps
+**2.2 Implement `_call_api()` with tools support**
+- Add `tools` parameter to OpenRouter API call
+- Handle streaming responses with tool calls
+- Parse tool call responses correctly
 
-### Phase 4: CLI Entry Point Refactor
+### Phase 3: Model Detection & Auto-Selection
 
-**4.1 Update src/cli.py**
-- Add `main()` function as entry point
-- Ensure all imports work when installed as package
-- Remove sys.path manipulation hack (line 15)
-- Handle case where no workflow.yaml exists gracefully
+**3.1 Add function calling capability detection**
+- Maintain list of models known to support function calling
+- Query OpenRouter model metadata if available
+- Default to assuming support for major models (GPT-4+, Claude, Gemini)
 
-**4.2 Fix relative imports**
-- Review all imports in src/*.py files
-- Ensure they work both as package and from repo root
-- Use relative imports within the package
+**3.2 Update `execute()` to auto-detect**
+```python
+def execute(self, prompt: str, model: str = None) -> ExecutionResult:
+    model = model or self._model
 
-### Phase 5: Documentation Updates
+    if self._supports_function_calling(model):
+        return self.execute_with_tools(prompt, model)
+    else:
+        # Fall back to context injection (existing behavior)
+        return self._execute_basic(prompt, model)
+```
 
-**5.1 Update README.md**
-- Add "Installation" section with pip install command
-- Update "Quick Start" to reflect global usage
-- Keep local development instructions
+### Phase 4: Context Injection Fallback
 
-**5.2 Update CLAUDE.md**
-- Update CLI examples to use `orchestrator` instead of `./orchestrator`
-- Add section on global installation for AI agents
-- Include the pip install command prominently
+**4.1 Integrate with existing `ReviewContextCollector`**
+- Reuse `src/review/context.py` for gathering context
+- When function calling unavailable, pre-collect and inject
+- Keep existing behavior as fallback path
 
-**5.3 Update docs/SETUP_GUIDE.md**
-- Rewrite installation section
-- Document both global install and development setup
-- Add troubleshooting for common issues
+**4.2 Add working_dir support to provider**
+- Provider needs to know the working directory for tool execution
+- Add `working_dir` parameter to `__init__` or `execute()`
 
-**5.4 Update docs/CLAUDE_CODE_PROMPT_GLOBAL_INSTALL.md**
-- Mark as implemented
-- Add actual commands used
+### Phase 5: Testing
 
-### Phase 6: Testing
+**5.1 Unit tests for tools**
+- Test each tool function independently
+- Test edge cases (large files, no matches, invalid paths)
+- Test warning thresholds
 
-**6.1 Update existing tests**
-- Ensure tests still pass with new structure
-- Update any path-dependent tests
+**5.2 Integration tests**
+- Test full execute_with_tools loop with mock API
+- Test fallback behavior
+- Test model detection
 
-**6.2 Add installation tests**
-- Test `pip install -e .` works
-- Test `orchestrator` command is available after install
-- Test workflow discovery (local vs bundled)
-- Test init command (new, overwrite, backup)
+**5.3 Manual testing**
+- Test with real OpenRouter API
+- Verify with GPT-4, Claude, Gemini models
 
 ---
 
 ## File Changes Summary
 
 ### New Files
-- `pyproject.toml` - Package configuration
-- `src/__main__.py` - Entry point for `python -m src`
-- `src/config.py` - Configuration discovery logic
-- `src/default_workflow.yaml` - Bundled workflow (copy of workflow.yaml)
+- `src/providers/tools.py` - Tool definitions and execution functions
 
 ### Modified Files
-- `src/__init__.py` - Export main(), version consistency
-- `src/cli.py` - Add main(), init command, remove path hack
-- `src/engine.py` - Use config discovery for workflow loading
-- `README.md` - Installation docs
-- `CLAUDE.md` - AI agent instructions
-- `docs/SETUP_GUIDE.md` - Updated setup guide
-- `docs/CLAUDE_CODE_PROMPT_GLOBAL_INSTALL.md` - Mark complete
+- `src/providers/openrouter.py` - Add execute_with_tools(), model detection
+- `src/providers/base.py` - Add working_dir to interface (optional)
 
-### Deprecated (kept for backwards compat)
-- `orchestrator` (bash script) - Keep working for existing users
-- `requirements.txt` - Keep for reference, pyproject.toml is authoritative
+### Test Files
+- `tests/test_provider_tools.py` - New tests for tools module
+- `tests/test_providers.py` - Update with function calling tests
 
 ---
 
 ## Success Criteria
 
-1. `pip install git+https://...` creates globally available `orchestrator` command
-2. Running `orchestrator status` in empty directory uses bundled workflow
-3. Running `orchestrator status` with local `workflow.yaml` uses that file
-4. `orchestrator init` creates local workflow.yaml (with backup if needed)
-5. All existing tests pass
-6. Works in Claude Code Web and Manus environments
+1. Models with function calling can read files on-demand during execution
+2. Models without function calling fall back to context injection seamlessly
+3. Soft warnings logged for large files (>2MB) and high call counts (>50)
+4. All existing tests pass
+5. New functionality covered by tests
+6. Works in Claude Code Web environment
 
 ---
 
 ## Execution Approach
 
-Will implement directly in Claude Code (not handed off) since this is primarily:
-- Configuration/packaging work
-- Documentation updates
-- Straightforward code changes
+Will implement directly (not Claude Code handoff) since:
+- Changes are focused on the provider module
+- Straightforward Python implementation
+- Good test coverage needed throughout
 
-No complex logic requiring specialized implementation.
+---
+
+## Open Questions (Resolved)
+
+| Question | Resolution |
+|----------|------------|
+| Include run_command? | No - security risk, not needed for context |
+| Hard limits? | No - soft warnings only, future-proof |
+| Total context cap? | No - let model's context window be the limit |

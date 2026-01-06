@@ -1,254 +1,294 @@
-# Test Cases: Global Installation (Method C)
+# Test Cases: OpenRouter Function Calling for Interactive Repo Context
 
 ## Unit Tests
 
-### Config Discovery Tests
+### Tool Definition Tests
 
-#### TC-CFG-001: Find Local Workflow
-**Component:** `src/config.py`
-**Description:** Finds workflow.yaml in current directory
-**Input:** Directory with workflow.yaml present
-**Expected:** Returns path to local workflow.yaml
+#### TC-TOOL-001: Read File Tool Schema
+**Component:** `src/providers/tools.py`
+**Description:** READ_FILE_TOOL has correct OpenAI function schema
+**Expected:** Schema has name, description, parameters with required "path"
 **Priority:** High
 
-#### TC-CFG-002: Fallback to Bundled Workflow
-**Component:** `src/config.py`
-**Description:** Falls back to bundled when no local workflow
-**Input:** Directory without workflow.yaml
-**Expected:** Returns path to bundled default_workflow.yaml
+#### TC-TOOL-002: List Files Tool Schema
+**Component:** `src/providers/tools.py`
+**Description:** LIST_FILES_TOOL has correct schema
+**Expected:** Schema has "pattern" parameter for glob matching
 **Priority:** High
 
-#### TC-CFG-003: Get Bundled Workflow Path
-**Component:** `src/config.py`
-**Description:** Returns correct path to package data
-**Input:** N/A
-**Expected:** Path exists and points to valid YAML file
+#### TC-TOOL-003: Search Code Tool Schema
+**Component:** `src/providers/tools.py`
+**Description:** SEARCH_CODE_TOOL has correct schema
+**Expected:** Schema has "pattern" (required) and "path" (optional) parameters
 **Priority:** High
 
-#### TC-CFG-004: Get Default Workflow Content
-**Component:** `src/config.py`
-**Description:** Returns bundled workflow as string
-**Input:** N/A
-**Expected:** Valid YAML content with 5 phases
+### Tool Execution Tests
+
+#### TC-EXEC-001: Read File - Basic
+**Component:** `src/providers/tools.py`
+**Description:** Read a normal file successfully
+**Setup:** Create temp file with known content
+**Input:** `execute_read_file("test.txt", working_dir)`
+**Expected:** Returns {"content": "<file content>", "size": <bytes>}
+**Priority:** High
+
+#### TC-EXEC-002: Read File - Path Traversal Blocked
+**Component:** `src/providers/tools.py`
+**Description:** Blocks attempts to read outside working_dir
+**Input:** `execute_read_file("../../etc/passwd", working_dir)`
+**Expected:** Returns {"error": "Path outside working directory"}
+**Priority:** High
+
+#### TC-EXEC-003: Read File - Nonexistent
+**Component:** `src/providers/tools.py`
+**Description:** Handles missing file gracefully
+**Input:** `execute_read_file("nonexistent.txt", working_dir)`
+**Expected:** Returns {"error": "File not found", "path": "nonexistent.txt"}
+**Priority:** High
+
+#### TC-EXEC-004: Read File - Large File Warning
+**Component:** `src/providers/tools.py`
+**Description:** Logs warning for files >2MB
+**Setup:** Create 3MB temp file
+**Input:** `execute_read_file("large.bin", working_dir)`
+**Expected:** Returns content, logs warning about large file
 **Priority:** Medium
 
-### Init Command Tests
-
-#### TC-INIT-001: Init Creates Workflow
-**Component:** `src/cli.py`
-**Description:** Creates workflow.yaml in current directory
-**Setup:** Empty directory
-**Input:** `orchestrator init`
-**Expected:** workflow.yaml created, matches bundled content
-**Priority:** High
-
-#### TC-INIT-002: Init Prompts on Existing File
-**Component:** `src/cli.py`
-**Description:** Prompts before overwriting existing workflow
-**Setup:** Directory with existing workflow.yaml
-**Input:** `orchestrator init` (simulate 'y' response)
-**Expected:** Prompts user, creates backup, overwrites
-**Priority:** High
-
-#### TC-INIT-003: Init Creates Backup
-**Component:** `src/cli.py`
-**Description:** Backs up existing file before overwrite
-**Setup:** Directory with workflow.yaml containing custom content
-**Input:** `orchestrator init --force`
-**Expected:** workflow.yaml.bak created with original content
-**Priority:** High
-
-#### TC-INIT-004: Init Aborts on No
-**Component:** `src/cli.py`
-**Description:** Does not overwrite when user says no
-**Setup:** Directory with existing workflow.yaml
-**Input:** `orchestrator init` (simulate 'n' response)
-**Expected:** Original file unchanged, no backup created
+#### TC-EXEC-005: Read File - Very Large File Truncated
+**Component:** `src/providers/tools.py`
+**Description:** Truncates files >50MB with message
+**Setup:** Create 60MB temp file (or mock)
+**Input:** `execute_read_file("huge.bin", working_dir)`
+**Expected:** Returns {"content": "(file too large...)", "truncated": true}
 **Priority:** Medium
 
-#### TC-INIT-005: Init Force Flag
-**Component:** `src/cli.py`
-**Description:** --force skips prompt
-**Setup:** Directory with existing workflow.yaml
-**Input:** `orchestrator init --force`
-**Expected:** Creates backup and overwrites without prompt
+#### TC-EXEC-006: Read File - Binary Detection
+**Component:** `src/providers/tools.py`
+**Description:** Handles binary files appropriately
+**Setup:** Create file with binary content
+**Input:** `execute_read_file("image.png", working_dir)`
+**Expected:** Returns {"error": "Binary file"} or base64 encoded
 **Priority:** Medium
 
-### Engine Workflow Loading Tests
-
-#### TC-ENG-001: Engine Uses Local Workflow
-**Component:** `src/engine.py`
-**Description:** Engine loads local workflow.yaml when present
-**Setup:** Directory with custom workflow.yaml
-**Input:** `WorkflowEngine(".")` then `load_workflow()`
-**Expected:** Loaded workflow matches local file content
+#### TC-EXEC-007: List Files - Basic Glob
+**Component:** `src/providers/tools.py`
+**Description:** Lists files matching glob pattern
+**Setup:** Create files: a.py, b.py, c.txt
+**Input:** `execute_list_files("*.py", working_dir)`
+**Expected:** Returns {"files": ["a.py", "b.py"]}
 **Priority:** High
 
-#### TC-ENG-002: Engine Falls Back to Bundled
-**Component:** `src/engine.py`
-**Description:** Engine uses bundled when no local workflow
-**Setup:** Empty directory
-**Input:** `WorkflowEngine(".")` then `load_workflow()`
-**Expected:** Loaded workflow matches bundled default
+#### TC-EXEC-008: List Files - Recursive Glob
+**Component:** `src/providers/tools.py`
+**Description:** Supports ** for recursive matching
+**Setup:** Create nested directory with files
+**Input:** `execute_list_files("**/*.py", working_dir)`
+**Expected:** Returns all .py files in all subdirectories
 **Priority:** High
 
-#### TC-ENG-003: Engine Reports Workflow Source
-**Component:** `src/engine.py`
-**Description:** Engine logs which workflow is being used
-**Input:** Any workflow load
-**Expected:** Log message indicates source path
+#### TC-EXEC-009: List Files - No Matches
+**Component:** `src/providers/tools.py`
+**Description:** Returns empty list when no matches
+**Input:** `execute_list_files("*.xyz", working_dir)`
+**Expected:** Returns {"files": []}
 **Priority:** Medium
 
-### Import Tests
-
-#### TC-IMP-001: Package Import Works
-**Component:** `src/__init__.py`
-**Description:** Can import package after pip install
-**Setup:** `pip install -e .`
-**Input:** `from src import WorkflowEngine`
-**Expected:** Import succeeds
+#### TC-EXEC-010: Search Code - Basic Pattern
+**Component:** `src/providers/tools.py`
+**Description:** Finds lines matching regex pattern
+**Setup:** Create file with "def foo():" and "def bar():"
+**Input:** `execute_search_code("def \\w+", working_dir)`
+**Expected:** Returns matches with file paths and line numbers
 **Priority:** High
 
-#### TC-IMP-002: Main Entry Point Works
-**Component:** `src/__main__.py`
-**Description:** `python -m src` runs CLI
-**Setup:** `pip install -e .`
-**Input:** `python -m src --help`
-**Expected:** Shows help text
+#### TC-EXEC-011: Search Code - Path Filter
+**Component:** `src/providers/tools.py`
+**Description:** Limits search to specific path
+**Setup:** Create test.py and other.py with same content
+**Input:** `execute_search_code("pattern", working_dir, path="test.py")`
+**Expected:** Only returns matches from test.py
 **Priority:** High
 
-#### TC-IMP-003: Entry Point Script Works
-**Component:** pyproject.toml entry point
-**Description:** `orchestrator` command available after install
-**Setup:** `pip install -e .`
-**Input:** `orchestrator --help`
-**Expected:** Shows help text
+#### TC-EXEC-012: Search Code - No Matches
+**Component:** `src/providers/tools.py`
+**Description:** Returns empty when no matches
+**Input:** `execute_search_code("nonexistent_xyz_123", working_dir)`
+**Expected:** Returns {"matches": []}
+**Priority:** Medium
+
+### Model Detection Tests
+
+#### TC-MODEL-001: GPT-4 Supports Function Calling
+**Component:** `src/providers/openrouter.py`
+**Description:** Correctly identifies GPT-4+ as function-calling capable
+**Input:** `_supports_function_calling("openai/gpt-4")`
+**Expected:** Returns True
 **Priority:** High
+
+#### TC-MODEL-002: Claude Supports Function Calling
+**Component:** `src/providers/openrouter.py`
+**Description:** Correctly identifies Claude 3+ as function-calling capable
+**Input:** `_supports_function_calling("anthropic/claude-3-opus")`
+**Expected:** Returns True
+**Priority:** High
+
+#### TC-MODEL-003: Gemini Supports Function Calling
+**Component:** `src/providers/openrouter.py`
+**Description:** Correctly identifies Gemini Pro as function-calling capable
+**Input:** `_supports_function_calling("google/gemini-pro")`
+**Expected:** Returns True
+**Priority:** High
+
+#### TC-MODEL-004: Unknown Model Defaults Safe
+**Component:** `src/providers/openrouter.py`
+**Description:** Unknown models fall back gracefully
+**Input:** `_supports_function_calling("some/unknown-model")`
+**Expected:** Returns False (conservative default)
+**Priority:** Medium
+
+### Execute With Tools Tests
+
+#### TC-EWT-001: Basic Tool Loop
+**Component:** `src/providers/openrouter.py`
+**Description:** Executes tools and returns final response
+**Setup:** Mock API to return tool call then final response
+**Input:** `execute_with_tools("Read file.txt and summarize", model)`
+**Expected:** Tool executed, final response returned
+**Priority:** High
+
+#### TC-EWT-002: Multiple Tool Calls
+**Component:** `src/providers/openrouter.py`
+**Description:** Handles multiple sequential tool calls
+**Setup:** Mock API to return 3 tool calls then final response
+**Input:** `execute_with_tools("complex task", model)`
+**Expected:** All 3 tools executed, final response returned
+**Priority:** High
+
+#### TC-EWT-003: Tool Call Warning at 50
+**Component:** `src/providers/openrouter.py`
+**Description:** Logs warning after 50 tool calls
+**Setup:** Mock API to return 51 tool calls
+**Input:** `execute_with_tools("intensive task", model)`
+**Expected:** Warning logged, execution continues
+**Priority:** Medium
+
+#### TC-EWT-004: Hard Limit at 200 Calls
+**Component:** `src/providers/openrouter.py`
+**Description:** Stops execution at 200 tool calls
+**Setup:** Mock API to return infinite tool calls
+**Input:** `execute_with_tools("runaway task", model)`
+**Expected:** Returns error after 200 calls
+**Priority:** High
+
+#### TC-EWT-005: Tool Error Handling
+**Component:** `src/providers/openrouter.py`
+**Description:** Handles tool execution errors gracefully
+**Setup:** Mock tool to raise exception
+**Input:** `execute_with_tools("task with error", model)`
+**Expected:** Error returned to model, execution continues
+**Priority:** High
+
+### Auto-Detection Tests
+
+#### TC-AUTO-001: Execute Uses Tools When Supported
+**Component:** `src/providers/openrouter.py`
+**Description:** execute() auto-detects and uses tools
+**Setup:** Mock GPT-4 model
+**Input:** `execute("task", "openai/gpt-4")`
+**Expected:** Internally calls execute_with_tools()
+**Priority:** High
+
+#### TC-AUTO-002: Execute Falls Back When Not Supported
+**Component:** `src/providers/openrouter.py`
+**Description:** execute() falls back for non-tool models
+**Setup:** Mock basic model
+**Input:** `execute("task", "basic/model")`
+**Expected:** Uses basic execution path
+**Priority:** High
+
+#### TC-AUTO-003: Execute Falls Back on Tool Error
+**Component:** `src/providers/openrouter.py`
+**Description:** Falls back if tool setup fails
+**Setup:** Mock tool initialization to fail
+**Input:** `execute("task", "openai/gpt-4")`
+**Expected:** Graceful fallback to basic execution
+**Priority:** Medium
 
 ## Integration Tests
 
-### TC-INT-001: Fresh Install and Run
-**Description:** Full workflow from install to status check
-**Setup:** Fresh virtual environment
-**Steps:**
-1. `pip install git+https://github.com/keevaspeyer10x/workflow-orchestrator.git`
-2. `cd /tmp/test-dir`
-3. `orchestrator status`
-**Expected:** Shows status using bundled workflow
+### TC-INT-001: Real API - Read File
+**Description:** End-to-end test with real OpenRouter API
+**Setup:** Set OPENROUTER_API_KEY, create test file
+**Input:** Execute task that requires reading a file
+**Expected:** Model reads file via tool, provides correct response
 **Priority:** High
+**Note:** Mark as `@pytest.mark.integration`
 
-### TC-INT-002: Init Then Start Workflow
-**Description:** Init workflow then start a task
-**Setup:** Fresh directory
-**Steps:**
-1. `orchestrator init`
-2. `orchestrator start "Test task"`
-3. `orchestrator status`
-**Expected:** Workflow running in PLAN phase
-**Priority:** High
-
-### TC-INT-003: Local Workflow Override
-**Description:** Local workflow takes precedence over bundled
-**Setup:** Directory with custom 2-phase workflow.yaml
-**Steps:**
-1. `orchestrator start "Test"`
-2. Check loaded workflow
-**Expected:** Uses custom workflow, not bundled
-**Priority:** High
-
-### TC-INT-004: Backward Compat - Bash Script
-**Description:** Existing bash script still works
-**Setup:** Clone repo
-**Steps:**
-1. `cd workflow-orchestrator`
-2. `./orchestrator --help`
-**Expected:** Shows help (same as before)
-**Priority:** High
-
-### TC-INT-005: Editable Install Works
-**Description:** `pip install -e .` for development
-**Setup:** Clone repo
-**Steps:**
-1. `pip install -e .`
-2. `orchestrator --help`
-3. Edit src/cli.py (add comment)
-4. `orchestrator --help` (should reflect change)
-**Expected:** Changes reflected without reinstall
+### TC-INT-002: Real API - Search and Read
+**Description:** Model searches then reads files
+**Setup:** Create codebase with known patterns
+**Input:** "Find all functions that return int and explain them"
+**Expected:** Model uses search_code, then read_file, provides summary
 **Priority:** Medium
+**Note:** Mark as `@pytest.mark.integration`
 
-## CLI Command Tests
-
-### TC-CLI-001: Status Without Workflow
-**Component:** `src/cli.py`
-**Description:** Status with bundled workflow (no local file)
-**Input:** `orchestrator status` (in empty dir)
-**Expected:** Shows status or helpful message
+### TC-INT-003: Fallback Path Works
+**Description:** Basic model works without tools
+**Setup:** Use model known to not support tools
+**Input:** Execute simple task
+**Expected:** Completes using context injection fallback
 **Priority:** High
 
-### TC-CLI-002: Start Without Workflow
-**Component:** `src/cli.py`
-**Description:** Start works with bundled workflow
-**Input:** `orchestrator start "Task"` (in empty dir)
-**Expected:** Starts workflow using bundled definition
+## Backwards Compatibility Tests
+
+### TC-BC-001: Existing Execute Signature Unchanged
+**Component:** `src/providers/openrouter.py`
+**Description:** execute(prompt, model) still works
+**Input:** `provider.execute("task", "model")`
+**Expected:** No signature change errors
 **Priority:** High
 
-### TC-CLI-003: Init Output
-**Component:** `src/cli.py`
-**Description:** Init shows helpful next steps
-**Input:** `orchestrator init`
-**Expected:** Message includes "workflow.yaml created" and next steps
-**Priority:** Medium
+### TC-BC-002: ExecutionResult Format Unchanged
+**Component:** `src/providers/base.py`
+**Description:** ExecutionResult has same fields
+**Input:** Check result from execute()
+**Expected:** Has success, output, error, model_used, etc.
+**Priority:** High
 
-### TC-CLI-004: Version Flag
-**Component:** `src/cli.py`
-**Description:** Shows version from package
-**Input:** `orchestrator --version`
-**Expected:** Shows version number
-**Priority:** Low
+### TC-BC-003: Provider Interface Unchanged
+**Component:** `src/providers/base.py`
+**Description:** AgentProvider interface not broken
+**Input:** Check ManualProvider still works
+**Expected:** No changes required to other providers
+**Priority:** High
 
 ## Error Handling Tests
 
-### TC-ERR-001: Missing Package Data
-**Component:** `src/config.py`
-**Description:** Clear error if bundled workflow missing
-**Setup:** Corrupted install without package data
-**Input:** Try to access bundled workflow
-**Expected:** Clear error message with recovery steps
+### TC-ERR-001: API Timeout
+**Component:** `src/providers/openrouter.py`
+**Description:** Handles API timeout during tool loop
+**Setup:** Mock API to timeout
+**Expected:** Returns error, no crash
 **Priority:** Medium
 
-### TC-ERR-002: Invalid Local Workflow
-**Component:** `src/engine.py`
-**Description:** Error on malformed workflow.yaml
-**Setup:** workflow.yaml with invalid YAML
-**Input:** `orchestrator status`
-**Expected:** Parse error with file path and line number
+### TC-ERR-002: Invalid Tool Call Format
+**Component:** `src/providers/openrouter.py`
+**Description:** Handles malformed tool call from API
+**Setup:** Mock API to return invalid tool call structure
+**Expected:** Logs error, continues or falls back gracefully
 **Priority:** Medium
 
-### TC-ERR-003: Init in Read-Only Directory
-**Component:** `src/cli.py`
-**Description:** Clear error when can't write
-**Setup:** Directory without write permission
-**Input:** `orchestrator init`
-**Expected:** Permission error with explanation
-**Priority:** Low
-
-## Existing Test Compatibility
-
-### TC-COMPAT-001: All Existing Tests Pass
-**Description:** No regressions from package restructure
-**Input:** `pytest tests/`
-**Expected:** All tests pass
-**Priority:** High
-
-### TC-COMPAT-002: Test Imports Updated
-**Description:** Tests use correct import paths
-**Input:** Run tests after import changes
-**Expected:** No import errors
-**Priority:** High
+### TC-ERR-003: Rate Limiting
+**Component:** `src/providers/openrouter.py`
+**Description:** Handles 429 during tool loop
+**Setup:** Mock API to return 429
+**Expected:** Retries with backoff or returns error
+**Priority:** Medium
 
 ## Coverage Requirements
 
-- Minimum 80% coverage for new code in `src/config.py`
-- 100% coverage for init command logic
-- All error paths must be tested
-- Integration tests can be marked `@pytest.mark.integration` and skipped in CI
+- Minimum 90% coverage for `src/providers/tools.py`
+- Minimum 85% coverage for new code in `src/providers/openrouter.py`
+- All path traversal cases must be tested
+- All error paths must have tests
+- Integration tests marked with `@pytest.mark.integration`

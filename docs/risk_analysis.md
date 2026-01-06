@@ -1,135 +1,217 @@
-# Risk Analysis: Global Installation (Method C)
+# Risk Analysis: OpenRouter Function Calling for Interactive Repo Context
 
-## Risk Assessment
+## Executive Summary
 
-### 1. Import Path Breakage
+This feature adds function calling support to the OpenRouter provider, allowing models to interactively request file/code context. Overall risk is **LOW to MEDIUM** due to read-only operations and graceful fallback design.
 
-**Risk:** Changing from `sys.path` manipulation to proper package imports could break existing imports across the codebase.
+---
 
-**Impact:** High - CLI could fail to start if imports break.
+## Risk Matrix
 
-**Mitigation:**
-- Test imports from multiple entry points (direct, pip install, editable install)
-- Keep backward compatibility with existing `./orchestrator` bash script
-- Run all tests after import changes
-- Use relative imports consistently within package
+| Risk | Likelihood | Impact | Severity | Mitigation |
+|------|------------|--------|----------|------------|
+| R1: Path traversal | Medium | High | **Medium** | Validate paths, sandbox to working_dir |
+| R2: Large file memory issues | Low | Medium | **Low** | Soft warning at 2MB, stream large files |
+| R3: Infinite tool call loop | Low | Medium | **Low** | Soft warning at 50 calls, model decides |
+| R4: API cost explosion | Medium | Medium | **Medium** | Log call counts, user visibility |
+| R5: Breaking existing behavior | Low | High | **Medium** | Auto-detect, preserve fallback path |
+| R6: Model compatibility issues | Medium | Low | **Low** | Maintain fallback, test major models |
 
-### 2. Package Data Not Found
+---
 
-**Risk:** Bundled `default_workflow.yaml` not included in pip install, causing "no workflow found" errors.
+## Detailed Risk Analysis
 
-**Impact:** High - Core feature (bundled defaults) wouldn't work.
+### R1: Path Traversal Attacks
 
-**Mitigation:**
-- Use `package_data` or `include_package_data` in pyproject.toml correctly
-- Test installation in fresh environment to verify data files included
-- Add startup check that logs which workflow source is being used
-- Fall back to clear error message if bundled workflow missing
+**Description:** A malicious or confused model could request files outside the working directory (e.g., `../../etc/passwd`).
 
-### 3. Entry Point Not Created
+**Likelihood:** Medium - Models may generate unexpected paths.
 
-**Risk:** `orchestrator` command not available after pip install due to misconfigured entry points.
-
-**Impact:** High - Global install would be useless.
+**Impact:** High - Could expose sensitive system files.
 
 **Mitigation:**
-- Test `pip install .` and verify `which orchestrator` finds command
-- Use standard `[project.scripts]` syntax in pyproject.toml
-- Document fallback: `python -m src` if entry point fails
+1. Resolve all paths relative to `working_dir`
+2. Validate resolved path is within `working_dir` using `Path.resolve()`
+3. Return error for paths outside sandbox
+4. Never use user/model input directly in file operations
 
-### 4. Backward Compatibility for Existing Users
+**Implementation:**
+```python
+def safe_read_file(path: str, working_dir: Path) -> str:
+    resolved = (working_dir / path).resolve()
+    if not resolved.is_relative_to(working_dir):
+        return {"error": "Path outside working directory", "path": path}
+    # ... proceed with read
+```
 
-**Risk:** Users with existing repo-based workflows may experience different behavior after update.
+---
 
-**Impact:** Medium - Could disrupt existing workflows.
+### R2: Large File Memory Issues
 
-**Mitigation:**
-- Keep `./orchestrator` bash script working exactly as before
-- Local `workflow.yaml` always takes precedence over bundled
-- State files remain in same location (current directory)
-- Document any behavior changes in release notes
+**Description:** Reading very large files (multi-GB) could exhaust memory.
 
-### 5. Init Command Overwrites User Data
+**Likelihood:** Low - Most code files are small; 2MB warning catches edge cases.
 
-**Risk:** `orchestrator init` could accidentally overwrite customized `workflow.yaml`.
-
-**Impact:** Medium - User loses customizations.
-
-**Mitigation:**
-- Always prompt before overwriting existing file
-- Create backup (`workflow.yaml.bak`) before overwriting
-- Add `--force` flag to skip prompt (for scripted use)
-- Print clear warning showing what will be backed up
-
-### 6. Python Version Compatibility
-
-**Risk:** Package may not work on older Python versions users have installed.
-
-**Impact:** Medium - Users on older Python can't install.
+**Impact:** Medium - Process crash, poor UX.
 
 **Mitigation:**
-- Specify `requires-python >= "3.10"` in pyproject.toml
-- Test on Python 3.10, 3.11, 3.12
-- Document minimum Python version prominently
-- pip will error clearly if Python version incompatible
+1. Soft warning at 2MB (log, don't block)
+2. For files >10MB, consider streaming/chunking
+3. Return file size in response so model can decide
+4. Truncate extremely large files (>50MB) with clear message
 
-### 7. Dependency Conflicts
+**Implementation:**
+```python
+def execute_read_file(path: str, working_dir: Path) -> dict:
+    file_size = file_path.stat().st_size
+    if file_size > 2 * 1024 * 1024:  # 2MB
+        logger.warning(f"Large file ({file_size / 1024 / 1024:.1f}MB): {path}")
+    if file_size > 50 * 1024 * 1024:  # 50MB
+        return {"content": "(file too large - 50MB limit)", "truncated": True}
+    # ... read file
+```
 
-**Risk:** Package dependencies (pydantic, pyyaml, requests) could conflict with user's existing packages.
+---
 
-**Impact:** Low-Medium - Could prevent installation or break user's environment.
+### R3: Infinite Tool Call Loop
+
+**Description:** Model keeps calling tools without producing final output.
+
+**Likelihood:** Low - Modern models handle tool loops well.
+
+**Impact:** Medium - Wasted API costs, hung execution.
 
 **Mitigation:**
-- Use flexible version specifiers (`>=2.0` not `==2.0.1`)
-- Recommend `pipx` for isolated installation
-- Document as CLI tool, not library (reduces conflict risk)
+1. Soft warning at 50 calls (log, don't block)
+2. Hard limit at 200 calls as safety net
+3. Include call count in final result metadata
+4. Log each tool call for debugging
 
-### 8. Config Discovery Confusion
+**Implementation:**
+```python
+MAX_TOOL_CALLS = 200  # Hard safety limit
 
-**Risk:** Users unclear about which workflow.yaml is being used (local vs bundled).
+while call_count < MAX_TOOL_CALLS:
+    if call_count == 50:
+        logger.warning("50+ tool calls - consider optimizing prompt")
+    # ... execute tool
+else:
+    return ExecutionResult(
+        success=False,
+        error=f"Exceeded maximum tool calls ({MAX_TOOL_CALLS})"
+    )
+```
 
-**Impact:** Low - Unexpected behavior, confusion.
+---
+
+### R4: API Cost Explosion
+
+**Description:** Many tool calls = many API round-trips = high costs.
+
+**Likelihood:** Medium - Complex tasks may need many file reads.
+
+**Impact:** Medium - Unexpected bills for users.
 
 **Mitigation:**
-- `orchestrator status` always shows workflow source path
-- Log message on start: "Using workflow from: <path>"
-- Document discovery behavior clearly
+1. Log total tool calls prominently in output
+2. Include token usage in ExecutionResult metadata
+3. Document expected costs in user guide
+4. Consider adding `--max-tools` CLI flag (future enhancement)
+
+---
+
+### R5: Breaking Existing Behavior
+
+**Description:** Changes to `execute()` could break existing workflows.
+
+**Likelihood:** Low - Design preserves existing code path.
+
+**Impact:** High - User workflows fail unexpectedly.
+
+**Mitigation:**
+1. Auto-detection: only use tools if model supports it
+2. Preserve `_execute_basic()` as unchanged fallback
+3. Extensive testing of both paths
+4. Clear logging of which path is used
+
+**Implementation:**
+```python
+def execute(self, prompt: str, model: str = None) -> ExecutionResult:
+    if self._supports_function_calling(model):
+        logger.info(f"Using function calling with {model}")
+        return self.execute_with_tools(prompt, model)
+    else:
+        logger.info(f"Using basic execution with {model}")
+        return self._execute_basic(prompt, model)
+```
+
+---
+
+### R6: Model Compatibility Issues
+
+**Description:** Different models may have different function calling formats/behaviors.
+
+**Likelihood:** Medium - OpenRouter normalizes, but edge cases exist.
+
+**Impact:** Low - Falls back gracefully.
+
+**Mitigation:**
+1. Start with known-good models (GPT-4+, Claude 3+, Gemini Pro)
+2. Maintain allowlist of tested models
+3. Fallback to basic execution on any tool-related errors
+4. Log model-specific issues for improvement
+
+---
 
 ## Security Considerations
 
-### No New Attack Surface
+### What We're NOT Doing (Intentionally)
 
-This change doesn't introduce new security risks:
-- No new network access
-- No new file system access beyond current directory
-- Package data is read-only
-- Init command only writes to current directory
+| Capability | Status | Reason |
+|------------|--------|--------|
+| Shell command execution | **Excluded** | High risk, not needed for context |
+| File writing | **Excluded** | Out of scope, security risk |
+| Network requests | **Excluded** | Out of scope, security risk |
+| Environment variables | **Excluded** | Could leak secrets |
 
-### Dependency Supply Chain
+### Defense in Depth
 
-**Risk:** pip install from GitHub could be compromised if repo is compromised.
+1. **Path sandboxing**: All file operations restricted to working_dir
+2. **Read-only**: No write operations exposed
+3. **No execution**: No shell/command capabilities
+4. **Graceful failures**: Errors return messages, never crash
 
-**Mitigation:**
-- Use HTTPS URL
-- Pin to specific commits/tags for production use
-- Consider signing releases in future
+---
 
 ## Rollback Plan
 
-If global installation causes issues:
+If issues discovered post-deployment:
 
-1. **Immediate:** Use `./orchestrator` bash script directly (always works from repo)
-2. **Short-term:** `pip uninstall workflow-orchestrator` and use repo-based workflow
-3. **Long-term:** Fix issues and re-release
+1. **Immediate**: Set `ORCHESTRATOR_DISABLE_TOOLS=1` env var to disable
+2. **Quick fix**: Pin to models known to work
+3. **Full rollback**: Revert to previous version (git revert)
 
-## Testing Checklist
+---
 
-Before release:
-- [ ] `pip install .` works in fresh venv
-- [ ] `orchestrator --help` accessible after install
-- [ ] `orchestrator status` works with bundled workflow
-- [ ] `orchestrator status` works with local workflow.yaml
-- [ ] `orchestrator init` creates workflow correctly
-- [ ] `orchestrator init` backs up existing file
-- [ ] `./orchestrator` bash script still works from repo
-- [ ] All existing tests pass
+## Monitoring & Observability
+
+Add logging for:
+- Each tool call (tool name, parameters, result size)
+- Total tool calls per execution
+- Execution time with vs without tools
+- Fallback triggers (why basic mode was used)
+
+---
+
+## Conclusion
+
+The feature is **LOW to MEDIUM risk** overall:
+- Read-only operations limit blast radius
+- Path sandboxing prevents traversal
+- Graceful fallbacks preserve existing behavior
+- Soft limits future-proof without blocking valid use cases
+
+**Recommendation:** Proceed with implementation, with emphasis on:
+1. Path validation (R1)
+2. Good logging for cost visibility (R4)
+3. Comprehensive testing of both code paths (R5)
