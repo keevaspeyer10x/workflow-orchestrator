@@ -4,6 +4,77 @@ This document tracks planned improvements, deferred features, and audit recommen
 
 ---
 
+## v2.2 Enhancements (Currently Implementing)
+
+> See `PRD_v2.2_ENHANCEMENTS.md` for full specification
+
+### CORE-001: Provider Abstraction & OpenRouter Integration
+**Status:** In Progress
+**Complexity:** Medium
+**Description:** Abstract the Claude Code integration into a generic provider interface to support multiple LLM backends.
+
+**Features:**
+- Generic HTTP API provider interface
+- OpenRouter as default provider (requires `OPENROUTER_API_KEY`)
+- Claude Code provider (refactored from existing)
+- Manual provider (fallback for copy/paste)
+- `--provider` and `--model` CLI flags
+- Per-phase/item model selection support
+
+---
+
+### CORE-002: Environment Detection & Adaptation
+**Status:** In Progress
+**Complexity:** Low
+**Description:** Auto-detect execution environment and adapt behavior accordingly.
+
+**Features:**
+- Detect Claude Code, Manus, Standalone CLI environments
+- Environment-specific provider defaults
+- Adapted output format per environment
+- `--env` override flag
+
+---
+
+### CORE-003: Operating Notes System
+**Status:** In Progress
+**Complexity:** Low
+**Description:** Add `notes` field to phases and items for embedding operational wisdom.
+
+**Features:**
+- `notes: list[str]` on PhaseDef and ChecklistItemDef
+- Optional categorization: `[tip]`, `[caution]`, `[learning]`, `[context]`
+- Display in status recitation and handoff prompts
+- Learning engine suggests note additions
+
+---
+
+### CORE-004: Task Constraints Flag
+**Status:** In Progress
+**Complexity:** Low
+**Description:** Allow task-specific guidance without modifying workflow.yaml.
+
+**Features:**
+- `--constraints` flag on `orchestrator start`
+- Stored in workflow state
+- Included in all recitation and handoff output
+
+---
+
+### CORE-005: Checkpoint/Resume System
+**Status:** In Progress
+**Complexity:** Medium
+**Description:** Enable saving workflow state with context summaries for resumption in fresh context.
+
+**Features:**
+- `orchestrator checkpoint` - Save state with context summary
+- `orchestrator resume` - Restore and generate handoff prompt
+- `orchestrator checkpoints` - List available checkpoints
+- Auto-checkpoint on phase transitions (configurable)
+- Context recovery data: decisions, file manifest, summary
+
+---
+
 ## Visual Verification Improvements
 
 ### High Priority
@@ -243,16 +314,48 @@ if not service_url.startswith('https://'):
 These features were considered but deferred for future consideration:
 
 ### DEF-001: Video Recording of Visual Tests
-**Complexity:** Medium-High  
+**Complexity:** Medium-High
 **Reason Deferred:** Nice-to-have, not core functionality. Adds ffmpeg dependency and storage requirements.
 
 ### DEF-002: Response Caching
-**Complexity:** Medium  
+**Complexity:** Medium
 **Reason Deferred:** Optimization that adds complexity. Evaluate need based on actual usage patterns.
 
 ### DEF-003: Network Interception
-**Complexity:** High  
+**Complexity:** High
 **Reason Deferred:** Significant scope creep. Would change service architecture substantially.
+
+### DEF-004: Sub-Agent Type Hints
+**Complexity:** Low
+**Reason Deferred:** `agent_hint` field on items (explore, plan, execute). Deferred until provider abstraction settles.
+
+### DEF-005: Tool Result Compression
+**Complexity:** Low
+**Reason Deferred:** Change handoff prompts to reference files rather than include content. Optimize later if needed.
+
+### DEF-006: Slack Integration
+**Complexity:** Medium
+**Reason Deferred:** Slack bot/channel for workflow notifications, approval requests, status updates. Future consideration.
+
+### DEF-007: GitHub Integration
+**Complexity:** Medium
+**Reason Deferred:** Create issues from workflow items, link PRs to phases, auto-complete on merge. Future consideration.
+
+### DEF-008: VS Code Extension
+**Complexity:** High
+**Reason Deferred:** Sidebar showing workflow status, click to complete/skip. Future consideration.
+
+### DEF-009: Workflow Templates Library
+**Complexity:** Medium
+**Reason Deferred:** Pre-built workflows for common tasks. `orchestrator init --template bugfix`. Future consideration.
+
+### DEF-010: Distributed/Team Workflows
+**Complexity:** High
+**Reason Deferred:** Multiple agents on same workflow, locking/claiming items. Complex, long-term.
+
+### DEF-011: LLM-Assisted Workflow Generation
+**Complexity:** Medium
+**Reason Deferred:** Describe task, LLM generates workflow.yaml. Experimental idea.
 
 ---
 
@@ -266,13 +369,22 @@ These features were considered but deferred for future consideration:
 | - | Style guide integration method | 2026-01-06 |
 | - | Unit test suite (19 tests) | 2026-01-06 |
 | - | Documentation (VISUAL_VERIFICATION.md) | 2026-01-06 |
+| - | Core workflow engine with phase/item state machine | 2026-01-05 |
+| - | YAML-based workflow definitions | 2026-01-05 |
+| - | Active verification (file_exists, command, manual_gate) | 2026-01-05 |
+| - | Claude Code CLI integration | 2026-01-05 |
+| - | Analytics and learning engine | 2026-01-05 |
+| - | Web dashboard | 2026-01-05 |
+| - | Security hardening (injection protection, path traversal) | 2026-01-05 |
+| - | Version-locked workflow definitions in state | 2026-01-05 |
+| - | Template variable substitution | 2026-01-05 |
 
 ---
 
 ## Contributing
 
 When adding items to this roadmap:
-1. Use the appropriate prefix (VV-, SEC-, ARCH-, WF-, DEF-)
+1. Use the appropriate prefix (CORE-, VV-, SEC-, ARCH-, WF-, DEF-)
 2. Include: Status, Complexity, Description, Implementation Notes
 3. For audit items, include Source reference
 4. Move completed items to the Completed Items table
