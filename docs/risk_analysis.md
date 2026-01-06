@@ -1,135 +1,153 @@
-# Risk Analysis: Global Installation (Method C)
+# Risk Analysis: Roadmap Items CORE-007, CORE-008, ARCH-001, WF-004
 
-## Risk Assessment
+## Overall Risk Assessment: LOW
 
-### 1. Import Path Breakage
+All four items are low-complexity changes with minimal risk. The changes are isolated and backwards-compatible.
 
-**Risk:** Changing from `sys.path` manipulation to proper package imports could break existing imports across the codebase.
+---
 
-**Impact:** High - CLI could fail to start if imports break.
+## Risk Assessment by Item
 
-**Mitigation:**
-- Test imports from multiple entry points (direct, pip install, editable install)
-- Keep backward compatibility with existing `./orchestrator` bash script
-- Run all tests after import changes
-- Use relative imports consistently within package
+### CORE-007: Deprecate Legacy Claude Integration
 
-### 2. Package Data Not Found
+**Risk Level:** Very Low
 
-**Risk:** Bundled `default_workflow.yaml` not included in pip install, causing "no workflow found" errors.
+**Potential Issues:**
+1. **Breaking existing code that imports claude_integration**
+   - Impact: Low - deprecation warning doesn't break functionality
+   - Mitigation: Warning only, no removal until v3.0
 
-**Impact:** High - Core feature (bundled defaults) wouldn't work.
+2. **Noisy warnings in logs/output**
+   - Impact: Low - cosmetic issue
+   - Mitigation: Use `stacklevel=2` to point to correct caller
 
-**Mitigation:**
-- Use `package_data` or `include_package_data` in pyproject.toml correctly
-- Test installation in fresh environment to verify data files included
-- Add startup check that logs which workflow source is being used
-- Fall back to clear error message if bundled workflow missing
+**Testing Required:**
+- Verify warning appears when module imported
+- Verify existing functionality still works
 
-### 3. Entry Point Not Created
+---
 
-**Risk:** `orchestrator` command not available after pip install due to misconfigured entry points.
+### CORE-008: Input Length Limits
 
-**Impact:** High - Global install would be useless.
+**Risk Level:** Low
 
-**Mitigation:**
-- Test `pip install .` and verify `which orchestrator` finds command
-- Use standard `[project.scripts]` syntax in pyproject.toml
-- Document fallback: `python -m src` if entry point fails
+**Potential Issues:**
+1. **Rejecting valid user input that happens to be long**
+   - Impact: Medium - user frustration
+   - Mitigation: 1000 chars for constraints, 500 chars for notes are generous limits
+   - Mitigation: Clear error messages explaining the limit
 
-### 4. Backward Compatibility for Existing Users
+2. **Breaking existing workflows with long constraints**
+   - Impact: Low - validation only applies to new input, not stored data
+   - Mitigation: Only validate on input, not when reading state
 
-**Risk:** Users with existing repo-based workflows may experience different behavior after update.
+**Testing Required:**
+- Verify inputs under limit work normally
+- Verify inputs at limit work
+- Verify inputs over limit rejected with clear error
+- Verify existing state with long notes still readable
 
-**Impact:** Medium - Could disrupt existing workflows.
+---
 
-**Mitigation:**
-- Keep `./orchestrator` bash script working exactly as before
-- Local `workflow.yaml` always takes precedence over bundled
-- State files remain in same location (current directory)
-- Document any behavior changes in release notes
+### ARCH-001: Extract Retry Logic
 
-### 5. Init Command Overwrites User Data
+**Risk Level:** Low
 
-**Risk:** `orchestrator init` could accidentally overwrite customized `workflow.yaml`.
+**Potential Issues:**
+1. **Changing retry behavior in visual_verification.py**
+   - Impact: Medium - could affect network resilience
+   - Mitigation: Match existing behavior exactly (base 2^n backoff)
+   - Mitigation: Keep same defaults (3 retries, exponential backoff)
 
-**Impact:** Medium - User loses customizations.
+2. **Decorator complexity with class methods**
+   - Impact: Low - decorators work well with methods
+   - Mitigation: Use `functools.wraps` to preserve method signatures
 
-**Mitigation:**
-- Always prompt before overwriting existing file
-- Create backup (`workflow.yaml.bak`) before overwriting
-- Add `--force` flag to skip prompt (for scripted use)
-- Print clear warning showing what will be backed up
+**Testing Required:**
+- Unit test retry decorator with mock functions
+- Test exponential backoff timing
+- Test exception propagation after max retries
+- Verify visual_verification.py still works
 
-### 6. Python Version Compatibility
+---
 
-**Risk:** Package may not work on older Python versions users have installed.
+### WF-004: Auto-Archive Workflow Documents
 
-**Impact:** Medium - Users on older Python can't install.
+**Risk Level:** Low-Medium
 
-**Mitigation:**
-- Specify `requires-python >= "3.10"` in pyproject.toml
-- Test on Python 3.10, 3.11, 3.12
-- Document minimum Python version prominently
-- pip will error clearly if Python version incompatible
+**Potential Issues:**
+1. **Accidentally archiving important files**
+   - Impact: Medium - user loses access to current plan
+   - Mitigation: Only archive specific known files (plan.md, risk_analysis.md, test_cases.md)
+   - Mitigation: Add `--no-archive` flag to skip
 
-### 7. Dependency Conflicts
+2. **Archive directory clutter**
+   - Impact: Low - cosmetic
+   - Mitigation: Use dated naming for easy cleanup
 
-**Risk:** Package dependencies (pydantic, pyyaml, requests) could conflict with user's existing packages.
+3. **File permission issues**
+   - Impact: Medium - could fail silently
+   - Mitigation: Check permissions, report errors clearly
 
-**Impact:** Low-Medium - Could prevent installation or break user's environment.
+4. **Race condition with duplicate names**
+   - Impact: Low - unlikely
+   - Mitigation: Counter suffix for duplicate names
 
-**Mitigation:**
-- Use flexible version specifiers (`>=2.0` not `==2.0.1`)
-- Recommend `pipx` for isolated installation
-- Document as CLI tool, not library (reduces conflict risk)
+**Testing Required:**
+- Test archiving when files exist
+- Test skipping when files don't exist
+- Test --no-archive flag
+- Test duplicate name handling
+- Verify archived files are intact
 
-### 8. Config Discovery Confusion
-
-**Risk:** Users unclear about which workflow.yaml is being used (local vs bundled).
-
-**Impact:** Low - Unexpected behavior, confusion.
-
-**Mitigation:**
-- `orchestrator status` always shows workflow source path
-- Log message on start: "Using workflow from: <path>"
-- Document discovery behavior clearly
+---
 
 ## Security Considerations
 
+### CORE-008: Input Validation (Security Improvement)
+This change **improves** security by preventing:
+- Memory exhaustion from extremely long strings
+- Potential log injection with very long inputs
+- DoS via oversized state files
+
 ### No New Attack Surface
+None of these changes introduce:
+- New network access
+- New file system access (archive only moves existing files)
+- External dependencies
+- User input that reaches shell commands
 
-This change doesn't introduce new security risks:
-- No new network access
-- No new file system access beyond current directory
-- Package data is read-only
-- Init command only writes to current directory
+---
 
-### Dependency Supply Chain
+## Backward Compatibility
 
-**Risk:** pip install from GitHub could be compromised if repo is compromised.
+All changes are backward compatible:
+- CORE-007: Warning only, no functional change
+- CORE-008: Existing data unaffected, only new input validated
+- ARCH-001: Same retry behavior, just refactored
+- WF-004: Opt-out available with `--no-archive`
 
-**Mitigation:**
-- Use HTTPS URL
-- Pin to specific commits/tags for production use
-- Consider signing releases in future
+---
 
 ## Rollback Plan
 
-If global installation causes issues:
+If issues occur:
 
-1. **Immediate:** Use `./orchestrator` bash script directly (always works from repo)
-2. **Short-term:** `pip uninstall workflow-orchestrator` and use repo-based workflow
-3. **Long-term:** Fix issues and re-release
+1. **CORE-007:** Remove deprecation warning (one-line change)
+2. **CORE-008:** Remove validation calls, delete validation.py
+3. **ARCH-001:** Revert visual_verification.py to inline retry logic
+4. **WF-004:** Remove archive call from start_workflow, delete method
+
+All changes are isolated and can be reverted independently.
+
+---
 
 ## Testing Checklist
 
-Before release:
-- [ ] `pip install .` works in fresh venv
-- [ ] `orchestrator --help` accessible after install
-- [ ] `orchestrator status` works with bundled workflow
-- [ ] `orchestrator status` works with local workflow.yaml
-- [ ] `orchestrator init` creates workflow correctly
-- [ ] `orchestrator init` backs up existing file
-- [ ] `./orchestrator` bash script still works from repo
+Before merge:
 - [ ] All existing tests pass
+- [ ] New unit tests for retry decorator
+- [ ] New unit tests for input validation
+- [ ] Integration test for auto-archive
+- [ ] Manual test of deprecation warning
+- [ ] Manual test of input limits

@@ -1,149 +1,168 @@
-# Implementation Plan: Global Installation (Method C)
+# Implementation Plan: Roadmap Items CORE-007, CORE-008, ARCH-001, WF-004
 
 ## Overview
 
-Convert workflow-orchestrator from a repo-based tool to a globally pip-installable package. After implementation, users can install via `pip install git+https://github.com/keevaspeyer10x/workflow-orchestrator.git` and run `orchestrator` from any directory.
+This plan covers 4 low-complexity roadmap items that improve code quality, security, and developer experience.
 
-## Target Environments
-- Local Claude Code CLI
-- Claude Code Web
-- Manus
+## Items to Implement
 
-## Design Decisions
-1. **Default workflow**: Bundle full 5-phase `workflow.yaml` (PLAN -> EXECUTE -> REVIEW -> VERIFY -> LEARN)
-2. **Init conflict handling**: Prompt user, then backup to `workflow.yaml.bak` before replacing
-3. **State files**: Store in current working directory (`.workflow_state.json`, `.workflow_log.jsonl`)
-4. **Config discovery**: Local `workflow.yaml` > bundled default (no user config dir - keep it simple)
+### 1. CORE-007: Deprecate Legacy Claude Integration
+**File:** `src/claude_integration.py`
 
----
+**Tasks:**
+- Add deprecation warning at module import
+- Point users to `src.providers.claude_code` as the replacement
 
-## Implementation Steps
-
-### Phase 1: Package Structure
-
-**1.1 Create pyproject.toml**
-- Define package metadata (name: `workflow-orchestrator`)
-- Specify dependencies from requirements.txt
-- Define entry point: `orchestrator = "src.cli:main"`
-- Include package data for bundled workflow.yaml
-- Require Python >= 3.10
-
-**1.2 Add __main__.py to src/**
-- Enable `python -m src` invocation
-- Call main() from cli.py
-
-**1.3 Update src/__init__.py**
-- Ensure version is defined in one place
-- Export main() function
-
-### Phase 2: Configuration Discovery
-
-**2.1 Create src/config.py**
-- `find_workflow_path()`: Check for local `workflow.yaml`, fall back to bundled
-- `get_bundled_workflow_path()`: Return path to package data workflow
-- `get_default_workflow_content()`: Return bundled workflow as string
-
-**2.2 Update src/engine.py**
-- Modify `load_workflow()` to use config discovery
-- When no workflow specified: try local, then bundled default
-- Log which workflow is being used
-
-### Phase 3: Init Command
-
-**3.1 Add init command to src/cli.py**
-- `orchestrator init`: Copy bundled workflow to current directory
-- Check if `workflow.yaml` exists
-- If exists: prompt user, backup to `workflow.yaml.bak`, then replace
-- If not exists: copy directly
-- Print success message with next steps
-
-### Phase 4: CLI Entry Point Refactor
-
-**4.1 Update src/cli.py**
-- Add `main()` function as entry point
-- Ensure all imports work when installed as package
-- Remove sys.path manipulation hack (line 15)
-- Handle case where no workflow.yaml exists gracefully
-
-**4.2 Fix relative imports**
-- Review all imports in src/*.py files
-- Ensure they work both as package and from repo root
-- Use relative imports within the package
-
-### Phase 5: Documentation Updates
-
-**5.1 Update README.md**
-- Add "Installation" section with pip install command
-- Update "Quick Start" to reflect global usage
-- Keep local development instructions
-
-**5.2 Update CLAUDE.md**
-- Update CLI examples to use `orchestrator` instead of `./orchestrator`
-- Add section on global installation for AI agents
-- Include the pip install command prominently
-
-**5.3 Update docs/SETUP_GUIDE.md**
-- Rewrite installation section
-- Document both global install and development setup
-- Add troubleshooting for common issues
-
-**5.4 Update docs/CLAUDE_CODE_PROMPT_GLOBAL_INSTALL.md**
-- Mark as implemented
-- Add actual commands used
-
-### Phase 6: Testing
-
-**6.1 Update existing tests**
-- Ensure tests still pass with new structure
-- Update any path-dependent tests
-
-**6.2 Add installation tests**
-- Test `pip install -e .` works
-- Test `orchestrator` command is available after install
-- Test workflow discovery (local vs bundled)
-- Test init command (new, overwrite, backup)
+**Implementation:**
+```python
+import warnings
+warnings.warn(
+    "claude_integration module is deprecated. Use src.providers.claude_code instead.",
+    DeprecationWarning,
+    stacklevel=2
+)
+```
 
 ---
 
-## File Changes Summary
+### 2. CORE-008: Input Length Limits
+**Files:** `src/cli.py`, `src/validation.py` (new)
 
-### New Files
-- `pyproject.toml` - Package configuration
-- `src/__main__.py` - Entry point for `python -m src`
-- `src/config.py` - Configuration discovery logic
-- `src/default_workflow.yaml` - Bundled workflow (copy of workflow.yaml)
+**Tasks:**
+- Create new `src/validation.py` module with constants and validation functions
+- Add `MAX_CONSTRAINT_LENGTH = 1000` constant
+- Add `MAX_NOTE_LENGTH = 500` constant
+- Validate constraints in `cmd_start()` before storing
+- Validate notes in `cmd_complete()`, `cmd_approve_item()`, `cmd_finish()`
+- Add tests for validation
 
-### Modified Files
-- `src/__init__.py` - Export main(), version consistency
-- `src/cli.py` - Add main(), init command, remove path hack
-- `src/engine.py` - Use config discovery for workflow loading
-- `README.md` - Installation docs
-- `CLAUDE.md` - AI agent instructions
-- `docs/SETUP_GUIDE.md` - Updated setup guide
-- `docs/CLAUDE_CODE_PROMPT_GLOBAL_INSTALL.md` - Mark complete
+**Implementation:**
+```python
+# src/validation.py
+MAX_CONSTRAINT_LENGTH = 1000
+MAX_NOTE_LENGTH = 500
 
-### Deprecated (kept for backwards compat)
-- `orchestrator` (bash script) - Keep working for existing users
-- `requirements.txt` - Keep for reference, pyproject.toml is authoritative
+def validate_constraint(constraint: str) -> str:
+    if len(constraint) > MAX_CONSTRAINT_LENGTH:
+        raise ValueError(f"Constraint exceeds {MAX_CONSTRAINT_LENGTH} characters")
+    return constraint
 
----
-
-## Success Criteria
-
-1. `pip install git+https://...` creates globally available `orchestrator` command
-2. Running `orchestrator status` in empty directory uses bundled workflow
-3. Running `orchestrator status` with local `workflow.yaml` uses that file
-4. `orchestrator init` creates local workflow.yaml (with backup if needed)
-5. All existing tests pass
-6. Works in Claude Code Web and Manus environments
+def validate_note(note: str) -> str:
+    if note and len(note) > MAX_NOTE_LENGTH:
+        raise ValueError(f"Note exceeds {MAX_NOTE_LENGTH} characters")
+    return note
+```
 
 ---
 
-## Execution Approach
+### 3. ARCH-001: Extract Retry Logic
+**Files:** `src/utils.py` (new), `src/visual_verification.py`
 
-Will implement directly in Claude Code (not handed off) since this is primarily:
-- Configuration/packaging work
-- Documentation updates
-- Straightforward code changes
+**Tasks:**
+- Create new `src/utils.py` module with reusable retry decorator
+- Implement `@retry_with_backoff` decorator with configurable:
+  - `max_retries` (default: 3)
+  - `base_delay` (default: 1.0 seconds)
+  - `max_delay` (default: 60 seconds)
+  - `exceptions` (tuple of exception types to catch)
+- Refactor `visual_verification.py` to use the new decorator
+- Add tests for retry utility
 
-No complex logic requiring specialized implementation.
+**Implementation:**
+```python
+# src/utils.py
+import time
+import functools
+from typing import Tuple, Type
+
+def retry_with_backoff(
+    max_retries: int = 3,
+    base_delay: float = 1.0,
+    max_delay: float = 60.0,
+    exceptions: Tuple[Type[Exception], ...] = (Exception,)
+):
+    """Decorator that retries a function with exponential backoff."""
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            last_error = None
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except exceptions as e:
+                    last_error = e
+                    if attempt < max_retries - 1:
+                        delay = min(base_delay * (2 ** attempt), max_delay)
+                        time.sleep(delay)
+            raise last_error
+        return wrapper
+    return decorator
+```
+
+---
+
+### 4. WF-004: Auto-Archive Workflow Documents
+**File:** `src/engine.py`
+
+**Tasks:**
+- Add `archive_existing_docs()` method to `WorkflowEngine`
+- Call it in `start_workflow()` before creating new state
+- Archive files: `docs/plan.md`, `docs/risk_analysis.md`, `tests/test_cases.md`
+- Create archive directory: `docs/archive/`
+- Naming format: `{date}_{task_slug}_{type}.md`
+- Add `--no-archive` flag to start command
+- Log archived files
+
+**Implementation:**
+```python
+def archive_existing_docs(self, task_slug: str) -> list[str]:
+    """Archive existing workflow docs before starting new workflow."""
+    docs_to_archive = [
+        ("docs/plan.md", "plan"),
+        ("docs/risk_analysis.md", "risk"),
+        ("tests/test_cases.md", "test_cases"),
+    ]
+    archive_dir = self.working_dir / "docs" / "archive"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+
+    archived = []
+    date_str = datetime.now().strftime("%Y-%m-%d")
+
+    for doc_path, suffix in docs_to_archive:
+        src = self.working_dir / doc_path
+        if src.exists():
+            dst = archive_dir / f"{date_str}_{task_slug}_{suffix}.md"
+            # Handle duplicate names by adding counter
+            counter = 1
+            while dst.exists():
+                dst = archive_dir / f"{date_str}_{task_slug}_{suffix}_{counter}.md"
+                counter += 1
+            src.rename(dst)
+            archived.append(str(dst))
+
+    return archived
+```
+
+---
+
+## Implementation Order
+
+1. **ARCH-001** (Extract Retry Logic) - Creates utility used by other code
+2. **CORE-007** (Deprecation Warning) - Simple, standalone change
+3. **CORE-008** (Input Validation) - Creates validation module
+4. **WF-004** (Auto-Archive) - Modifies workflow engine
+
+## Files to Create
+- `src/utils.py` - Reusable utilities (retry decorator)
+- `src/validation.py` - Input validation functions
+
+## Files to Modify
+- `src/claude_integration.py` - Add deprecation warning
+- `src/cli.py` - Add validation calls, --no-archive flag
+- `src/engine.py` - Add archive_existing_docs method
+- `src/visual_verification.py` - Refactor to use retry utility
+
+## Tests to Add
+- `tests/test_utils.py` - Test retry decorator
+- `tests/test_validation.py` - Test input validation
+- Update `tests/test_v2_2_features.py` - Test auto-archive
