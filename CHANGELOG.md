@@ -19,6 +19,10 @@ All notable changes to the workflow-orchestrator.
   - `propose_actions` → `approve_actions` → `apply_approved_actions`
   - User must approve specific changes before they're embedded
 
+- **Commit and Sync Step (WF-007)**: Final workflow item prompts to commit
+  - Auto-generates commit message from task description and changes
+  - Prompts user before committing and pushing to main
+
 ### Changed
 - EXECUTE phase item order: write_tests now comes before implement_code
 - LEARN phase restructured for explicit action approval

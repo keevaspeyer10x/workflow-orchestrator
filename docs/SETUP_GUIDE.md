@@ -127,67 +127,49 @@ Claude Code Web runs in a **remote sandbox** with full terminal access. Great fo
 
 ### Step 1: Access Claude Code Web
 
-1. Go to [claude.ai/code](https://claude.ai/code)
+1. Go to [claude.ai](https://claude.ai)
 2. Sign in with your Anthropic account
-3. You'll see a chat interface with terminal capabilities
+3. Start a new conversation
 
-### Step 2: Setup Your Environment in the Web Sandbox
+### Step 2: Install the Orchestrator
 
-When you start a new session, Claude Code Web runs in a fresh sandbox. Set up your environment:
+Simply ask Claude to install it:
 
 ```
-Please set up my development environment:
-
-1. Clone the workflow-orchestrator:
-   git clone https://github.com/keevaspeyer10x/workflow-orchestrator.git
-   cd workflow-orchestrator
-
-2. Install Python dependencies:
-   pip3 install -r requirements.txt
-
-3. Verify the orchestrator works:
-   ./orchestrator status
-
-4. Also clone my project repository:
-   git clone https://github.com/keevaspeyer10x/[your-project].git
+pip install git+https://github.com/keevaspeyer10x/workflow-orchestrator.git
 ```
 
-### Step 3: Configure Environment (SessionStart Hook)
+That's it! The orchestrator is now available globally.
 
-For persistent setup across sessions, you can use SessionStart Hooks. Create a setup script:
+### Step 3: Use the Orchestrator
 
 ```bash
-# In your project, create .claude/hooks/session-start.sh
-#!/bin/bash
-if [ "$CLAUDE_CODE_REMOTE" = "true" ]; then
-    # Remote Web environment setup
-    pip3 install -r requirements.txt
-    export ANTHROPIC_API_KEY="your-key"  # Or use secrets management
-fi
+# Check status
+orchestrator status
+
+# Start a workflow for your task
+orchestrator start "Implement feature X"
+
+# Work through the phases
+orchestrator complete <item> --notes "What was done"
+orchestrator advance
 ```
 
-### Step 4: Using the Orchestrator in Web
+### Step 4: Clone Your Project (Optional)
 
-Since Claude Code Web has terminal access, you can use the orchestrator directly:
+If working on an existing project:
 
-```
-Run these commands:
-cd workflow-orchestrator
-./orchestrator status
-./orchestrator start "My task description"
-```
-
-### Transferring Between CLI and Web
-
-**From CLI to Web (background task):**
 ```bash
-# In local CLI, prefix with & to send to Web
-& ./orchestrator handoff --execute
+git clone https://github.com/your-username/your-project.git
+cd your-project
+orchestrator start "Task description"
 ```
 
-**From Web to CLI:**
-- Click "Open from CLI" button in Web interface
-- Or use `/teleport` command
+### Notes for Claude Code Web
+
+- **Fresh sandbox each session**: You'll need to `pip install` again in new sessions
+- **SessionStart hooks**: Can automate setup if your project has `.claude/hooks/session-start.sh`
+- **No local workflow.yaml needed**: Uses bundled 5-phase workflow by default
 
 ---
 
@@ -382,13 +364,16 @@ orchestrator complete implement_code --notes "Feature implemented"
 ### Daily Workflow (Claude Code Web)
 
 ```
-1. Go to claude.ai/code
+1. Go to claude.ai
 2. Install the orchestrator:
    pip install git+https://github.com/keevaspeyer10x/workflow-orchestrator.git
-3. Use orchestrator commands:
+3. Clone your project (if needed):
+   git clone https://github.com/your-username/your-project.git
+   cd your-project
+4. Start and follow the workflow:
    orchestrator start "My task"
    orchestrator status
-4. Work through the workflow conversationally
+5. At end of workflow, commit when prompted (commit_and_sync step)
 ```
 
 ---
