@@ -15,12 +15,21 @@ A general-purpose workflow enforcement system for AI agents. Prevents AI agents 
 
 ## Installation
 
-### Global Install (Recommended)
+### Quick Install (Recommended)
 
-Install the orchestrator globally to use it from any directory:
+Run this in any repo to install with automatic updates:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/keevaspeyer10x/workflow-orchestrator/main/install.sh | bash
+```
+
+This installs the orchestrator AND sets up a SessionStart hook so future Claude Code sessions auto-update to the latest version.
+
+### Manual Install
 
 ```bash
 pip install git+https://github.com/keevaspeyer10x/workflow-orchestrator.git
+orchestrator install-hook  # Optional: enables auto-updates for this repo
 ```
 
 After installation, the `orchestrator` command is available globally:
@@ -34,15 +43,13 @@ orchestrator status
 
 ### For AI Agents (Claude Code Web, Manus, etc.)
 
-Add this to your project instructions or CLAUDE.md:
+Just ask: "install workflow-orchestrator from keevaspeyer10x github"
 
-```bash
-# Install orchestrator if not available
-pip install git+https://github.com/keevaspeyer10x/workflow-orchestrator.git
+Or add to your project's CLAUDE.md:
 
-# Then use it for non-trivial tasks
-orchestrator start "Task description"
-orchestrator status
+```markdown
+## Setup
+curl -sSL https://raw.githubusercontent.com/keevaspeyer10x/workflow-orchestrator/main/install.sh | bash
 ```
 
 ### Development Install

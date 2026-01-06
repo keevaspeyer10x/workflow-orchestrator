@@ -2,15 +2,22 @@
 
 This file provides instructions for Claude Code when working with the workflow-orchestrator.
 
-## Installation (Required First)
+## Installing in a New Repo
 
-Before using the orchestrator, install it globally:
+**When the user asks to "install workflow-orchestrator" or "install the orchestrator", run:**
+
+```bash
+curl -sSL https://raw.githubusercontent.com/keevaspeyer10x/workflow-orchestrator/main/install.sh | bash
+```
+
+This installs the orchestrator AND sets up automatic updates for future sessions.
+
+## Manual Installation (Alternative)
 
 ```bash
 pip install git+https://github.com/keevaspeyer10x/workflow-orchestrator.git
+orchestrator install-hook  # Optional: enables auto-updates
 ```
-
-After installation, `orchestrator` is available as a global command.
 
 ## Project Overview
 
