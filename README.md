@@ -25,6 +25,8 @@ curl -sSL https://raw.githubusercontent.com/keevaspeyer10x/workflow-orchestrator
 
 This installs the orchestrator AND sets up a SessionStart hook so future Claude Code sessions auto-update to the latest version.
 
+**Your files are safe:** Auto-updates only update the orchestrator code. Your repo-specific files (`workflow.yaml`, workflow state, logs) are never modified.
+
 ### Manual Install
 
 ```bash

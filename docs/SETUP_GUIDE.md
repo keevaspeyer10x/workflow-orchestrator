@@ -178,6 +178,8 @@ This creates a hook that:
 - Works in both Claude Code CLI and Claude Code Web
 - Always gets the latest version from GitHub
 
+**Your files are safe:** Auto-updates only update the orchestrator code. Your repo-specific files (`workflow.yaml`, workflow state, logs) are never modified.
+
 To disable: `orchestrator setup --remove`
 
 ### Option B: Manual Setup

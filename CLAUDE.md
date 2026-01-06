@@ -15,6 +15,8 @@ curl -sSL https://raw.githubusercontent.com/keevaspeyer10x/workflow-orchestrator
 
 This installs the orchestrator AND enables automatic updates for future sessions.
 
+**Note:** Auto-updates only update the orchestrator code. Your repo-specific files (`workflow.yaml`, workflow state, logs) are never modified.
+
 ## Using the Orchestrator
 
 After installation, the user can say things naturally:
