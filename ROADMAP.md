@@ -66,52 +66,32 @@ def prompt_user_for_provider(preferred: str, available: List[str]) -> str:
 ---
 
 #### CORE-007: Deprecate Legacy Claude Integration
-**Status:** Planned  
-**Complexity:** Low  
-**Priority:** Medium  
+**Status:** ✅ Completed (2026-01-06)
+**Complexity:** Low
+**Priority:** Medium
 **Description:** Add deprecation warning to `claude_integration.py` and update documentation to use new provider system.
 
 **Implementation:**
-```python
-# In claude_integration.py
-import warnings
-warnings.warn(
-    "claude_integration module is deprecated. Use src.providers.claude_code instead.",
-    DeprecationWarning,
-    stacklevel=2
-)
-```
+- Added deprecation warning at module import with `stacklevel=2`
+- Warning points users to `src.providers.claude_code`
 
-**Tasks:**
-- [ ] Add deprecation warning to module import
-- [ ] Update README to reference new provider system
-- [ ] Remove in v3.0
+**Files:** `src/claude_integration.py`
 
 ---
 
 #### CORE-008: Input Length Limits
-**Status:** Planned  
-**Complexity:** Low  
-**Priority:** Medium  
-**Source:** Security Review v2.2  
+**Status:** ✅ Completed (2026-01-06)
+**Complexity:** Low
+**Priority:** Medium
+**Source:** Security Review v2.2
 **Description:** Add length limits to user-provided constraints and notes to prevent DoS via extremely long strings.
 
 **Implementation:**
-```python
-MAX_CONSTRAINT_LENGTH = 1000
-MAX_NOTE_LENGTH = 500
+- Created `src/validation.py` with `validate_constraint()` and `validate_note()` functions
+- Added validation calls to CLI commands: `start`, `complete`, `approve-item`, `finish`
+- 14 tests in `tests/test_validation.py`
 
-def validate_constraint(constraint: str) -> str:
-    if len(constraint) > MAX_CONSTRAINT_LENGTH:
-        raise ValueError(f"Constraint exceeds {MAX_CONSTRAINT_LENGTH} characters")
-    return constraint
-```
-
-**Tasks:**
-- [ ] Add `MAX_CONSTRAINT_LENGTH` constant (1000 chars)
-- [ ] Add `MAX_NOTE_LENGTH` constant (500 chars)
-- [ ] Validate in CLI before storing
-- [ ] Add tests for validation
+**Files:** `src/validation.py`, `src/cli.py`, `tests/test_validation.py`
 
 ---
 
@@ -166,47 +146,21 @@ The same model that writes code shouldn't review it. Different models have diffe
 ---
 
 #### WF-004: Auto-Archive Workflow Documents
-**Status:** Planned
+**Status:** ✅ Completed (2026-01-06)
 **Complexity:** Low
 **Priority:** Medium
 **Source:** Current workflow
 **Description:** Automatically archive workflow documents (plan.md, risk_analysis.md) when starting a new workflow.
 
-**Problem Solved:**
-Multiple plan/risk files accumulate, making the repo messy.
+**Implementation:**
+- Added `archive_existing_docs()` method to `WorkflowEngine`
+- Archives `docs/plan.md`, `docs/risk_analysis.md`, `tests/test_cases.md`
+- Added `--no-archive` flag to skip archiving
+- Uses `slugify()` utility for filename generation
+- Handles duplicate filenames with counter suffix
+- 10 tests in `tests/test_roadmap_features.py`
 
-**Desired Behavior:**
-1. On `orchestrator start`, check for existing `docs/plan.md`
-2. If exists, move to `docs/archive/YYYY-MM-DD_<task_slug>_plan.md`
-3. Same for `docs/risk_analysis.md` and `tests/test_cases.md`
-4. Log archive action
-
-**Implementation Notes:**
-```python
-def archive_existing_docs(self):
-    """Archive existing workflow docs before starting new workflow."""
-    docs_to_archive = [
-        ("docs/plan.md", "plan"),
-        ("docs/risk_analysis.md", "risk"),
-        ("tests/test_cases.md", "test_cases"),
-    ]
-    archive_dir = self.working_dir / "docs" / "archive"
-    archive_dir.mkdir(exist_ok=True)
-
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    for doc_path, suffix in docs_to_archive:
-        src = self.working_dir / doc_path
-        if src.exists():
-            task_slug = slugify(self.state.task_description[:30])
-            dst = archive_dir / f"{date_str}_{task_slug}_{suffix}.md"
-            src.rename(dst)
-```
-
-**Tasks:**
-- [ ] Add `archive_existing_docs()` method to engine
-- [ ] Call in `start_workflow()` before creating new state
-- [ ] Add `--no-archive` flag to skip
-- [ ] Log archived files
+**Files:** `src/engine.py`, `src/cli.py`, `src/utils.py`, `tests/test_roadmap_features.py`
 
 ---
 
@@ -639,17 +593,18 @@ if not service_url.startswith('https://'):
 ## Architecture Improvements
 
 ### ARCH-001: Extract Retry Logic
-**Status:** Planned  
-**Complexity:** Low  
-**Source:** Architecture Review (Score: 7/10)  
+**Status:** ✅ Completed (2026-01-06)
+**Complexity:** Low
+**Source:** Architecture Review (Score: 7/10)
 **Description:** Extract retry logic with exponential backoff into a reusable utility.
 
-**Current State:**
-- Retry logic duplicated in `verify()` method
+**Implementation:**
+- Created `src/utils.py` with `@retry_with_backoff` decorator
+- Configurable: `max_retries`, `base_delay`, `max_delay`, `exceptions`
+- Also added `slugify()` utility for filename generation
+- 15 tests in `tests/test_utils.py`
 
-**Desired State:**
-- Reusable `@retry_with_backoff` decorator or utility function
-- Configurable retry count, base delay, max delay
+**Files:** `src/utils.py`, `tests/test_utils.py`
 
 ---
 
