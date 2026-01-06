@@ -81,10 +81,63 @@ This document tracks planned improvements, deferred features, and audit recommen
 
 ### Short-term (Low Effort)
 
-#### CORE-006: Deprecate Legacy Claude Integration
+#### CORE-006: Automatic Connector Detection with User Fallback
+**Status:** Planned  
+**Complexity:** Medium  
+**Priority:** High  
+**Source:** v2.2 Implementation Learning  
+**Description:** Automatically detect available agent connectors and ask user before defaulting to manual implementation when preferred agent is unavailable.
+
+**Problem Solved:**
+During v2.2 implementation, Claude Code CLI was unavailable in Manus sandbox. Instead of asking the user about alternative connection methods (Manus direct connector), the agent defaulted to manual implementation. This missed an opportunity to use a specialized coding AI.
+
+**Desired Behavior:**
+1. Check for Claude Code CLI (`which claude`)
+2. Check for Manus direct connector (environment detection)
+3. Check for OpenRouter API key
+4. If primary agent unavailable, **ASK USER** before proceeding:
+   - "Claude Code CLI is not available. Would you like me to:
+     a) Use Manus direct connector (detected)
+     b) Use OpenRouter API
+     c) Proceed with manual implementation
+     d) Help me install Claude Code CLI"
+
+**Implementation Notes:**
+```python
+def get_available_providers() -> List[str]:
+    """Return list of available providers in priority order."""
+    available = []
+    if shutil.which('claude'):
+        available.append('claude_code')
+    if detect_manus_connector():
+        available.append('manus_direct')
+    if os.environ.get('OPENROUTER_API_KEY'):
+        available.append('openrouter')
+    available.append('manual')  # Always available
+    return available
+
+def prompt_user_for_provider(preferred: str, available: List[str]) -> str:
+    """Ask user which provider to use when preferred is unavailable."""
+    if preferred in available:
+        return preferred
+    # Generate user prompt with available options
+    ...
+```
+
+**Tasks:**
+- [ ] Add `detect_manus_connector()` function to environment.py
+- [ ] Add `get_available_providers()` to providers/__init__.py
+- [ ] Add `prompt_user_for_provider()` interactive function
+- [ ] Update `handoff` command to use interactive selection when needed
+- [ ] Add `--interactive` flag to force user prompt
+- [ ] Document Manus direct connector access method
+
+---
+
+#### CORE-007: Deprecate Legacy Claude Integration
 **Status:** Planned  
 **Complexity:** Low  
-**Priority:** High  
+**Priority:** Medium  
 **Description:** Add deprecation warning to `claude_integration.py` and update documentation to use new provider system.
 
 **Implementation:**
@@ -105,7 +158,7 @@ warnings.warn(
 
 ---
 
-#### CORE-007: Input Length Limits
+#### CORE-008: Input Length Limits
 **Status:** Planned  
 **Complexity:** Low  
 **Priority:** Medium  
@@ -131,7 +184,7 @@ def validate_constraint(constraint: str) -> str:
 
 ---
 
-#### CORE-008: Constraints File Flag
+#### CORE-009: Constraints File Flag
 **Status:** Planned  
 **Complexity:** Low  
 **Priority:** Low  
@@ -158,7 +211,7 @@ Follow PEP 8 style guide
 
 ### Medium-term (Medium Effort)
 
-#### CORE-009: Checkpoint Database Backend
+#### CORE-010: Checkpoint Database Backend
 **Status:** Planned  
 **Complexity:** Medium  
 **Priority:** Medium  
@@ -198,7 +251,7 @@ class PostgresBackend(CheckpointBackend): ...  # New
 
 ---
 
-#### CORE-010: Provider Caching
+#### CORE-011: Provider Caching
 **Status:** Planned  
 **Complexity:** Medium  
 **Priority:** Low  
@@ -240,7 +293,7 @@ class CachedProvider:
 
 ---
 
-#### CORE-011: OpenRouter Streaming Support
+#### CORE-012: OpenRouter Streaming Support
 **Status:** Planned  
 **Complexity:** Medium  
 **Priority:** Low  
@@ -279,7 +332,7 @@ def execute_streaming(self, prompt: str) -> Generator[str, None, ExecutionResult
 
 ### Long-term (High Effort)
 
-#### CORE-012: Provider Plugin System
+#### CORE-013: Provider Plugin System
 **Status:** Planned  
 **Complexity:** High  
 **Priority:** Low  
@@ -315,7 +368,7 @@ for ep in importlib.metadata.entry_points(group='orchestrator.providers'):
 
 ---
 
-#### CORE-013: Checkpoint Encryption
+#### CORE-014: Checkpoint Encryption
 **Status:** Planned  
 **Complexity:** High  
 **Priority:** Low  
@@ -352,7 +405,7 @@ class EncryptedCheckpointBackend(CheckpointBackend):
 
 ---
 
-#### CORE-014: Distributed Workflow Execution
+#### CORE-015: Distributed Workflow Execution
 **Status:** Planned  
 **Complexity:** High  
 **Priority:** Low  

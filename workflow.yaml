@@ -115,12 +115,20 @@ phases:
   - id: "EXECUTE"
     name: "Implementation"
     description: "Write code and tests to implement the planned feature. DEFAULT: Use Claude Code for implementation. Only handle directly for trivial tasks with explicit justification."
+    notes:
+      - "[caution] Before implementing, verify that your chosen agent/provider is actually available. If Claude Code CLI is not installed, check for alternative connectors (e.g., Manus direct connection, OpenRouter API)."
+      - "[tip] If the preferred agent is unavailable, ASK THE USER before defaulting to manual implementation. They may know of alternative connection methods."
+      - "[learning] From v2.2: Claude Code CLI may not be available in all environments (e.g., Manus sandbox), but alternative connectors often exist."
     items:
       - id: "handoff_decision"
         name: "Claude Code Handoff Decision"
         description: "Determine if task should be handed off to Claude Code (default) or handled directly. Document reasoning. Only skip Claude Code for: 1) Single-line config changes, 2) Documentation-only updates, 3) Explicit user request to handle directly."
         required: true
         skippable: false
+        notes:
+          - "[caution] BEFORE deciding, verify agent availability: 1) Check if Claude Code CLI is installed (`which claude`), 2) Check for Manus direct connector, 3) Check for OpenRouter API key. If primary agent unavailable, ASK USER about alternatives before proceeding."
+          - "[tip] Use `orchestrator handoff --provider auto` to auto-detect the best available provider for your environment."
+          - "[learning] Different environments have different agent access: Claude Code CLI (local dev), Manus direct connector (Manus sandbox), OpenRouter API (universal fallback)."
 
       - id: "implement_code"
         name: "Implement feature code"
