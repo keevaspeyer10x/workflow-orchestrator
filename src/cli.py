@@ -11,9 +11,6 @@ import json
 from pathlib import Path
 from datetime import datetime
 
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from src.engine import WorkflowEngine
 from src.analytics import WorkflowAnalytics
 from src.learning import LearningEngine
@@ -36,8 +33,9 @@ from src.review import (
     check_review_setup,
     setup_reviews,
 )
+from src.config import find_workflow_path, get_default_workflow_content, is_using_bundled_workflow
 
-VERSION = "1.0.0"
+VERSION = "2.0.0"
 
 
 def get_engine(args) -> WorkflowEngine:
@@ -61,16 +59,25 @@ def get_engine(args) -> WorkflowEngine:
 
 def cmd_start(args):
     """Start a new workflow."""
-    engine = WorkflowEngine(args.dir or '.')
-    
-    yaml_path = Path(args.dir or '.') / (args.workflow or 'workflow.yaml')
-    if not yaml_path.exists():
-        print(f"Error: Workflow definition not found: {yaml_path}")
-        sys.exit(1)
-    
+    working_dir = Path(args.dir or '.')
+    engine = WorkflowEngine(working_dir)
+
+    # Use explicit workflow if specified, otherwise use config discovery
+    if args.workflow and args.workflow != 'workflow.yaml':
+        # Explicit workflow specified
+        yaml_path = working_dir / args.workflow
+        if not yaml_path.exists():
+            print(f"Error: Workflow definition not found: {yaml_path}")
+            sys.exit(1)
+    else:
+        # Use config discovery: local workflow.yaml or bundled default
+        yaml_path = find_workflow_path(working_dir)
+        if is_using_bundled_workflow(working_dir):
+            print("Using bundled default workflow (no local workflow.yaml found)")
+
     # Parse constraints (Feature 4) - can be specified multiple times
     constraints = getattr(args, 'constraints', None) or []
-    
+
     try:
         state = engine.start_workflow(
             str(yaml_path),
@@ -86,6 +93,40 @@ def cmd_start(args):
         print("\nRun 'orchestrator status' to see the checklist.")
     except ValueError as e:
         print(f"Error: {e}")
+        sys.exit(1)
+
+
+def cmd_init(args):
+    """Initialize a workflow.yaml in the current directory."""
+    working_dir = Path(args.dir or '.')
+    workflow_path = working_dir / 'workflow.yaml'
+
+    # Check if workflow.yaml already exists
+    if workflow_path.exists() and not args.force:
+        print(f"workflow.yaml already exists at {workflow_path}")
+        response = input("Overwrite? This will backup the existing file. [y/N] ").strip().lower()
+        if response != 'y':
+            print("Aborted.")
+            sys.exit(0)
+
+    # Backup existing file if it exists
+    if workflow_path.exists():
+        backup_path = working_dir / 'workflow.yaml.bak'
+        import shutil
+        shutil.copy2(workflow_path, backup_path)
+        print(f"Backed up existing workflow to {backup_path}")
+
+    # Write the default workflow
+    try:
+        content = get_default_workflow_content()
+        workflow_path.write_text(content)
+        print(f"\n✓ Created {workflow_path}")
+        print("\nNext steps:")
+        print("  1. Review and customize workflow.yaml for your project")
+        print("  2. Start a workflow: orchestrator start \"Your task description\"")
+        print("  3. Check status: orchestrator status")
+    except Exception as e:
+        print(f"Error creating workflow.yaml: {e}")
         sys.exit(1)
 
 
@@ -1087,7 +1128,12 @@ Examples:
     start_parser.add_argument('--constraints', '-c', action='append', default=[],
                               help='Task constraint (can be specified multiple times)')
     start_parser.set_defaults(func=cmd_start)
-    
+
+    # Init command
+    init_parser = subparsers.add_parser('init', help='Initialize workflow.yaml in current directory')
+    init_parser.add_argument('--force', '-f', action='store_true', help='Overwrite existing workflow.yaml without prompting')
+    init_parser.set_defaults(func=cmd_init)
+
     # Status command
     status_parser = subparsers.add_parser('status', help='Show current workflow status')
     status_parser.add_argument('--json', action='store_true', help='Output as JSON')

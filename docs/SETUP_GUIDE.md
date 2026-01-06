@@ -228,13 +228,22 @@ EOF
 chmod +x ~/your-project/orchestrator
 ```
 
-### Method C: Global Installation (Coming Soon)
+### Method C: Global Installation (Recommended)
 
-Future versions will support:
+Install globally with pip:
 ```bash
-pip install workflow-orchestrator
-orchestrator init  # Creates workflow.yaml in current directory
+pip install git+https://github.com/keevaspeyer10x/workflow-orchestrator.git
 ```
+
+Then use from any directory:
+```bash
+cd ~/your-project
+orchestrator status        # Uses bundled workflow if no local workflow.yaml
+orchestrator init          # Creates workflow.yaml in current directory
+orchestrator start "Task"
+```
+
+This is the simplest approach for most users and works in all environments (local, Claude Code Web, Manus).
 
 ### Working Directory Configuration
 
@@ -348,35 +357,37 @@ The Web sandbox resets between sessions. Use SessionStart Hooks or re-run setup 
 
 ## Quick Reference
 
-### Daily Workflow (CLI)
+### Daily Workflow (After Global Install)
 
 ```bash
 # Start your day
 cd ~/your-project
-./orchestrator status
+orchestrator status
 
 # Start a new task
-./orchestrator start "Implement user authentication"
+orchestrator start "Implement user authentication"
 
 # Work through the phases
-./orchestrator complete check_roadmap --notes "No relevant items"
-./orchestrator complete clarifying_questions --notes "Requirements clear"
+orchestrator complete check_roadmap --notes "No relevant items"
+orchestrator complete clarifying_questions --notes "Requirements clear"
 # ... continue through workflow
 
 # Hand off to Claude Code for implementation
-./orchestrator handoff --execute
+orchestrator handoff --execute
 
 # After Claude completes, continue
-./orchestrator complete implement_code --notes "Feature implemented"
+orchestrator complete implement_code --notes "Feature implemented"
 ```
 
-### Daily Workflow (Web)
+### Daily Workflow (Claude Code Web)
 
 ```
 1. Go to claude.ai/code
-2. Ask Claude to clone your repos and set up environment
-3. Run orchestrator commands through Claude:
-   "Run: cd my-project && ./orchestrator status"
+2. Install the orchestrator:
+   pip install git+https://github.com/keevaspeyer10x/workflow-orchestrator.git
+3. Use orchestrator commands:
+   orchestrator start "My task"
+   orchestrator status
 4. Work through the workflow conversationally
 ```
 

@@ -1,81 +1,12 @@
 # Workflow Orchestrator Roadmap
 
-This document tracks planned improvements, deferred features, and audit recommendations for the workflow orchestrator.
+This document tracks **planned** improvements, deferred features, and audit recommendations.
+
+For completed features, see [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
-## v2.2 Enhancements (COMPLETED)
-
-> See `PRD_v2.2_ENHANCEMENTS.md` for full specification
-
-### CORE-001: Provider Abstraction & OpenRouter Integration
-**Status:** ✅ Completed (2026-01-06)
-**Complexity:** Medium
-**Description:** Abstract the Claude Code integration into a generic provider interface to support multiple LLM backends.
-
-**Features:**
-- Generic HTTP API provider interface
-- OpenRouter as default provider (requires `OPENROUTER_API_KEY`)
-- Claude Code provider (refactored from existing)
-- Manual provider (fallback for copy/paste)
-- `--provider` and `--model` CLI flags
-- Per-phase/item model selection support
-
----
-
-### CORE-002: Environment Detection & Adaptation
-**Status:** ✅ Completed (2026-01-06)
-**Complexity:** Low
-**Description:** Auto-detect execution environment and adapt behavior accordingly.
-
-**Features:**
-- Detect Claude Code, Manus, Standalone CLI environments
-- Environment-specific provider defaults
-- Adapted output format per environment
-- `--env` override flag
-
----
-
-### CORE-003: Operating Notes System
-**Status:** ✅ Completed (2026-01-06)
-**Complexity:** Low
-**Description:** Add `notes` field to phases and items for embedding operational wisdom.
-
-**Features:**
-- `notes: list[str]` on PhaseDef and ChecklistItemDef
-- Optional categorization: `[tip]`, `[caution]`, `[learning]`, `[context]`
-- Display in status recitation and handoff prompts
-- Learning engine suggests note additions
-
----
-
-### CORE-004: Task Constraints Flag
-**Status:** ✅ Completed (2026-01-06)
-**Complexity:** Low
-**Description:** Allow task-specific guidance without modifying workflow.yaml.
-
-**Features:**
-- `--constraints` flag on `orchestrator start`
-- Stored in workflow state
-- Included in all recitation and handoff output
-
----
-
-### CORE-005: Checkpoint/Resume System
-**Status:** ✅ Completed (2026-01-06)
-**Complexity:** Medium
-**Description:** Enable saving workflow state with context summaries for resumption in fresh context.
-
-**Features:**
-- `orchestrator checkpoint` - Save state with context summary
-- `orchestrator resume` - Restore and generate handoff prompt
-- `orchestrator checkpoints` - List available checkpoints
-- Auto-checkpoint on phase transitions (configurable)
-- Context recovery data: decisions, file manifest, summary
-
----
-
-## v2.3 Recommendations (From v2.2 Implementation)
+## Planned Improvements
 
 > Items identified during v2.2 implementation for future work
 
@@ -828,30 +759,7 @@ These features were considered but deferred for future consideration:
 
 ## Completed Items
 
-| ID | Description | Completed |
-|----|-------------|-----------|
-| CORE-001 | Provider Abstraction & OpenRouter Integration | 2026-01-06 |
-| CORE-002 | Environment Detection & Adaptation | 2026-01-06 |
-| CORE-003 | Operating Notes System | 2026-01-06 |
-| CORE-004 | Task Constraints Flag | 2026-01-06 |
-| CORE-005 | Checkpoint/Resume System | 2026-01-06 |
-| CORE-000 | SOPS Secrets Management (backported) | 2026-01-06 |
-| CORE-016 | Multi-Model Review Routing | 2026-01-06 |
-| - | Visual verification client implementation | 2026-01-06 |
-| - | CLI commands (visual-verify, visual-template) | 2026-01-06 |
-| - | Mobile viewport testing by default | 2026-01-06 |
-| - | Style guide integration method | 2026-01-06 |
-| - | Unit test suite (19 tests) | 2026-01-06 |
-| - | Documentation (VISUAL_VERIFICATION.md) | 2026-01-06 |
-| - | Core workflow engine with phase/item state machine | 2026-01-05 |
-| - | YAML-based workflow definitions | 2026-01-05 |
-| - | Active verification (file_exists, command, manual_gate) | 2026-01-05 |
-| - | Claude Code CLI integration | 2026-01-05 |
-| - | Analytics and learning engine | 2026-01-05 |
-| - | Web dashboard | 2026-01-05 |
-| - | Security hardening (injection protection, path traversal) | 2026-01-05 |
-| - | Version-locked workflow definitions in state | 2026-01-05 |
-| - | Template variable substitution | 2026-01-05 |
+See [CHANGELOG.md](CHANGELOG.md) for completed features and their details.
 
 ---
 
@@ -861,4 +769,4 @@ When adding items to this roadmap:
 1. Use the appropriate prefix (CORE-, VV-, SEC-, ARCH-, WF-, DEF-)
 2. Include: Status, Complexity, Description, Implementation Notes
 3. For audit items, include Source reference
-4. Move completed items to the Completed Items table
+4. When completed, move to CHANGELOG.md and remove from this file

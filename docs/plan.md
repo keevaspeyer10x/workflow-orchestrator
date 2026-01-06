@@ -1,420 +1,149 @@
-# Plan: Multi-Model Review Routing for REVIEW Phase
+# Implementation Plan: Global Installation (Method C)
 
-## Summary
+## Overview
 
-Implement automatic AI code reviews optimized for **vibe coding** (AI-generated code with minimal human review). Reviews catch what coding agents miss: security issues, codebase inconsistencies, quality problems, and holistic concerns.
+Convert workflow-orchestrator from a repo-based tool to a globally pip-installable package. After implementation, users can install via `pip install git+https://github.com/keevaspeyer10x/workflow-orchestrator.git` and run `orchestrator` from any directory.
 
-**Four Reviews:**
-1. **Security Review** (Codex) - OWASP, vulnerabilities, auth issues
-2. **Consistency Review** (Gemini) - Pattern compliance, existing utilities, codebase fit
-3. **Quality Review** (Codex) - Edge cases, complexity, test coverage
-4. **Holistic Review** (Gemini) - Open-ended "what did the AI miss?"
+## Target Environments
+- Local Claude Code CLI
+- Claude Code Web
+- Manus
 
-**Three Execution Modes:**
-- **CLI Mode** (local): Codex CLI + Gemini CLI with full repo access
-- **API Mode** (Claude Code Web): OpenRouter with context injection
-- **GitHub Actions** (PR gate): Full repo access, blocks merge
+## Design Decisions
+1. **Default workflow**: Bundle full 5-phase `workflow.yaml` (PLAN -> EXECUTE -> REVIEW -> VERIFY -> LEARN)
+2. **Init conflict handling**: Prompt user, then backup to `workflow.yaml.bak` before replacing
+3. **State files**: Store in current working directory (`.workflow_state.json`, `.workflow_log.jsonl`)
+4. **Config discovery**: Local `workflow.yaml` > bundled default (no user config dir - keep it simple)
 
-## Problem Statement
-
-AI coding agents have systematic blind spots:
-- **Tunnel vision**: Solve problems in isolation, miss existing utilities
-- **Pattern ignorance**: Don't follow established codebase conventions
-- **Security naivety**: Introduce vulnerabilities without realizing
-- **Happy path focus**: Miss edge cases and error handling
-
-For vibe coding, these reviews are the **only safety net** before code ships.
-
-## Architecture
-
-### Review Pipeline
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Multi-Stage Review Pipeline                   │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  DURING DEVELOPMENT                                              │
-│  ├── Local (Claude Code CLI)                                     │
-│  │   └── Codex CLI + Gemini CLI (full repo access)              │
-│  │                                                               │
-│  └── Web (Claude Code Web)                                       │
-│      └── OpenRouter API (context injection)                      │
-│                                                                  │
-│  ON PR CREATION (GitHub Actions)                                 │
-│  ├── Security Review (Codex Action)                              │
-│  ├── Consistency Review (Gemini Code Assist)                     │
-│  ├── Quality Review (Codex Action)                               │
-│  └── Holistic Review (Gemini Code Assist)                        │
-│      └── BLOCKS MERGE until all pass                             │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Environment Auto-Detection
-
-```python
-def detect_review_method() -> str:
-    """Detect best review method for current environment."""
-
-    # Check for CLI tools (best experience)
-    has_codex = shutil.which("codex")
-    has_gemini = shutil.which("gemini")
-
-    if has_codex and has_gemini:
-        return "cli"
-
-    # Check for API key (fallback)
-    if os.environ.get("OPENROUTER_API_KEY"):
-        return "api"
-
-    raise ReviewConfigError(
-        "No review method available. Either:\n"
-        "  1. Install CLIs: npm install -g @openai/codex @google/gemini-cli\n"
-        "  2. Set OPENROUTER_API_KEY for API mode"
-    )
-```
-
-## The Four Reviews
-
-### 1. Security Review (Codex)
-
-```yaml
-security_review:
-  tool: codex  # or openrouter/openai-gpt-5.2-codex
-  prompt: |
-    Review this AI-generated code for security vulnerabilities.
-    AI agents often introduce these issues without realizing:
-
-    - Injection (SQL, command, XSS, template)
-    - Authentication/authorization bypasses
-    - Hardcoded secrets or credentials
-    - SSRF, CSRF, path traversal
-    - Insecure deserialization
-    - Missing input validation
-
-    This code has had ZERO human review. Be thorough.
-
-    For each finding:
-    ### [CRITICAL|HIGH|MEDIUM|LOW]
-    **Issue:** <description>
-    **Location:** <file:line>
-    **Fix:** <recommendation>
-```
-
-### 2. Consistency Review (Gemini - 1M context)
-
-```yaml
-consistency_review:
-  tool: gemini  # 1M token context = entire codebase
-  prompt: |
-    You have access to the ENTIRE codebase. Review if this new code:
-
-    1. DUPLICATES existing utilities/helpers
-       - List any existing code that does the same thing
-       - "There's already src/utils/dates.ts for date formatting"
-
-    2. FOLLOWS established patterns
-       - Show examples of how similar problems are solved elsewhere
-       - "Other API handlers use the errorHandler middleware"
-
-    3. USES existing abstractions
-       - Don't reinvent what already exists
-       - "The BaseRepository class already handles this"
-
-    4. MATCHES naming, structure, error handling conventions
-       - "Other services use camelCase, this uses snake_case"
-
-    AI agents solve problems in isolation. Find what they missed.
-```
-
-### 3. Quality Review (Codex)
-
-```yaml
-quality_review:
-  tool: codex
-  prompt: |
-    Review this AI-generated code for production readiness:
-
-    - Edge cases: What inputs weren't considered?
-    - Error handling: What can fail? Is it handled?
-    - Resource cleanup: File handles, connections closed?
-    - Input validation: At system boundaries?
-    - Complexity: Is there a simpler solution?
-    - Tests: Are they meaningful? What's missing?
-
-    AI agents often take the happy path. Find the unhappy paths.
-
-    ### Quality Score: [1-10]
-    **Issues:** (list with severity and location)
-    **Missing Tests:** (what scenarios aren't covered)
-```
-
-### 4. Holistic Review (Gemini)
-
-```yaml
-holistic_review:
-  tool: gemini
-  prompt: |
-    Review this AI-generated code with fresh eyes.
-
-    The security, consistency, and quality reviews have run.
-    What else concerns you?
-
-    Consider:
-    - Would a senior engineer approve this PR?
-    - What questions would come up in code review?
-    - What feels "off" even if you can't pinpoint why?
-    - What would YOU do differently?
-    - Any red flags the other reviews might have missed?
-
-    Be the skeptical human reviewer this code hasn't had.
-```
-
-## Setup Command: `setup-reviews`
-
-Bootstrap GitHub Actions in any repo:
-
-```bash
-# Set up review infrastructure in current repo
-./orchestrator setup-reviews
-
-# Options
-./orchestrator setup-reviews --dry-run        # Preview changes
-./orchestrator setup-reviews --provider all   # Default: all providers
-./orchestrator setup-reviews --skip-actions   # Only config files, no Actions
-```
-
-### Generated Files
-
-```
-your-repo/
-├── .github/
-│   └── workflows/
-│       └── ai-reviews.yml      ← Generated GitHub Actions workflow
-├── .gemini/
-│   └── styleguide.md           ← Gemini review instructions
-├── AGENTS.md                    ← Codex review instructions
-└── .coderabbit.yaml            ← CodeRabbit config (optional)
-```
-
-### Generated GitHub Actions Workflow
-
-```yaml
-# .github/workflows/ai-reviews.yml
-name: AI Code Reviews
-
-on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-
-jobs:
-  security-review:
-    name: 🔒 Security Review
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run Security Review
-        uses: openai/codex-action@v1
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          mode: review
-          custom-instructions: |
-            Focus on security vulnerabilities in AI-generated code.
-            Check for: injection, auth issues, secrets, SSRF, path traversal.
-            This code has had zero human review - be thorough.
-
-  consistency-review:
-    name: 🔄 Consistency Review
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run Consistency Review
-        uses: google/gemini-code-assist-action@v1
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          # Uses .gemini/styleguide.md for instructions
-
-  quality-review:
-    name: ✨ Quality Review
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run Quality Review
-        uses: openai/codex-action@v1
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          mode: review
-          custom-instructions: |
-            Focus on code quality and edge cases.
-            Check for: error handling, input validation, complexity, test coverage.
-
-  holistic-review:
-    name: 🎯 Holistic Review
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run Holistic Review
-        uses: google/gemini-code-assist-action@v1
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          custom-prompt: |
-            Review this code with fresh eyes. What concerns you?
-            What would a senior engineer ask about in code review?
-```
-
-## Workflow.yaml Settings
-
-```yaml
-settings:
-  # Review configuration
-  reviews:
-    enabled: true
-    on_by_default: true  # Reviews run automatically
-
-    # Method selection
-    method: auto  # auto | cli | api | github-actions
-
-    # GitHub Actions configuration
-    github_actions:
-      configured: false  # Auto-detected
-      required_for_merge: true  # Block merge if reviews fail
-
-    # Fallback when CLI/Actions unavailable
-    fallback_to_api: true
-
-    # Prompt to set up if missing
-    prompt_setup_if_missing: true
-
-    # Review types to run
-    types:
-      - security_review
-      - consistency_review
-      - quality_review
-      - holistic_review
-```
-
-## CLI Commands
-
-```bash
-# Setup reviews in a new repo
-./orchestrator setup-reviews
-./orchestrator setup-reviews --dry-run
-
-# Check review infrastructure status
-./orchestrator review-status
-# Output:
-#   CLI Tools:    ✓ codex, ✓ gemini
-#   API Key:      ✓ OPENROUTER_API_KEY
-#   GitHub Actions: ✗ Not configured (run setup-reviews)
-
-# Run reviews manually
-./orchestrator review                    # All reviews
-./orchestrator review security           # Specific review
-./orchestrator review --method cli       # Force CLI mode
-./orchestrator review --method api       # Force API mode
-
-# View results
-./orchestrator review-results
-./orchestrator review-results --json
-
-# Skip reviews (requires justification)
-./orchestrator advance --skip-reviews --reason "Emergency hotfix"
-```
-
-## Auto-Detection Flow
-
-```python
-def on_entering_review_phase():
-    """Called when workflow advances to REVIEW phase."""
-
-    # 1. Check what's available
-    setup = check_review_setup()
-
-    # 2. Determine method
-    if setup.cli_available:
-        method = "cli"
-    elif setup.api_available:
-        method = "api"
-        print("⚠️  Using API mode (reduced context). Consider installing CLIs.")
-    else:
-        raise ReviewConfigError("No review method available")
-
-    # 3. Check GitHub Actions for PR gate
-    if not setup.github_actions_configured:
-        print("⚠️  GitHub Actions not configured for this repo.")
-        print("   Reviews will run locally but won't block PRs.")
-        print("   Run: ./orchestrator setup-reviews")
-
-    # 4. Execute reviews
-    for review_type in ["security", "consistency", "quality", "holistic"]:
-        execute_review(review_type, method)
-```
+---
 
 ## Implementation Steps
 
-### Phase 1: Core Review Module
-1. Create `src/review/` module structure
-2. Implement `ReviewContextCollector` for API mode
-3. Implement `ReviewRouter` with method detection
-4. Create prompt templates for all 4 reviews
-5. Implement result parsing
+### Phase 1: Package Structure
 
-### Phase 2: CLI Integration
-6. Add `review` command
-7. Add `review-status` command
-8. Add `review-results` command
-9. Integrate with `advance` command
+**1.1 Create pyproject.toml**
+- Define package metadata (name: `workflow-orchestrator`)
+- Specify dependencies from requirements.txt
+- Define entry point: `orchestrator = "src.cli:main"`
+- Include package data for bundled workflow.yaml
+- Require Python >= 3.10
 
-### Phase 3: Setup Command
-10. Implement `setup-reviews` command
-11. Generate GitHub Actions workflow file
-12. Generate `.gemini/styleguide.md`
-13. Generate `AGENTS.md`
-14. Auto-detection of existing setup
+**1.2 Add __main__.py to src/**
+- Enable `python -m src` invocation
+- Call main() from cli.py
 
-### Phase 4: Testing
-15. Unit tests for each component
-16. Integration tests with mock CLIs
-17. End-to-end test with real APIs (optional, requires keys)
+**1.3 Update src/__init__.py**
+- Ensure version is defined in one place
+- Export main() function
 
-## Files to Create/Modify
+### Phase 2: Configuration Discovery
 
-| File | Action | Description |
-|------|--------|-------------|
-| `src/review/__init__.py` | Create | Module exports |
-| `src/review/context.py` | Create | Context collector for API mode |
-| `src/review/router.py` | Create | Method detection and routing |
-| `src/review/prompts.py` | Create | All 4 review prompts |
-| `src/review/result.py` | Create | Result parsing and storage |
-| `src/review/setup.py` | Create | `setup-reviews` implementation |
-| `src/review/cli_executor.py` | Create | Execute via Codex/Gemini CLI |
-| `src/review/api_executor.py` | Create | Execute via OpenRouter API |
-| `src/cli.py` | Modify | Add review commands |
-| `src/engine.py` | Modify | Integrate with REVIEW phase |
-| `workflow.yaml` | Modify | Add review settings |
-| `templates/ai-reviews.yml` | Create | GitHub Actions template |
-| `templates/gemini-styleguide.md` | Create | Gemini config template |
-| `templates/AGENTS.md` | Create | Codex config template |
-| `tests/test_review_*.py` | Create | Test suite |
+**2.1 Create src/config.py**
+- `find_workflow_path()`: Check for local `workflow.yaml`, fall back to bundled
+- `get_bundled_workflow_path()`: Return path to package data workflow
+- `get_default_workflow_content()`: Return bundled workflow as string
+
+**2.2 Update src/engine.py**
+- Modify `load_workflow()` to use config discovery
+- When no workflow specified: try local, then bundled default
+- Log which workflow is being used
+
+### Phase 3: Init Command
+
+**3.1 Add init command to src/cli.py**
+- `orchestrator init`: Copy bundled workflow to current directory
+- Check if `workflow.yaml` exists
+- If exists: prompt user, backup to `workflow.yaml.bak`, then replace
+- If not exists: copy directly
+- Print success message with next steps
+
+### Phase 4: CLI Entry Point Refactor
+
+**4.1 Update src/cli.py**
+- Add `main()` function as entry point
+- Ensure all imports work when installed as package
+- Remove sys.path manipulation hack (line 15)
+- Handle case where no workflow.yaml exists gracefully
+
+**4.2 Fix relative imports**
+- Review all imports in src/*.py files
+- Ensure they work both as package and from repo root
+- Use relative imports within the package
+
+### Phase 5: Documentation Updates
+
+**5.1 Update README.md**
+- Add "Installation" section with pip install command
+- Update "Quick Start" to reflect global usage
+- Keep local development instructions
+
+**5.2 Update CLAUDE.md**
+- Update CLI examples to use `orchestrator` instead of `./orchestrator`
+- Add section on global installation for AI agents
+- Include the pip install command prominently
+
+**5.3 Update docs/SETUP_GUIDE.md**
+- Rewrite installation section
+- Document both global install and development setup
+- Add troubleshooting for common issues
+
+**5.4 Update docs/CLAUDE_CODE_PROMPT_GLOBAL_INSTALL.md**
+- Mark as implemented
+- Add actual commands used
+
+### Phase 6: Testing
+
+**6.1 Update existing tests**
+- Ensure tests still pass with new structure
+- Update any path-dependent tests
+
+**6.2 Add installation tests**
+- Test `pip install -e .` works
+- Test `orchestrator` command is available after install
+- Test workflow discovery (local vs bundled)
+- Test init command (new, overwrite, backup)
+
+---
+
+## File Changes Summary
+
+### New Files
+- `pyproject.toml` - Package configuration
+- `src/__main__.py` - Entry point for `python -m src`
+- `src/config.py` - Configuration discovery logic
+- `src/default_workflow.yaml` - Bundled workflow (copy of workflow.yaml)
+
+### Modified Files
+- `src/__init__.py` - Export main(), version consistency
+- `src/cli.py` - Add main(), init command, remove path hack
+- `src/engine.py` - Use config discovery for workflow loading
+- `README.md` - Installation docs
+- `CLAUDE.md` - AI agent instructions
+- `docs/SETUP_GUIDE.md` - Updated setup guide
+- `docs/CLAUDE_CODE_PROMPT_GLOBAL_INSTALL.md` - Mark complete
+
+### Deprecated (kept for backwards compat)
+- `orchestrator` (bash script) - Keep working for existing users
+- `requirements.txt` - Keep for reference, pyproject.toml is authoritative
+
+---
 
 ## Success Criteria
 
-1. ✅ Four reviews run with appropriate tools (Codex/Gemini)
-2. ✅ CLI mode works with full repo access
-3. ✅ API mode works in Claude Code Web
-4. ✅ `setup-reviews` bootstraps GitHub Actions in any repo
-5. ✅ GitHub Actions block PR merge until reviews pass
-6. ✅ Reviews are on by default, skip requires justification
-7. ✅ Auto-detection chooses best available method
-8. ✅ Clear status output shows what's configured
+1. `pip install git+https://...` creates globally available `orchestrator` command
+2. Running `orchestrator status` in empty directory uses bundled workflow
+3. Running `orchestrator status` with local `workflow.yaml` uses that file
+4. `orchestrator init` creates local workflow.yaml (with backup if needed)
+5. All existing tests pass
+6. Works in Claude Code Web and Manus environments
 
-## Out of Scope (Future)
+---
 
-- Real-time streaming of review output
-- Review result caching (same diff = reuse review)
-- Custom prompts per project (beyond styleguide files)
-- Review aggregation dashboard
-- Automatic fix suggestions/application
+## Execution Approach
+
+Will implement directly in Claude Code (not handed off) since this is primarily:
+- Configuration/packaging work
+- Documentation updates
+- Straightforward code changes
+
+No complex logic requiring specialized implementation.
