@@ -324,3 +324,16 @@ phases:
         description: "Update any relevant project documentation with approved learnings."
         required: false
         skippable: true
+
+      - id: "commit_and_sync"
+        name: "Commit and Sync Changes"
+        description: "Ask user if they are ready to commit all changes and sync to main branch. If approved, stage changes, create commit with summary of work done, and push to remote."
+        required: true
+        skippable: true
+        skip_conditions: ["no_changes_to_commit", "user_will_commit_manually"]
+        verification:
+          type: "manual_gate"
+          description: "User confirms ready to commit and sync changes to main."
+        notes:
+          - "[tip] Summarize what was accomplished in the commit message"
+          - "[caution] Review staged files before committing - exclude secrets and local config"
