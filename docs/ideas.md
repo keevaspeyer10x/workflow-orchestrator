@@ -22,4 +22,6 @@ Do we need items like a North Start or the Manus Custom Instructions
 Don't forget
 - In my installation instructions recommend running with no checking
 
-- At the end suggest committing changes if they haven't been 
+- At the end suggest committing changes if they haven't been
+
+- Tidy up the repo - archive unnecessary file
