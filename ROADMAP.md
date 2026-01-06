@@ -96,9 +96,9 @@ def prompt_user_for_provider(preferred: str, available: List[str]) -> str:
 ---
 
 #### CORE-009: Constraints File Flag
-**Status:** Planned  
-**Complexity:** Low  
-**Priority:** Low  
+**Status:** Planned
+**Complexity:** Low
+**Priority:** Low
 **Description:** Add `--constraints-file` flag to load constraints from a file for complex multi-line constraints.
 
 **Implementation:**
@@ -117,6 +117,193 @@ Follow PEP 8 style guide
 - [ ] Read file and split by newlines
 - [ ] Combine with inline `--constraints` flags
 - [ ] Add documentation
+
+---
+
+#### CORE-010: Enhanced Skip Visibility
+**Status:** Planned
+**Complexity:** Low
+**Priority:** High
+**Source:** Learnings from roadmap items implementation (2026-01-06)
+**Description:** Make skipped items more visible to force deliberate consideration and prevent lazy skipping.
+
+**Problem Solved:**
+When AI agents skip workflow items, the skip reason is stored but not prominently displayed. This allows:
+1. **Lazy skipping** - Agent skips items without fully considering implications
+2. **Silent accumulation** - Multiple skips go unnoticed until workflow ends
+3. **Lost context** - User doesn't see what was skipped or why
+
+The act of articulating rationale forces deeper consideration - it's harder to be lazy when you have to explain yourself out loud.
+
+**Desired Behavior:**
+
+1. **At skip time** - Enhanced output that forces consideration:
+```
+============================================================
+⊘ SKIPPING: visual_regression_test
+============================================================
+Reason: Not applicable - CLI tool with no visual UI
+
+Implications:
+  • No visual regression testing will be performed
+  • UI changes (if any) will not be automatically verified
+
+This skip is acceptable because:
+  • This is a CLI-only tool with no visual components
+  • Visual testing would have no meaningful assertions
+============================================================
+```
+
+2. **At phase advance** - Show skipped items for the completed phase:
+```
+Phase VERIFY completed with 1 skipped item(s):
+  ⊘ visual_regression_test - "Not applicable - CLI tool with no visual UI"
+```
+
+3. **At workflow finish** - Summary of all skipped items:
+```
+============================================================
+SKIPPED ITEMS SUMMARY
+============================================================
+Review these skips - were they all justified?
+
+Phase PLAN:
+  ⊘ clarifying_questions - "Roadmap items well-specified"
+
+Phase VERIFY:
+  ⊘ visual_regression_test - "CLI tool with no visual UI"
+
+Phase LEARN:
+  ⊘ backport_improvements - "No universal improvements to backport"
+  ⊘ update_knowledge_base - "Handled via ROADMAP.md updates"
+
+Total: 4 items skipped across 3 phases
+============================================================
+```
+
+**Implementation Notes:**
+
+```python
+# In cmd_skip() - src/cli.py
+def cmd_skip(args):
+    # ... existing validation ...
+
+    # Enhanced skip output
+    print("=" * 60)
+    print(f"⊘ SKIPPING: {args.item}")
+    print("=" * 60)
+    print(f"Reason: {args.reason}")
+    print()
+
+    # Get item definition for context
+    item_def = engine.get_item_definition(args.item)
+    if item_def and item_def.description:
+        print("What this item does:")
+        print(f"  {item_def.description}")
+        print()
+
+    print("Implications:")
+    print(f"  • {item_def.name} will not be performed")
+    print()
+    print("=" * 60)
+
+    # Proceed with skip
+    success, message = engine.skip_item(args.item, args.reason)
+    # ...
+
+# In cmd_advance() - show skipped items for completed phase
+def cmd_advance(args):
+    # ... existing logic ...
+
+    # After successful advance, show skipped items from previous phase
+    skipped = engine.get_skipped_items(previous_phase_id)
+    if skipped:
+        print(f"\nPhase {previous_phase_id} completed with {len(skipped)} skipped item(s):")
+        for item_id, reason in skipped:
+            print(f"  ⊘ {item_id} - \"{reason}\"")
+
+# In cmd_finish() - full summary
+def cmd_finish(args):
+    # ... existing logic ...
+
+    # Before completing, show all skipped items
+    all_skipped = engine.get_all_skipped_items()
+    if all_skipped:
+        print("\n" + "=" * 60)
+        print("SKIPPED ITEMS SUMMARY")
+        print("=" * 60)
+        print("Review these skips - were they all justified?\n")
+
+        for phase_id, items in all_skipped.items():
+            print(f"Phase {phase_id}:")
+            for item_id, reason in items:
+                print(f"  ⊘ {item_id} - \"{reason}\"")
+            print()
+
+        total = sum(len(items) for items in all_skipped.values())
+        print(f"Total: {total} items skipped across {len(all_skipped)} phases")
+        print("=" * 60)
+```
+
+**Engine Methods to Add:**
+
+```python
+# In WorkflowEngine - src/engine.py
+
+def get_skipped_items(self, phase_id: str) -> list[tuple[str, str]]:
+    """Get list of (item_id, skip_reason) for skipped items in a phase."""
+    if not self.state:
+        return []
+    phase = self.state.phases.get(phase_id)
+    if not phase:
+        return []
+    return [
+        (item_id, item.skip_reason or "No reason provided")
+        for item_id, item in phase.items.items()
+        if item.status == ItemStatus.SKIPPED
+    ]
+
+def get_all_skipped_items(self) -> dict[str, list[tuple[str, str]]]:
+    """Get all skipped items grouped by phase."""
+    if not self.state:
+        return {}
+    result = {}
+    for phase_id, phase in self.state.phases.items():
+        skipped = self.get_skipped_items(phase_id)
+        if skipped:
+            result[phase_id] = skipped
+    return result
+
+def get_item_definition(self, item_id: str) -> Optional[ChecklistItemDef]:
+    """Get the workflow definition for an item."""
+    if not self.workflow_def:
+        return None
+    for phase in self.workflow_def.phases:
+        for item in phase.items:
+            if item.id == item_id:
+                return item
+    return None
+```
+
+**Tasks:**
+- [ ] Add `get_skipped_items()` method to WorkflowEngine
+- [ ] Add `get_all_skipped_items()` method to WorkflowEngine
+- [ ] Add `get_item_definition()` method to WorkflowEngine
+- [ ] Update `cmd_skip()` to show enhanced output with implications
+- [ ] Update `cmd_advance()` to show skipped items from completed phase
+- [ ] Update `cmd_finish()` to show full skipped items summary
+- [ ] Add tests for new engine methods
+- [ ] Add tests for CLI output changes
+- [ ] Update documentation
+
+**Why This Matters for AI Agents:**
+When an AI agent must articulate *why* something is being skipped and see the implications displayed, it:
+1. Forces genuine consideration of whether skipping is appropriate
+2. Makes lazy skipping visible and uncomfortable
+3. Creates accountability in the conversation/logs
+4. Gives the human user visibility into agent decision-making
+
+This is particularly important for "vibe coding" workflows where AI operates with high autonomy.
 
 ---
 
