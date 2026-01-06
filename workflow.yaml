@@ -327,7 +327,7 @@ phases:
 
       - id: "commit_and_sync"
         name: "Commit and Sync Changes"
-        description: "Ask user if they are ready to commit all changes and sync to main branch. If approved, stage changes, create commit with summary of work done, and push to remote."
+        description: "Ask user if they are ready to commit and sync to main. If approved: 1) Run git status/diff, 2) Auto-generate commit message from workflow task and changes, 3) Stage relevant files (exclude .env, secrets, workflow state), 4) Commit and push."
         required: true
         skippable: true
         skip_conditions: ["no_changes_to_commit", "user_will_commit_manually"]
@@ -335,5 +335,6 @@ phases:
           type: "manual_gate"
           description: "User confirms ready to commit and sync changes to main."
         notes:
-          - "[tip] Summarize what was accomplished in the commit message"
-          - "[caution] Review staged files before committing - exclude secrets and local config"
+          - "[tip] Auto-generate commit message: summarize the task from workflow state + key changes from git diff"
+          - "[tip] Commit message format: 'feat/fix/chore: <summary from task>' with bullet points of what changed"
+          - "[caution] Exclude from commit: .env, .workflow_state.json, .workflow_log.jsonl, secrets, credentials"
