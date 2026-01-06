@@ -1,254 +1,257 @@
-# Test Cases: Global Installation (Method C)
+# Test Cases: Roadmap Items CORE-007, CORE-008, ARCH-001, WF-004
 
-## Unit Tests
+## CORE-007: Deprecate Legacy Claude Integration
 
-### Config Discovery Tests
-
-#### TC-CFG-001: Find Local Workflow
-**Component:** `src/config.py`
-**Description:** Finds workflow.yaml in current directory
-**Input:** Directory with workflow.yaml present
-**Expected:** Returns path to local workflow.yaml
+### TC-DEP-001: Deprecation Warning on Import
+**Component:** `src/claude_integration.py`
+**Description:** Importing module shows deprecation warning
+**Input:** `import src.claude_integration`
+**Expected:** `DeprecationWarning` raised pointing to caller
 **Priority:** High
 
-#### TC-CFG-002: Fallback to Bundled Workflow
-**Component:** `src/config.py`
-**Description:** Falls back to bundled when no local workflow
-**Input:** Directory without workflow.yaml
-**Expected:** Returns path to bundled default_workflow.yaml
+### TC-DEP-002: Functionality Still Works
+**Component:** `src/claude_integration.py`
+**Description:** Module still functions after deprecation warning
+**Input:** `from src.claude_integration import ClaudeCodeIntegration`
+**Expected:** Can instantiate and use class
 **Priority:** High
 
-#### TC-CFG-003: Get Bundled Workflow Path
-**Component:** `src/config.py`
-**Description:** Returns correct path to package data
-**Input:** N/A
-**Expected:** Path exists and points to valid YAML file
-**Priority:** High
-
-#### TC-CFG-004: Get Default Workflow Content
-**Component:** `src/config.py`
-**Description:** Returns bundled workflow as string
-**Input:** N/A
-**Expected:** Valid YAML content with 5 phases
+### TC-DEP-003: Warning Points to Correct File
+**Component:** `src/claude_integration.py`
+**Description:** Stacklevel correctly points to importing code
+**Input:** Import from test file
+**Expected:** Warning shows test file as source, not claude_integration.py
 **Priority:** Medium
 
-### Init Command Tests
+---
 
-#### TC-INIT-001: Init Creates Workflow
-**Component:** `src/cli.py`
-**Description:** Creates workflow.yaml in current directory
-**Setup:** Empty directory
-**Input:** `orchestrator init`
-**Expected:** workflow.yaml created, matches bundled content
+## CORE-008: Input Length Limits
+
+### TC-VAL-001: Valid Constraint Under Limit
+**Component:** `src/validation.py`
+**Description:** Constraints under 1000 chars accepted
+**Input:** `validate_constraint("short constraint")`
+**Expected:** Returns input unchanged
 **Priority:** High
 
-#### TC-INIT-002: Init Prompts on Existing File
-**Component:** `src/cli.py`
-**Description:** Prompts before overwriting existing workflow
-**Setup:** Directory with existing workflow.yaml
-**Input:** `orchestrator init` (simulate 'y' response)
-**Expected:** Prompts user, creates backup, overwrites
+### TC-VAL-002: Valid Constraint At Limit
+**Component:** `src/validation.py`
+**Description:** Constraint exactly 1000 chars accepted
+**Input:** `validate_constraint("a" * 1000)`
+**Expected:** Returns input unchanged
 **Priority:** High
 
-#### TC-INIT-003: Init Creates Backup
-**Component:** `src/cli.py`
-**Description:** Backs up existing file before overwrite
-**Setup:** Directory with workflow.yaml containing custom content
-**Input:** `orchestrator init --force`
-**Expected:** workflow.yaml.bak created with original content
+### TC-VAL-003: Constraint Over Limit Rejected
+**Component:** `src/validation.py`
+**Description:** Constraint over 1000 chars rejected
+**Input:** `validate_constraint("a" * 1001)`
+**Expected:** Raises `ValueError` with clear message
 **Priority:** High
 
-#### TC-INIT-004: Init Aborts on No
-**Component:** `src/cli.py`
-**Description:** Does not overwrite when user says no
-**Setup:** Directory with existing workflow.yaml
-**Input:** `orchestrator init` (simulate 'n' response)
-**Expected:** Original file unchanged, no backup created
+### TC-VAL-004: Valid Note Under Limit
+**Component:** `src/validation.py`
+**Description:** Notes under 500 chars accepted
+**Input:** `validate_note("short note")`
+**Expected:** Returns input unchanged
+**Priority:** High
+
+### TC-VAL-005: Note At Limit
+**Component:** `src/validation.py`
+**Description:** Note exactly 500 chars accepted
+**Input:** `validate_note("a" * 500)`
+**Expected:** Returns input unchanged
+**Priority:** High
+
+### TC-VAL-006: Note Over Limit Rejected
+**Component:** `src/validation.py`
+**Description:** Note over 500 chars rejected
+**Input:** `validate_note("a" * 501)`
+**Expected:** Raises `ValueError` with clear message
+**Priority:** High
+
+### TC-VAL-007: None Note Accepted
+**Component:** `src/validation.py`
+**Description:** None/empty notes pass validation
+**Input:** `validate_note(None)`, `validate_note("")`
+**Expected:** Returns input unchanged
 **Priority:** Medium
 
-#### TC-INIT-005: Init Force Flag
+### TC-VAL-008: CLI Start Validates Constraints
 **Component:** `src/cli.py`
-**Description:** --force skips prompt
-**Setup:** Directory with existing workflow.yaml
-**Input:** `orchestrator init --force`
-**Expected:** Creates backup and overwrites without prompt
+**Description:** Start command validates constraint length
+**Input:** `orchestrator start "task" --constraints "a"*1001`
+**Expected:** Error message about constraint length
+**Priority:** High
+
+### TC-VAL-009: CLI Complete Validates Notes
+**Component:** `src/cli.py`
+**Description:** Complete command validates note length
+**Input:** `orchestrator complete item_id --notes "a"*501`
+**Expected:** Error message about note length
+**Priority:** High
+
+---
+
+## ARCH-001: Extract Retry Logic
+
+### TC-RTY-001: Successful First Attempt
+**Component:** `src/utils.py`
+**Description:** No retry when function succeeds
+**Input:** Function that succeeds immediately
+**Expected:** Returns result, no retries
+**Priority:** High
+
+### TC-RTY-002: Success After Retries
+**Component:** `src/utils.py`
+**Description:** Retries until success within limit
+**Input:** Function that fails twice then succeeds
+**Expected:** Returns result after 3rd attempt
+**Priority:** High
+
+### TC-RTY-003: All Retries Exhausted
+**Component:** `src/utils.py`
+**Description:** Raises last error after max retries
+**Input:** Function that always fails, max_retries=3
+**Expected:** Raises exception after 3 attempts
+**Priority:** High
+
+### TC-RTY-004: Exponential Backoff Timing
+**Component:** `src/utils.py`
+**Description:** Delays follow exponential pattern
+**Input:** Function that fails, base_delay=1.0
+**Expected:** Delays are ~1s, ~2s, ~4s (approx)
 **Priority:** Medium
 
-### Engine Workflow Loading Tests
+### TC-RTY-005: Max Delay Respected
+**Component:** `src/utils.py`
+**Description:** Delay never exceeds max_delay
+**Input:** base_delay=10, max_delay=15, many retries
+**Expected:** Delays capped at 15s
+**Priority:** Medium
 
-#### TC-ENG-001: Engine Uses Local Workflow
+### TC-RTY-006: Specific Exception Types
+**Component:** `src/utils.py`
+**Description:** Only catches specified exceptions
+**Input:** exceptions=(ValueError,), raise TypeError
+**Expected:** TypeError propagates immediately
+**Priority:** High
+
+### TC-RTY-007: Function Signature Preserved
+**Component:** `src/utils.py`
+**Description:** Decorated function keeps name/docstring
+**Input:** Decorated function
+**Expected:** `__name__` and `__doc__` preserved
+**Priority:** Low
+
+### TC-RTY-008: Visual Verification Uses Utility
+**Component:** `src/visual_verification.py`
+**Description:** Refactored code uses retry utility
+**Input:** Call verify() method
+**Expected:** Retry behavior unchanged from before
+**Priority:** High
+
+---
+
+## WF-004: Auto-Archive Workflow Documents
+
+### TC-ARC-001: Archive Existing Plan
 **Component:** `src/engine.py`
-**Description:** Engine loads local workflow.yaml when present
-**Setup:** Directory with custom workflow.yaml
-**Input:** `WorkflowEngine(".")` then `load_workflow()`
-**Expected:** Loaded workflow matches local file content
+**Description:** Archives docs/plan.md when starting workflow
+**Setup:** Create docs/plan.md with content
+**Input:** `orchestrator start "New task"`
+**Expected:** plan.md moved to docs/archive/{date}_{slug}_plan.md
 **Priority:** High
 
-#### TC-ENG-002: Engine Falls Back to Bundled
+### TC-ARC-002: Archive Risk Analysis
 **Component:** `src/engine.py`
-**Description:** Engine uses bundled when no local workflow
-**Setup:** Empty directory
-**Input:** `WorkflowEngine(".")` then `load_workflow()`
-**Expected:** Loaded workflow matches bundled default
+**Description:** Archives docs/risk_analysis.md
+**Setup:** Create docs/risk_analysis.md
+**Input:** `orchestrator start "New task"`
+**Expected:** File moved to archive
 **Priority:** High
 
-#### TC-ENG-003: Engine Reports Workflow Source
+### TC-ARC-003: Archive Test Cases
 **Component:** `src/engine.py`
-**Description:** Engine logs which workflow is being used
-**Input:** Any workflow load
-**Expected:** Log message indicates source path
+**Description:** Archives tests/test_cases.md
+**Setup:** Create tests/test_cases.md
+**Input:** `orchestrator start "New task"`
+**Expected:** File moved to archive
+**Priority:** High
+
+### TC-ARC-004: Skip Missing Files
+**Component:** `src/engine.py`
+**Description:** No error if files don't exist
+**Setup:** Empty docs/ directory
+**Input:** `orchestrator start "New task"`
+**Expected:** Workflow starts normally
+**Priority:** High
+
+### TC-ARC-005: Create Archive Directory
+**Component:** `src/engine.py`
+**Description:** Creates docs/archive/ if missing
+**Setup:** No archive directory
+**Input:** `orchestrator start "New task"` with existing docs
+**Expected:** Archive directory created
+**Priority:** High
+
+### TC-ARC-006: Handle Duplicate Names
+**Component:** `src/engine.py`
+**Description:** Adds counter suffix for duplicates
+**Setup:** Archive file with same date/slug already exists
+**Input:** Start second workflow same day
+**Expected:** File named with _1 suffix
 **Priority:** Medium
 
-### Import Tests
-
-#### TC-IMP-001: Package Import Works
-**Component:** `src/__init__.py`
-**Description:** Can import package after pip install
-**Setup:** `pip install -e .`
-**Input:** `from src import WorkflowEngine`
-**Expected:** Import succeeds
+### TC-ARC-007: No-Archive Flag
+**Component:** `src/cli.py`
+**Description:** --no-archive skips archiving
+**Setup:** docs/plan.md exists
+**Input:** `orchestrator start "Task" --no-archive`
+**Expected:** plan.md not moved
 **Priority:** High
 
-#### TC-IMP-002: Main Entry Point Works
-**Component:** `src/__main__.py`
-**Description:** `python -m src` runs CLI
-**Setup:** `pip install -e .`
-**Input:** `python -m src --help`
-**Expected:** Shows help text
+### TC-ARC-008: Archive Logged
+**Component:** `src/engine.py`
+**Description:** Log event for archived files
+**Input:** Start workflow with docs to archive
+**Expected:** Log entry shows archived files
+**Priority:** Low
+
+### TC-ARC-009: Archived Content Intact
+**Component:** `src/engine.py`
+**Description:** Archived files have same content
+**Setup:** plan.md with specific content
+**Input:** Start workflow
+**Expected:** Archived file content matches original
 **Priority:** High
 
-#### TC-IMP-003: Entry Point Script Works
-**Component:** pyproject.toml entry point
-**Description:** `orchestrator` command available after install
-**Setup:** `pip install -e .`
-**Input:** `orchestrator --help`
-**Expected:** Shows help text
-**Priority:** High
+---
 
 ## Integration Tests
 
-### TC-INT-001: Fresh Install and Run
-**Description:** Full workflow from install to status check
-**Setup:** Fresh virtual environment
+### TC-INT-001: Full Workflow With All Features
+**Description:** Start workflow exercising all 4 features
 **Steps:**
-1. `pip install git+https://github.com/keevaspeyer10x/workflow-orchestrator.git`
-2. `cd /tmp/test-dir`
-3. `orchestrator status`
-**Expected:** Shows status using bundled workflow
+1. Import claude_integration (see warning)
+2. Start workflow with long constraint (rejected)
+3. Start workflow with valid constraint
+4. Verify docs archived
+5. Complete item with long note (rejected)
+6. Complete item with valid note
+**Expected:** All behaviors work together
 **Priority:** High
 
-### TC-INT-002: Init Then Start Workflow
-**Description:** Init workflow then start a task
-**Setup:** Fresh directory
-**Steps:**
-1. `orchestrator init`
-2. `orchestrator start "Test task"`
-3. `orchestrator status`
-**Expected:** Workflow running in PLAN phase
-**Priority:** High
-
-### TC-INT-003: Local Workflow Override
-**Description:** Local workflow takes precedence over bundled
-**Setup:** Directory with custom 2-phase workflow.yaml
-**Steps:**
-1. `orchestrator start "Test"`
-2. Check loaded workflow
-**Expected:** Uses custom workflow, not bundled
-**Priority:** High
-
-### TC-INT-004: Backward Compat - Bash Script
-**Description:** Existing bash script still works
-**Setup:** Clone repo
-**Steps:**
-1. `cd workflow-orchestrator`
-2. `./orchestrator --help`
-**Expected:** Shows help (same as before)
-**Priority:** High
-
-### TC-INT-005: Editable Install Works
-**Description:** `pip install -e .` for development
-**Setup:** Clone repo
-**Steps:**
-1. `pip install -e .`
-2. `orchestrator --help`
-3. Edit src/cli.py (add comment)
-4. `orchestrator --help` (should reflect change)
-**Expected:** Changes reflected without reinstall
-**Priority:** Medium
-
-## CLI Command Tests
-
-### TC-CLI-001: Status Without Workflow
-**Component:** `src/cli.py`
-**Description:** Status with bundled workflow (no local file)
-**Input:** `orchestrator status` (in empty dir)
-**Expected:** Shows status or helpful message
-**Priority:** High
-
-### TC-CLI-002: Start Without Workflow
-**Component:** `src/cli.py`
-**Description:** Start works with bundled workflow
-**Input:** `orchestrator start "Task"` (in empty dir)
-**Expected:** Starts workflow using bundled definition
-**Priority:** High
-
-### TC-CLI-003: Init Output
-**Component:** `src/cli.py`
-**Description:** Init shows helpful next steps
-**Input:** `orchestrator init`
-**Expected:** Message includes "workflow.yaml created" and next steps
-**Priority:** Medium
-
-### TC-CLI-004: Version Flag
-**Component:** `src/cli.py`
-**Description:** Shows version from package
-**Input:** `orchestrator --version`
-**Expected:** Shows version number
-**Priority:** Low
-
-## Error Handling Tests
-
-### TC-ERR-001: Missing Package Data
-**Component:** `src/config.py`
-**Description:** Clear error if bundled workflow missing
-**Setup:** Corrupted install without package data
-**Input:** Try to access bundled workflow
-**Expected:** Clear error message with recovery steps
-**Priority:** Medium
-
-### TC-ERR-002: Invalid Local Workflow
-**Component:** `src/engine.py`
-**Description:** Error on malformed workflow.yaml
-**Setup:** workflow.yaml with invalid YAML
-**Input:** `orchestrator status`
-**Expected:** Parse error with file path and line number
-**Priority:** Medium
-
-### TC-ERR-003: Init in Read-Only Directory
-**Component:** `src/cli.py`
-**Description:** Clear error when can't write
-**Setup:** Directory without write permission
-**Input:** `orchestrator init`
-**Expected:** Permission error with explanation
-**Priority:** Low
-
-## Existing Test Compatibility
-
-### TC-COMPAT-001: All Existing Tests Pass
-**Description:** No regressions from package restructure
+### TC-INT-002: Existing Tests Still Pass
+**Description:** No regressions from changes
 **Input:** `pytest tests/`
-**Expected:** All tests pass
+**Expected:** All existing tests pass
 **Priority:** High
 
-### TC-COMPAT-002: Test Imports Updated
-**Description:** Tests use correct import paths
-**Input:** Run tests after import changes
-**Expected:** No import errors
-**Priority:** High
+---
 
 ## Coverage Requirements
 
-- Minimum 80% coverage for new code in `src/config.py`
-- 100% coverage for init command logic
-- All error paths must be tested
-- Integration tests can be marked `@pytest.mark.integration` and skipped in CI
+- 100% coverage for `src/validation.py`
+- 100% coverage for `src/utils.py`
+- 90%+ coverage for archive logic in `src/engine.py`
+- All error paths tested

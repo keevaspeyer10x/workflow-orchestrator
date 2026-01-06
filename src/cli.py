@@ -34,6 +34,7 @@ from src.review import (
     setup_reviews,
 )
 from src.config import find_workflow_path, get_default_workflow_content, is_using_bundled_workflow
+from src.validation import validate_constraints, validate_note
 
 VERSION = "2.0.0"
 
@@ -78,12 +79,23 @@ def cmd_start(args):
     # Parse constraints (Feature 4) - can be specified multiple times
     constraints = getattr(args, 'constraints', None) or []
 
+    # Validate constraints (CORE-008)
+    try:
+        constraints = validate_constraints(constraints)
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+    # Get no_archive flag (WF-004)
+    no_archive = getattr(args, 'no_archive', False)
+
     try:
         state = engine.start_workflow(
             str(yaml_path),
             args.task,
             project=args.project,
-            constraints=constraints
+            constraints=constraints,
+            no_archive=no_archive
         )
         print(f"\n✓ Workflow started: {state.workflow_id}")
         print(f"  Task: {args.task}")
@@ -143,15 +155,22 @@ def cmd_status(args):
 def cmd_complete(args):
     """Mark an item as complete."""
     engine = get_engine(args)
-    
+
     if not engine.state:
         print("Error: No active workflow")
         sys.exit(1)
-    
+
+    # Validate notes (CORE-008)
+    try:
+        notes = validate_note(args.notes)
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
     try:
         success, message = engine.complete_item(
             args.item,
-            notes=args.notes,
+            notes=notes,
             skip_verification=args.skip_verify
         )
         
@@ -193,13 +212,20 @@ def cmd_skip(args):
 def cmd_approve_item(args):
     """Approve a manual gate item."""
     engine = get_engine(args)
-    
+
     if not engine.state:
         print("Error: No active workflow")
         sys.exit(1)
-    
+
+    # Validate notes (CORE-008)
     try:
-        success, message = engine.approve_item(args.item, notes=args.notes)
+        notes = validate_note(args.notes)
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+    try:
+        success, message = engine.approve_item(args.item, notes=notes)
         
         if success:
             print(f"✓ {message}")
@@ -267,11 +293,18 @@ def cmd_approve(args):
 def cmd_finish(args):
     """Complete or abandon the workflow."""
     engine = get_engine(args)
-    
+
     if not engine.state:
         print("Error: No active workflow")
         sys.exit(1)
-    
+
+    # Validate notes (CORE-008)
+    try:
+        notes = validate_note(args.notes)
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
     if args.abandon:
         if not args.reason:
             print("Error: --reason is required when abandoning")
@@ -279,7 +312,7 @@ def cmd_finish(args):
         engine.abandon_workflow(args.reason)
         print("✓ Workflow abandoned")
     else:
-        engine.complete_workflow(notes=args.notes)
+        engine.complete_workflow(notes=notes)
         print("✓ Workflow completed")
         
         # Trigger learning if available
@@ -1213,6 +1246,8 @@ Examples:
     start_parser.add_argument('--project', '-p', help='Project name')
     start_parser.add_argument('--constraints', '-c', action='append', default=[],
                               help='Task constraint (can be specified multiple times)')
+    start_parser.add_argument('--no-archive', action='store_true',
+                              help='Skip archiving existing workflow documents')
     start_parser.set_defaults(func=cmd_start)
 
     # Init command
