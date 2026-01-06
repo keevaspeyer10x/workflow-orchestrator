@@ -97,6 +97,9 @@ Check if the new code:
 QUALITY_REVIEW_PROMPT = """
 Review this AI-generated code for production readiness.
 
+## Project Context
+{project_context}
+
 AI coding agents often focus on the "happy path" and miss:
 
 - **Edge Cases**: What inputs weren't considered? Empty arrays, null values, boundary conditions
@@ -108,6 +111,7 @@ AI coding agents often focus on the "happy path" and miss:
 - **Performance**: Any obvious N+1 queries, unnecessary loops, memory leaks?
 
 **IMPORTANT**: This code has had ZERO human review. Find the unhappy paths.
+**IMPORTANT**: Only check for build tools/configs that match this project type (e.g., don't check for package.json in Python projects).
 
 ## Changed Files
 {changed_files}

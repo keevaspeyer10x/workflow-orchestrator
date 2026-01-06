@@ -29,6 +29,7 @@ class ReviewContext:
     related_files: dict[str, str] = field(default_factory=dict)  # path -> content
     architecture_docs: Optional[str] = None
     context_summary: Optional[str] = None  # For holistic review
+    project_context: Optional[str] = None  # Project type and build info
     truncated: bool = False
     truncation_warning: Optional[str] = None
 
@@ -97,6 +98,9 @@ class ReviewContextCollector:
         """
         context = ReviewContext()
 
+        # Always get project context (type, build system, etc.)
+        context.project_context = self._detect_project_context()
+
         # Always get git diff and changed files
         context.git_diff = self._get_git_diff()
         context.changed_files = self._get_changed_file_contents()
@@ -117,6 +121,51 @@ class ReviewContextCollector:
         self._truncate_if_needed(context)
 
         return context
+
+    def _detect_project_context(self) -> str:
+        """Detect project type and build configuration."""
+        indicators = []
+
+        # Check for Python
+        if (self.working_dir / "requirements.txt").exists():
+            indicators.append("Python project (requirements.txt)")
+        if (self.working_dir / "pyproject.toml").exists():
+            indicators.append("Python project (pyproject.toml)")
+        if (self.working_dir / "setup.py").exists():
+            indicators.append("Python project (setup.py)")
+
+        # Check for Node.js
+        if (self.working_dir / "package.json").exists():
+            indicators.append("Node.js project (package.json)")
+
+        # Check for Go
+        if (self.working_dir / "go.mod").exists():
+            indicators.append("Go project (go.mod)")
+
+        # Check for Rust
+        if (self.working_dir / "Cargo.toml").exists():
+            indicators.append("Rust project (Cargo.toml)")
+
+        # Check for Java/Kotlin
+        if (self.working_dir / "pom.xml").exists():
+            indicators.append("Java/Maven project (pom.xml)")
+        if (self.working_dir / "build.gradle").exists():
+            indicators.append("Java/Gradle project (build.gradle)")
+
+        # Check for Ruby
+        if (self.working_dir / "Gemfile").exists():
+            indicators.append("Ruby project (Gemfile)")
+
+        # Check for Docker
+        if (self.working_dir / "Dockerfile").exists():
+            indicators.append("Uses Docker")
+        if (self.working_dir / "docker-compose.yml").exists():
+            indicators.append("Uses Docker Compose")
+
+        if not indicators:
+            return "Project type: Unknown (no standard build files detected)"
+
+        return "Project type: " + ", ".join(indicators)
 
     def _run_git(self, *args: str) -> str:
         """Run a git command and return output."""

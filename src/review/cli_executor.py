@@ -137,21 +137,20 @@ class CLIExecutor:
         """
         process = None
         try:
-            # Codex CLI: use --base for what to review, pipe prompt via stdin
+            # Codex CLI: --base and prompt can't be used together
+            # Use --base alone - Codex has full repo access and will do a comprehensive review
             process = subprocess.Popen(
                 [
                     "codex",
                     "review",
                     "--base", base_branch,
-                    "-",  # Read custom instructions from stdin
                 ],
                 cwd=self.working_dir,
-                stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
             )
-            stdout, stderr = process.communicate(input=prompt, timeout=self.timeout)
+            stdout, stderr = process.communicate(timeout=self.timeout)
 
             if process.returncode != 0 and stderr:
                 logger.warning(f"Codex returned non-zero: {stderr}")

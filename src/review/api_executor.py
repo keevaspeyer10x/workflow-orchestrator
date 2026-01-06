@@ -138,6 +138,7 @@ class APIExecutor:
             related_files=context.format_related_files(),
             architecture_docs=context.architecture_docs or "(no architecture docs)",
             context=context.context_summary or "(no additional context)",
+            project_context=context.project_context or "(project type not detected)",
         )
 
         return prompt
