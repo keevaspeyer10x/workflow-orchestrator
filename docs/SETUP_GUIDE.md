@@ -165,11 +165,36 @@ cd your-project
 orchestrator start "Task description"
 ```
 
-### Notes for Claude Code Web
+### Option A: Automatic Setup (Recommended)
 
-- **Fresh sandbox each session**: You'll need to `pip install` again in new sessions
-- **SessionStart hooks**: Can automate setup if your project has `.claude/hooks/session-start.sh`
+Run once to install a SessionStart hook in your project:
+
+```bash
+orchestrator install-hook
+```
+
+This creates `.claude/hooks/session-start.sh` which:
+- Auto-installs/updates orchestrator at session start
+- Works in both Claude Code CLI and Claude Code Web
+- Always gets the latest version from GitHub
+
+To remove: `orchestrator uninstall-hook`
+
+### Option B: Manual Setup
+
+Add to your project's CLAUDE.md:
+
+```markdown
+## Setup
+pip install git+https://github.com/keevaspeyer10x/workflow-orchestrator.git
+```
+
+Then say "run setup" at the start of each session.
+
+### Notes
+
 - **No local workflow.yaml needed**: Uses bundled 5-phase workflow by default
+- **Works everywhere**: Claude Code CLI, Claude Code Web, Manus
 
 ---
 

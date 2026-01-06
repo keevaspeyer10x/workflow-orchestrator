@@ -93,6 +93,8 @@ orchestrator status
 | `validate` | Validate a workflow YAML file |
 | `generate-md` | Generate human-readable WORKFLOW.md |
 | `finish --abandon` | Abandon current workflow |
+| `install-hook` | Install auto-setup hook for Claude Code sessions |
+| `uninstall-hook` | Remove the auto-setup hook |
 
 ## Workflow YAML Format
 

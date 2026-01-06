@@ -57,6 +57,8 @@ orchestrator finish
 | `orchestrator handoff` | Generate handoff prompt |
 | `orchestrator checkpoint` | Create checkpoint |
 | `orchestrator resume` | Resume from checkpoint |
+| `orchestrator install-hook` | Install auto-setup hook for Claude Code |
+| `orchestrator uninstall-hook` | Remove the auto-setup hook |
 
 ## Workflow Rules
 

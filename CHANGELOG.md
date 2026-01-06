@@ -23,6 +23,12 @@ All notable changes to the workflow-orchestrator.
   - Auto-generates commit message from task description and changes
   - Prompts user before committing and pushing to main
 
+- **Auto-Setup Hook Commands (CORE-019)**: Easy setup for Claude Code sessions
+  - `orchestrator install-hook` - Installs SessionStart hook for auto-setup
+  - `orchestrator uninstall-hook` - Removes the hook
+  - Always gets latest version with `--upgrade`
+  - Works in Claude Code CLI and Claude Code Web
+
 ### Changed
 - EXECUTE phase item order: write_tests now comes before implement_code
 - LEARN phase restructured for explicit action approval
