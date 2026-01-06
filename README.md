@@ -29,7 +29,7 @@ This installs the orchestrator AND sets up a SessionStart hook so future Claude 
 
 ```bash
 pip install git+https://github.com/keevaspeyer10x/workflow-orchestrator.git
-orchestrator install-hook  # Optional: enables auto-updates for this repo
+orchestrator setup  # Optional: enables auto-updates for this repo
 ```
 
 After installation, the `orchestrator` command is available globally:
@@ -100,8 +100,8 @@ orchestrator status
 | `validate` | Validate a workflow YAML file |
 | `generate-md` | Generate human-readable WORKFLOW.md |
 | `finish --abandon` | Abandon current workflow |
-| `install-hook` | Install auto-setup hook for Claude Code sessions |
-| `uninstall-hook` | Remove the auto-setup hook |
+| `setup` | Enable automatic updates for this repo |
+| `setup --remove` | Disable automatic updates |
 
 ## Workflow YAML Format
 

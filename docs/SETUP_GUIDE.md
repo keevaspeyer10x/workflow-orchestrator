@@ -167,18 +167,18 @@ orchestrator start "Task description"
 
 ### Option A: Automatic Setup (Recommended)
 
-Run once to install a SessionStart hook in your project:
+Run once to enable auto-updates for your project:
 
 ```bash
-orchestrator install-hook
+orchestrator setup
 ```
 
-This creates `.claude/hooks/session-start.sh` which:
-- Auto-installs/updates orchestrator at session start
+This creates a hook that:
+- Auto-updates orchestrator at session start
 - Works in both Claude Code CLI and Claude Code Web
 - Always gets the latest version from GitHub
 
-To remove: `orchestrator uninstall-hook`
+To disable: `orchestrator setup --remove`
 
 ### Option B: Manual Setup
 

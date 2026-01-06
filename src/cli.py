@@ -1075,83 +1075,80 @@ pip install -q --upgrade git+https://github.com/keevaspeyer10x/workflow-orchestr
 HOOK_MARKER = "# Added by: orchestrator install-hook"
 
 
-def cmd_install_hook(args):
-    """Install SessionStart hook for automatic orchestrator setup."""
+def cmd_setup(args):
+    """Set up automatic updates for this repo, or remove the setup."""
     working_dir = Path(args.dir or '.')
     hooks_dir = working_dir / '.claude' / 'hooks'
     hook_file = hooks_dir / 'session-start.sh'
 
-    # Create directories if needed
+    if args.remove:
+        # Remove the auto-update setup
+        if not hook_file.exists():
+            print("Auto-updates not configured for this repo.")
+            return
+
+        content = hook_file.read_text()
+
+        if HOOK_MARKER not in content:
+            print("Auto-updates not configured for this repo.")
+            return
+
+        # Remove the orchestrator section
+        lines = content.split('\n')
+        new_lines = []
+        skip_until_empty = False
+
+        for line in lines:
+            if HOOK_MARKER in line:
+                skip_until_empty = True
+                continue
+            if skip_until_empty:
+                if line.strip() == '':
+                    skip_until_empty = False
+                continue
+            new_lines.append(line)
+
+        new_content = '\n'.join(new_lines).strip()
+
+        if not new_content or new_content == '#!/bin/bash':
+            # Hook file is now empty, remove it
+            hook_file.unlink()
+            # Clean up empty directories
+            if hooks_dir.exists() and not any(hooks_dir.iterdir()):
+                hooks_dir.rmdir()
+                claude_dir = hooks_dir.parent
+                if claude_dir.exists() and not any(claude_dir.iterdir()):
+                    claude_dir.rmdir()
+        else:
+            hook_file.write_text(new_content + '\n')
+
+        print("✓ Auto-updates disabled for this repo.")
+        return
+
+    # Set up auto-updates
     hooks_dir.mkdir(parents=True, exist_ok=True)
 
     if hook_file.exists() and not args.force:
         content = hook_file.read_text()
         if HOOK_MARKER in content:
-            print(f"✓ Hook already installed at {hook_file}")
+            print("✓ Auto-updates already enabled for this repo.")
             return
         # Append to existing hook
-        print(f"Appending to existing hook at {hook_file}")
         with open(hook_file, 'a') as f:
             f.write('\n' + HOOK_CONTENT)
     else:
-        # Create new hook
         hook_file.write_text(HOOK_CONTENT)
-        print(f"✓ Created hook at {hook_file}")
 
     # Make executable
     import os
     os.chmod(hook_file, 0o755)
 
-    print("\nThe orchestrator will now auto-install when you start a Claude Code session in this repo.")
+    print("✓ Auto-updates enabled for this repo.")
+    print("")
+    print("The orchestrator will automatically update when you start a new Claude Code session.")
     print("Works in both Claude Code CLI and Claude Code Web.")
-
-
-def cmd_uninstall_hook(args):
-    """Remove SessionStart hook for orchestrator."""
-    working_dir = Path(args.dir or '.')
-    hook_file = working_dir / '.claude' / 'hooks' / 'session-start.sh'
-
-    if not hook_file.exists():
-        print(f"No hook file found at {hook_file}")
-        return
-
-    content = hook_file.read_text()
-
-    if HOOK_MARKER not in content:
-        print(f"Orchestrator hook not found in {hook_file}")
-        return
-
-    # Remove the orchestrator section
-    lines = content.split('\n')
-    new_lines = []
-    skip_until_fi = False
-
-    for line in lines:
-        if HOOK_MARKER in line:
-            skip_until_fi = True
-            continue
-        if skip_until_fi:
-            if line.strip() == 'fi':
-                skip_until_fi = False
-            continue
-        new_lines.append(line)
-
-    new_content = '\n'.join(new_lines).strip()
-
-    if not new_content or new_content == '#!/bin/bash':
-        # Hook file is now empty, remove it
-        hook_file.unlink()
-        print(f"✓ Removed hook file {hook_file}")
-        # Clean up empty directories
-        hooks_dir = hook_file.parent
-        if hooks_dir.exists() and not any(hooks_dir.iterdir()):
-            hooks_dir.rmdir()
-            claude_dir = hooks_dir.parent
-            if claude_dir.exists() and not any(claude_dir.iterdir()):
-                claude_dir.rmdir()
-    else:
-        hook_file.write_text(new_content + '\n')
-        print(f"✓ Removed orchestrator hook from {hook_file}")
+    print("")
+    print("To disable: orchestrator setup --remove")
 
 
 def cmd_setup_reviews(args):
@@ -1387,16 +1384,12 @@ Examples:
     setup_reviews_parser.add_argument('--force', '-f', action='store_true', help='Overwrite existing files')
     setup_reviews_parser.set_defaults(func=cmd_setup_reviews)
 
-    # Install-hook command
-    install_hook_parser = subparsers.add_parser('install-hook', help='Install SessionStart hook for auto-setup in Claude Code')
-    install_hook_parser.add_argument('--dir', '-d', help='Target directory (default: current)')
-    install_hook_parser.add_argument('--force', '-f', action='store_true', help='Overwrite existing hook')
-    install_hook_parser.set_defaults(func=cmd_install_hook)
-
-    # Uninstall-hook command
-    uninstall_hook_parser = subparsers.add_parser('uninstall-hook', help='Remove SessionStart hook')
-    uninstall_hook_parser.add_argument('--dir', '-d', help='Target directory (default: current)')
-    uninstall_hook_parser.set_defaults(func=cmd_uninstall_hook)
+    # Setup command (auto-updates)
+    setup_parser = subparsers.add_parser('setup', help='Enable automatic updates for this repo')
+    setup_parser.add_argument('--dir', '-d', help='Target directory (default: current)')
+    setup_parser.add_argument('--force', '-f', action='store_true', help='Overwrite existing setup')
+    setup_parser.add_argument('--remove', action='store_true', help='Remove auto-updates from this repo')
+    setup_parser.set_defaults(func=cmd_setup)
 
     args = parser.parse_args()
     

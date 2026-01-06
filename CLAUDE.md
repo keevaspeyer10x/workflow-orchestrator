@@ -16,7 +16,7 @@ This installs the orchestrator AND sets up automatic updates for future sessions
 
 ```bash
 pip install git+https://github.com/keevaspeyer10x/workflow-orchestrator.git
-orchestrator install-hook  # Optional: enables auto-updates
+orchestrator setup  # Optional: enables auto-updates
 ```
 
 ## Project Overview
@@ -64,8 +64,8 @@ orchestrator finish
 | `orchestrator handoff` | Generate handoff prompt |
 | `orchestrator checkpoint` | Create checkpoint |
 | `orchestrator resume` | Resume from checkpoint |
-| `orchestrator install-hook` | Install auto-setup hook for Claude Code |
-| `orchestrator uninstall-hook` | Remove the auto-setup hook |
+| `orchestrator setup` | Enable automatic updates for this repo |
+| `orchestrator setup --remove` | Disable automatic updates |
 
 ## Workflow Rules
 
