@@ -3,14 +3,17 @@ OpenRouter provider for agent execution.
 
 This provider uses the OpenRouter API to execute prompts through various LLM models.
 Requires OPENROUTER_API_KEY environment variable to be set.
+
+Supports function calling for models that have this capability, allowing
+interactive repo context exploration during execution.
 """
 
 import os
 import time
 import json
 import logging
-from typing import Optional
-from datetime import datetime
+from pathlib import Path
+from typing import Optional, Any
 
 try:
     import requests
@@ -18,9 +21,46 @@ except ImportError:
     requests = None
 
 from .base import AgentProvider, ExecutionResult
+from .tools import (
+    get_tool_definitions,
+    execute_tool,
+    TOOL_CALL_WARNING_COUNT,
+    TOOL_CALL_HARD_LIMIT,
+)
 
 
 logger = logging.getLogger(__name__)
+
+# Models known to support function calling
+# This is a conservative list - models not listed will fall back to basic execution
+FUNCTION_CALLING_MODELS = {
+    # OpenAI models
+    "openai/gpt-4",
+    "openai/gpt-4-turbo",
+    "openai/gpt-4-turbo-preview",
+    "openai/gpt-4o",
+    "openai/gpt-4o-mini",
+    "openai/gpt-4.1",
+    "openai/gpt-4.1-mini",
+    "openai/gpt-4.1-nano",
+    "openai/gpt-5",
+    "openai/gpt-5.1",
+    # Anthropic models
+    "anthropic/claude-3-opus",
+    "anthropic/claude-3-sonnet",
+    "anthropic/claude-3-haiku",
+    "anthropic/claude-3.5-sonnet",
+    "anthropic/claude-3.5-haiku",
+    "anthropic/claude-sonnet-4",
+    "anthropic/claude-opus-4",
+    # Google models
+    "google/gemini-pro",
+    "google/gemini-pro-1.5",
+    "google/gemini-2.0-flash",
+    "google/gemini-2.5-pro",
+    "google/gemini-3-pro",
+    "google/gemini-3-pro-preview",
+}
 
 
 class OpenRouterProvider(AgentProvider):
@@ -41,19 +81,25 @@ class OpenRouterProvider(AgentProvider):
         self,
         api_key: Optional[str] = None,
         model: Optional[str] = None,
-        timeout: Optional[int] = None
+        timeout: Optional[int] = None,
+        working_dir: Optional[Path] = None,
+        enable_tools: bool = True
     ):
         """
         Initialize the OpenRouter provider.
-        
+
         Args:
             api_key: OpenRouter API key (defaults to OPENROUTER_API_KEY env var)
             model: Default model to use (defaults to claude-sonnet-4)
             timeout: Request timeout in seconds (defaults to 600)
+            working_dir: Working directory for tool execution (defaults to cwd)
+            enable_tools: Whether to enable function calling for supported models
         """
         self._api_key = api_key or os.environ.get("OPENROUTER_API_KEY")
         self._model = model or os.environ.get("OPENROUTER_MODEL", self.DEFAULT_MODEL)
         self._timeout = timeout or self.DEFAULT_TIMEOUT
+        self._working_dir = Path(working_dir) if working_dir else Path.cwd()
+        self._enable_tools = enable_tools and not os.environ.get("ORCHESTRATOR_DISABLE_TOOLS")
     
     def name(self) -> str:
         return "openrouter"
@@ -169,11 +215,14 @@ class OpenRouterProvider(AgentProvider):
     def execute(self, prompt: str, model: Optional[str] = None) -> ExecutionResult:
         """
         Execute the prompt through OpenRouter API.
-        
+
+        Automatically uses function calling for models that support it,
+        falling back to basic execution for other models.
+
         Args:
             prompt: The prompt to execute
             model: Optional model override
-        
+
         Returns:
             ExecutionResult: The result of execution
         """
@@ -183,27 +232,247 @@ class OpenRouterProvider(AgentProvider):
                 output="",
                 error="OpenRouter API key not configured. Set OPENROUTER_API_KEY environment variable."
             )
-        
+
         model_to_use = model or self._model
+
+        # Check if we should use function calling
+        if self._enable_tools and self._supports_function_calling(model_to_use):
+            logger.info(f"Using function calling with {model_to_use}")
+            return self.execute_with_tools(prompt, model_to_use)
+        else:
+            logger.info(f"Using basic execution with {model_to_use}")
+            return self._execute_basic(prompt, model_to_use)
+    
+    def _sanitize_error(self, error: str) -> str:
+        """Remove any API keys from error messages."""
+        if self._api_key and self._api_key in error:
+            error = error.replace(self._api_key, "[REDACTED]")
+        return error
+
+    def _supports_function_calling(self, model: str) -> bool:
+        """
+        Check if a model supports function calling.
+
+        Args:
+            model: The model identifier (e.g., "openai/gpt-4")
+
+        Returns:
+            True if the model is known to support function calling
+        """
+        # Check exact match first
+        if model in FUNCTION_CALLING_MODELS:
+            return True
+
+        # Check prefix matches for model families
+        # This handles versioned models like "openai/gpt-4-0613"
+        for known_model in FUNCTION_CALLING_MODELS:
+            if model.startswith(known_model):
+                return True
+
+        # Conservative default: don't assume function calling support
+        return False
+
+    def execute_with_tools(
+        self,
+        prompt: str,
+        model: Optional[str] = None,
+        working_dir: Optional[Path] = None
+    ) -> ExecutionResult:
+        """
+        Execute a prompt with function calling support.
+
+        This method enables the model to interactively explore repository
+        context by calling tools (read_file, list_files, search_code).
+
+        Args:
+            prompt: The prompt to execute
+            model: Optional model override
+            working_dir: Optional working directory override
+
+        Returns:
+            ExecutionResult: The result of execution
+        """
+        if not self.is_available():
+            return ExecutionResult(
+                success=False,
+                output="",
+                error="OpenRouter API key not configured. Set OPENROUTER_API_KEY environment variable."
+            )
+
+        model_to_use = model or self._model
+        work_dir = Path(working_dir) if working_dir else self._working_dir
         start_time = time.time()
-        
+        total_tokens = 0
+        tool_call_count = 0
+
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
             "HTTP-Referer": "https://github.com/workflow-orchestrator",
             "X-Title": "Workflow Orchestrator"
         }
-        
-        payload = {
-            "model": model_to_use,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ]
+
+        # Initialize conversation with user prompt
+        messages = [{"role": "user", "content": prompt}]
+        tools = get_tool_definitions()
+
+        while tool_call_count < TOOL_CALL_HARD_LIMIT:
+            payload = {
+                "model": model_to_use,
+                "messages": messages,
+                "tools": tools,
+            }
+
+            try:
+                response = requests.post(
+                    self.API_URL,
+                    headers=headers,
+                    json=payload,
+                    timeout=self._timeout
+                )
+
+                if response.status_code != 200:
+                    error_msg = self._parse_error_response(response)
+                    # On API error, try falling back to basic execution
+                    logger.warning(f"Tool execution failed: {error_msg}. Falling back to basic execution.")
+                    return self._execute_basic(prompt, model_to_use, start_time)
+
+                data = response.json()
+
+                # Track token usage
+                usage = data.get("usage", {})
+                total_tokens += usage.get("total_tokens", 0)
+
+                # Get the assistant's response
+                if "choices" not in data or len(data["choices"]) == 0:
+                    return ExecutionResult(
+                        success=False,
+                        output="",
+                        error="No response from API",
+                        model_used=model_to_use,
+                        duration_seconds=time.time() - start_time
+                    )
+
+                choice = data["choices"][0]
+                message = choice.get("message", {})
+                finish_reason = choice.get("finish_reason", "")
+
+                # Check if the model wants to call tools
+                tool_calls = message.get("tool_calls", [])
+
+                if tool_calls:
+                    # Add assistant's message with tool calls to conversation
+                    messages.append(message)
+
+                    # Process each tool call
+                    for tool_call in tool_calls:
+                        tool_call_count += 1
+
+                        if tool_call_count == TOOL_CALL_WARNING_COUNT:
+                            logger.warning(
+                                f"High tool call count ({TOOL_CALL_WARNING_COUNT}+) - "
+                                "consider optimizing the prompt"
+                            )
+
+                        tool_id = tool_call.get("id", "")
+                        function = tool_call.get("function", {})
+                        tool_name = function.get("name", "")
+
+                        # Parse arguments
+                        try:
+                            arguments = json.loads(function.get("arguments", "{}"))
+                        except json.JSONDecodeError:
+                            arguments = {}
+
+                        logger.debug(f"Tool call: {tool_name}({arguments})")
+
+                        # Execute the tool
+                        result = execute_tool(tool_name, arguments, work_dir)
+
+                        # Add tool result to conversation
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_id,
+                            "content": json.dumps(result)
+                        })
+
+                else:
+                    # Model finished - return the final response
+                    output = message.get("content", "")
+                    duration = time.time() - start_time
+
+                    return ExecutionResult(
+                        success=True,
+                        output=output,
+                        model_used=data.get("model", model_to_use),
+                        tokens_used=total_tokens,
+                        duration_seconds=duration,
+                        metadata={
+                            "provider": "openrouter",
+                            "tool_calls": tool_call_count,
+                            "usage": usage,
+                            "used_function_calling": True
+                        }
+                    )
+
+            except requests.exceptions.Timeout:
+                logger.warning(f"Request timed out after {self._timeout}s during tool execution")
+                return self._execute_basic(prompt, model_to_use, start_time)
+
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"Request error during tool execution: {self._sanitize_error(str(e))}")
+                return self._execute_basic(prompt, model_to_use, start_time)
+
+        # Hit the hard limit
+        duration = time.time() - start_time
+        return ExecutionResult(
+            success=False,
+            output="",
+            error=f"Exceeded maximum tool calls ({TOOL_CALL_HARD_LIMIT})",
+            model_used=model_to_use,
+            tokens_used=total_tokens,
+            duration_seconds=duration,
+            metadata={
+                "provider": "openrouter",
+                "tool_calls": tool_call_count
+            }
+        )
+
+    def _execute_basic(
+        self,
+        prompt: str,
+        model: str,
+        start_time: Optional[float] = None
+    ) -> ExecutionResult:
+        """
+        Execute a prompt without function calling (basic mode).
+
+        This is the fallback for models that don't support function calling
+        or when tool execution fails.
+
+        Args:
+            prompt: The prompt to execute
+            model: The model to use
+            start_time: Optional start time for duration calculation
+
+        Returns:
+            ExecutionResult: The result of execution
+        """
+        if start_time is None:
+            start_time = time.time()
+
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/workflow-orchestrator",
+            "X-Title": "Workflow Orchestrator"
         }
-        
+
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}]
+        }
+
         last_error = None
         for attempt in range(self.MAX_RETRIES):
             try:
@@ -213,89 +482,80 @@ class OpenRouterProvider(AgentProvider):
                     json=payload,
                     timeout=self._timeout
                 )
-                
+
                 if response.status_code == 200:
                     data = response.json()
                     duration = time.time() - start_time
-                    
-                    # Extract response content
+
                     output = ""
                     if "choices" in data and len(data["choices"]) > 0:
                         message = data["choices"][0].get("message", {})
                         output = message.get("content", "")
-                    
-                    # Extract usage info
+
                     usage = data.get("usage", {})
                     tokens = usage.get("total_tokens")
-                    
+
                     return ExecutionResult(
                         success=True,
                         output=output,
-                        model_used=data.get("model", model_to_use),
+                        model_used=data.get("model", model),
                         tokens_used=tokens,
                         duration_seconds=duration,
                         metadata={
                             "provider": "openrouter",
-                            "usage": usage
+                            "usage": usage,
+                            "used_function_calling": False
                         }
                     )
-                
+
                 elif response.status_code == 429:
-                    # Rate limited - wait and retry
-                    last_error = f"Rate limited (429). Retrying in {self.RETRY_DELAY * (attempt + 1)}s..."
+                    last_error = f"Rate limited (429). Retrying..."
                     logger.warning(last_error)
                     time.sleep(self.RETRY_DELAY * (attempt + 1))
                     continue
-                
+
                 else:
-                    # Other error
-                    error_msg = f"API error {response.status_code}"
-                    try:
-                        error_data = response.json()
-                        if "error" in error_data:
-                            error_detail = error_data["error"]
-                            if isinstance(error_detail, dict):
-                                error_msg = error_detail.get("message", error_msg)
-                            else:
-                                error_msg = str(error_detail)
-                    except:
-                        error_msg = f"{error_msg}: {response.text[:200]}"
-                    
-                    # Don't expose API key in error messages
-                    error_msg = self._sanitize_error(error_msg)
-                    last_error = error_msg
-                    
-                    # Retry on 5xx errors
+                    last_error = self._parse_error_response(response)
                     if response.status_code >= 500:
-                        logger.warning(f"Server error, retrying: {error_msg}")
+                        logger.warning(f"Server error, retrying: {last_error}")
                         time.sleep(self.RETRY_DELAY * (attempt + 1))
                         continue
                     else:
                         break
-                        
+
             except requests.exceptions.Timeout:
                 last_error = f"Request timed out after {self._timeout}s"
                 logger.warning(last_error)
                 time.sleep(self.RETRY_DELAY * (attempt + 1))
                 continue
-                
+
             except requests.exceptions.RequestException as e:
                 last_error = self._sanitize_error(str(e))
                 logger.warning(f"Request error: {last_error}")
                 time.sleep(self.RETRY_DELAY * (attempt + 1))
                 continue
-        
+
         duration = time.time() - start_time
         return ExecutionResult(
             success=False,
             output="",
             error=last_error or "Unknown error",
-            model_used=model_to_use,
+            model_used=model,
             duration_seconds=duration
         )
-    
-    def _sanitize_error(self, error: str) -> str:
-        """Remove any API keys from error messages."""
-        if self._api_key and self._api_key in error:
-            error = error.replace(self._api_key, "[REDACTED]")
-        return error
+
+    def _parse_error_response(self, response: requests.Response) -> str:
+        """Parse error message from API response."""
+        error_msg = f"API error {response.status_code}"
+        try:
+            error_data = response.json()
+            if "error" in error_data:
+                error_detail = error_data["error"]
+                if isinstance(error_detail, dict):
+                    error_msg = error_detail.get("message", error_msg)
+                else:
+                    error_msg = str(error_detail)
+        except Exception:
+            error_msg = f"{error_msg}: {response.text[:200]}"
+
+        return self._sanitize_error(error_msg)

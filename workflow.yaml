@@ -19,7 +19,7 @@ settings:
   # Configurable settings - override these per-project
   # Test command - defaults to build check
   # Override with actual test command: "npm test", "pytest", "go test ./...", etc.
-  test_command: "npm run build"
+  test_command: "python -m pytest tests/ -v --tb=short"
   
   # Build/compile command (optional, for compiled languages)
   build_command: "npm run build"

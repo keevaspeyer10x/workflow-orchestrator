@@ -45,8 +45,9 @@ class TestProviderRegistry:
         assert 'Unknown provider' in str(exc_info.value)
     
     @patch.dict(os.environ, {'OPENROUTER_API_KEY': 'test-key'})
+    @patch('src.providers._HAS_ENVIRONMENT', False)
     def test_auto_detect_openrouter(self):
-        """Test auto-detection selects OpenRouter when API key is present."""
+        """Test auto-detection selects OpenRouter when API key is present (no env detection)."""
         provider = get_provider()
         assert provider.name() == 'openrouter'
     
