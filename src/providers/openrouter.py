@@ -33,8 +33,9 @@ logger = logging.getLogger(__name__)
 
 # Models known to support function calling
 # This is a conservative list - models not listed will fall back to basic execution
+# See CORE-017 in ROADMAP.md for planned `update-models` command to keep this current
 FUNCTION_CALLING_MODELS = {
-    # OpenAI models
+    # OpenAI models (including Codex)
     "openai/gpt-4",
     "openai/gpt-4-turbo",
     "openai/gpt-4-turbo-preview",
@@ -45,6 +46,9 @@ FUNCTION_CALLING_MODELS = {
     "openai/gpt-4.1-nano",
     "openai/gpt-5",
     "openai/gpt-5.1",
+    "openai/gpt-5.1-codex",
+    "openai/gpt-5.1-codex-max",
+    "openai/codex",  # Codex family prefix
     # Anthropic models
     "anthropic/claude-3-opus",
     "anthropic/claude-3-sonnet",

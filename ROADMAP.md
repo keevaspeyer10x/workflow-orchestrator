@@ -244,8 +244,10 @@ def get_latest_models():
 - [ ] Add `update-models` CLI command
 - [ ] Query OpenRouter API for model list
 - [ ] Update workflow.yaml models section
+- [ ] Update FUNCTION_CALLING_MODELS in src/providers/openrouter.py
 - [ ] Add `--check-models` flag to review command
 - [ ] Warn when using outdated models
+- [ ] Add periodic check (e.g., warn if last update > 30 days)
 
 ---
 
