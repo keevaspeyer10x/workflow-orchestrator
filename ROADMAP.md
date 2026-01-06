@@ -307,6 +307,205 @@ This is particularly important for "vibe coding" workflows where AI operates wit
 
 ---
 
+#### CORE-011: Workflow Completion Summary & Next Steps
+**Status:** Planned
+**Complexity:** Low
+**Priority:** High
+**Source:** Learnings from roadmap items implementation (2026-01-06)
+**Description:** Show comprehensive completion summary and prompt for next steps when workflow finishes, preventing conversations from "tailing off" without proper closure.
+
+**Problem Solved:**
+When `orchestrator finish` runs, it just outputs "✓ Workflow completed" and stops. This allows:
+1. **Premature closure** - Agent assumes work is done when user may have more steps
+2. **Missing handoff** - No prompt to create PR, merge, or continue discussion
+3. **Lost context** - No summary of what was accomplished or skipped
+4. **Conversation drift** - Discussion gets sidetracked and workflow silently ends
+
+The workflow completion is a critical moment - the agent should explicitly check with the user about next steps rather than assuming the conversation is over.
+
+**Desired Behavior:**
+
+When `orchestrator finish` runs, show:
+
+```
+============================================================
+✓ WORKFLOW COMPLETED
+============================================================
+Task: Implement roadmap items: CORE-007, CORE-008, ARCH-001, WF-004
+Started: 2026-01-06 10:30 UTC
+Finished: 2026-01-06 12:45 UTC
+Duration: 2h 15m
+
+PHASE SUMMARY
+─────────────────────────────────────────────────────────────
+  PLAN:     6 items (5 completed, 1 skipped)
+  EXECUTE:  4 items (4 completed)
+  REVIEW:   4 items (3 completed, 1 skipped)
+  VERIFY:   3 items (2 completed, 1 skipped)
+  LEARN:    6 items (4 completed, 2 skipped)
+─────────────────────────────────────────────────────────────
+  Total:    23 items (18 completed, 5 skipped)
+
+SKIPPED ITEMS (review for justification)
+─────────────────────────────────────────────────────────────
+  • clarifying_questions: "Roadmap items well-specified"
+  • visual_regression_test: "CLI tool with no visual UI"
+  • refactoring_assessment: "Small focused changes"
+  • backport_improvements: "No universal improvements"
+  • update_knowledge_base: "Handled via ROADMAP.md"
+
+============================================================
+⚠️  WORKFLOW COMPLETE - WHAT'S NEXT?
+============================================================
+
+The workflow is finished, but you may still need to:
+
+  □ Create a PR:
+    gh pr create --title "feat: Implement CORE-007, CORE-008, ARCH-001, WF-004"
+
+  □ Merge to main (if approved):
+    git checkout main && git merge <branch> && git push
+
+  □ Continue discussion with user about:
+    • Any follow-up tasks?
+    • Questions about the implementation?
+    • Ready to close this session?
+
+Reply to confirm next steps or start a new workflow.
+============================================================
+```
+
+**Implementation Notes:**
+
+```python
+# In cmd_finish() - src/cli.py
+
+def cmd_finish(args):
+    engine = get_engine(args)
+
+    if not engine.state:
+        print("Error: No active workflow")
+        sys.exit(1)
+
+    # Capture summary before completing
+    summary = engine.get_workflow_summary()
+    skipped = engine.get_all_skipped_items()
+
+    # Complete the workflow
+    if args.abandon:
+        engine.abandon_workflow(args.reason)
+        print("✓ Workflow abandoned")
+    else:
+        engine.complete_workflow(notes=args.notes)
+
+        # Show comprehensive completion summary
+        print_completion_summary(summary, skipped, engine.state)
+
+        # Prompt for next steps
+        print_next_steps_prompt(engine.state)
+
+def print_completion_summary(summary, skipped, state):
+    """Print detailed completion summary."""
+    print("=" * 60)
+    print("✓ WORKFLOW COMPLETED")
+    print("=" * 60)
+    print(f"Task: {state.task_description}")
+
+    if state.started_at and state.completed_at:
+        duration = state.completed_at - state.started_at
+        print(f"Duration: {format_duration(duration)}")
+    print()
+
+    # Phase summary table
+    print("PHASE SUMMARY")
+    print("-" * 60)
+    for phase_id, phase_summary in summary.items():
+        completed = phase_summary['completed']
+        skipped = phase_summary['skipped']
+        total = phase_summary['total']
+        print(f"  {phase_id:12} {total} items ({completed} completed, {skipped} skipped)")
+    print("-" * 60)
+
+    # Skipped items
+    if skipped:
+        print("\nSKIPPED ITEMS (review for justification)")
+        print("-" * 60)
+        for phase_id, items in skipped.items():
+            for item_id, reason in items:
+                # Truncate long reasons
+                short_reason = reason[:50] + "..." if len(reason) > 50 else reason
+                print(f"  • {item_id}: \"{short_reason}\"")
+    print()
+
+def print_next_steps_prompt(state):
+    """Prompt user/agent about next steps."""
+    print("=" * 60)
+    print("⚠️  WORKFLOW COMPLETE - WHAT'S NEXT?")
+    print("=" * 60)
+    print()
+    print("The workflow is finished, but you may still need to:")
+    print()
+    print("  □ Create a PR:")
+    print(f"    gh pr create --title \"{get_pr_title(state)}\"")
+    print()
+    print("  □ Merge to main (if approved)")
+    print()
+    print("  □ Continue discussion with user about:")
+    print("    • Any follow-up tasks?")
+    print("    • Questions about the implementation?")
+    print("    • Ready to close this session?")
+    print()
+    print("Reply to confirm next steps or start a new workflow.")
+    print("=" * 60)
+```
+
+**Engine Methods to Add:**
+
+```python
+# In WorkflowEngine - src/engine.py
+
+def get_workflow_summary(self) -> dict:
+    """Get summary of items per phase."""
+    if not self.state:
+        return {}
+
+    summary = {}
+    for phase_id, phase in self.state.phases.items():
+        completed = sum(1 for i in phase.items.values()
+                       if i.status == ItemStatus.COMPLETED)
+        skipped = sum(1 for i in phase.items.values()
+                     if i.status == ItemStatus.SKIPPED)
+        total = len(phase.items)
+        summary[phase_id] = {
+            'completed': completed,
+            'skipped': skipped,
+            'total': total
+        }
+    return summary
+```
+
+**Tasks:**
+- [ ] Add `get_workflow_summary()` method to WorkflowEngine
+- [ ] Add `print_completion_summary()` function to CLI
+- [ ] Add `print_next_steps_prompt()` function to CLI
+- [ ] Update `cmd_finish()` to call both functions
+- [ ] Add helper to generate suggested PR title from task description
+- [ ] Add duration calculation and formatting
+- [ ] Include skipped items summary (integrate with CORE-010)
+- [ ] Add tests for summary generation
+- [ ] Add tests for CLI output
+
+**Why This Matters for AI Agents:**
+AI agents can lose track of where they are in a conversation, especially after completing a complex multi-phase workflow. By explicitly prompting "what's next?" the orchestrator:
+1. Prevents the agent from assuming work is done prematurely
+2. Reminds the agent to check with the user before ending
+3. Provides concrete next step suggestions (PR, merge, etc.)
+4. Keeps the conversation focused on completing the full task
+
+This is critical for "vibe coding" where the human may be minimally engaged - the agent needs explicit prompts to stay on track rather than silently stopping.
+
+---
+
 #### CORE-016: Multi-Model Review Routing
 **Status:** ✅ Completed (2026-01-06)
 **Complexity:** Medium
