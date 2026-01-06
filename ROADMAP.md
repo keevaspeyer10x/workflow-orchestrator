@@ -279,6 +279,45 @@ def archive_existing_docs(self):
 
 ---
 
+#### CORE-017: Auto-Update Review Models
+**Status:** Planned
+**Complexity:** Low
+**Priority:** Medium
+**Source:** Current workflow
+**Description:** Automatically detect and use latest available AI models for reviews.
+
+**Problem Solved:**
+Model versions in config become stale as new models are released. Currently requires manual updates.
+
+**Desired Behavior:**
+1. `./orchestrator update-models` - Query OpenRouter API for latest models
+2. Auto-suggest updates when newer models detected
+3. Optional "latest" alias that resolves dynamically
+
+**Implementation Notes:**
+```python
+def get_latest_models():
+    """Query OpenRouter for latest available models."""
+    response = requests.get("https://openrouter.ai/api/v1/models")
+    models = response.json()["data"]
+
+    # Find latest OpenAI and Gemini models
+    latest_openai = max([m for m in models if m["id"].startswith("openai/gpt-5")],
+                        key=lambda m: m["created"])
+    latest_gemini = max([m for m in models if "gemini-3" in m["id"]],
+                        key=lambda m: m["created"])
+    return {"codex": latest_openai["id"], "gemini": latest_gemini["id"]}
+```
+
+**Tasks:**
+- [ ] Add `update-models` CLI command
+- [ ] Query OpenRouter API for model list
+- [ ] Update workflow.yaml models section
+- [ ] Add `--check-models` flag to review command
+- [ ] Warn when using outdated models
+
+---
+
 ### Medium-term (Medium Effort)
 
 #### CORE-010: Checkpoint Database Backend

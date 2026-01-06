@@ -185,11 +185,13 @@ Analyze the git diff and changed files to provide your review. Output your findi
         process = None
         try:
             # Gemini CLI uses positional prompt (not -p which is deprecated)
+            # Use --model to specify Gemini 3 Pro
             # Use --yolo to auto-approve any tool calls
             # Use --output-format text for clean output
             process = subprocess.Popen(
                 [
                     "gemini",
+                    "--model", "gemini-3-pro-preview",
                     "--yolo",
                     "--output-format", "text",
                     full_prompt,
@@ -205,7 +207,7 @@ Analyze the git diff and changed files to provide your review. Output your findi
                 logger.warning(f"Gemini returned non-zero: {stderr}")
 
             output = stdout or stderr
-            return output, "gemini/gemini-2.5-pro"  # Gemini CLI uses latest model
+            return output, "gemini/gemini-3-pro-preview"
 
         except subprocess.TimeoutExpired:
             if process:

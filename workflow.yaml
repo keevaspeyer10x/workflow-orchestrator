@@ -62,6 +62,17 @@ settings:
       consistency_review: gemini
       holistic_review: gemini
 
+    # Model versions - UPDATE THESE when new models are released
+    # CLI models are used when running Codex/Gemini CLIs directly
+    # API models are used when routing through OpenRouter
+    models:
+      cli:
+        codex: "gpt-5.1-codex-max"       # Latest Codex model
+        gemini: "gemini-3-pro-preview"   # Latest Gemini model (preview)
+      api:
+        codex: "openai/gpt-5.1"          # OpenRouter model ID
+        gemini: "google/gemini-3-pro-preview"  # OpenRouter model ID
+
     # GitHub Actions configuration
     github_actions:
       required_for_merge: true  # Block PR merge if reviews fail
