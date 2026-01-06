@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # Model mapping for OpenRouter
 OPENROUTER_MODELS = {
     "codex": "openai/gpt-4o",  # Best available code model via OpenRouter
-    "gemini": "google/gemini-2.0-flash-exp",  # Gemini via OpenRouter
+    "gemini": "google/gemini-2.0-flash-001",  # Gemini via OpenRouter
 }
 
 
@@ -103,14 +103,29 @@ class APIExecutor:
 
         except Exception as e:
             logger.exception(f"Error executing {review_type} review via API")
+            # Sanitize error message to avoid leaking sensitive info
+            error_msg = self._sanitize_error(str(e))
             return ReviewResult(
                 review_type=review_type,
                 success=False,
                 model_used="unknown",
                 method_used="api",
-                error=str(e),
+                error=error_msg,
                 duration_seconds=time.time() - start_time,
             )
+
+    def _sanitize_error(self, error: str) -> str:
+        """Sanitize error message to avoid leaking sensitive information."""
+        import re
+        # Remove potential API keys (sk-..., AIza..., etc.)
+        sanitized = re.sub(r'sk-[a-zA-Z0-9_-]+', '[REDACTED_KEY]', error)
+        sanitized = re.sub(r'AIza[a-zA-Z0-9_-]+', '[REDACTED_KEY]', sanitized)
+        # Remove Bearer tokens
+        sanitized = re.sub(r'Bearer\s+[a-zA-Z0-9_-]+', 'Bearer [REDACTED]', sanitized)
+        # Truncate long error messages
+        if len(sanitized) > 500:
+            sanitized = sanitized[:500] + "... (truncated)"
+        return sanitized
 
     def _build_prompt(self, review_type: str, context: ReviewContext) -> str:
         """Build the full prompt with context."""
@@ -163,6 +178,7 @@ class APIExecutor:
                 "temperature": 0.3,  # Lower temperature for more consistent reviews
             },
             timeout=300,  # 5 minute timeout
+            verify=True,  # Explicitly enforce SSL certificate verification
         )
 
         if response.status_code != 200:

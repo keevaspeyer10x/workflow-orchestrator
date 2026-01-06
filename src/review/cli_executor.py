@@ -129,31 +129,46 @@ class CLIExecutor:
                 duration_seconds=time.time() - start_time,
             )
 
-    def _run_codex(self, prompt: str) -> tuple[str, str]:
+    def _run_codex(self, prompt: str, base_branch: str = "main") -> tuple[str, str]:
         """
         Run Codex CLI review.
 
         Returns (output, model_name)
         """
-        # Codex CLI review command with custom instructions
-        result = subprocess.run(
-            [
-                "codex",
-                "review",
-                "--custom", prompt,
-                "--format", "markdown",
-            ],
-            cwd=self.working_dir,
-            capture_output=True,
-            text=True,
-            timeout=self.timeout,
-        )
+        process = None
+        try:
+            # Codex CLI: use --base for what to review, pipe prompt via stdin
+            process = subprocess.Popen(
+                [
+                    "codex",
+                    "review",
+                    "--base", base_branch,
+                    "-",  # Read custom instructions from stdin
+                ],
+                cwd=self.working_dir,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            stdout, stderr = process.communicate(input=prompt, timeout=self.timeout)
 
-        if result.returncode != 0 and result.stderr:
-            logger.warning(f"Codex returned non-zero: {result.stderr}")
+            if process.returncode != 0 and stderr:
+                logger.warning(f"Codex returned non-zero: {stderr}")
 
-        output = result.stdout or result.stderr
-        return output, "codex/gpt-5-codex"
+            output = stdout or stderr
+            return output, "codex/gpt-4o"
+
+        except subprocess.TimeoutExpired:
+            if process:
+                process.kill()
+                process.wait()  # Ensure process is cleaned up
+            raise
+
+        finally:
+            if process and process.poll() is None:
+                process.kill()
+                process.wait()
 
     def _run_gemini(self, prompt: str) -> tuple[str, str]:
         """
@@ -161,54 +176,48 @@ class CLIExecutor:
 
         Returns (output, model_name)
         """
-        # First check if code-review extension is installed
-        # If not, fall back to regular prompt
-
-        # Try the code-review extension first
-        try:
-            result = subprocess.run(
-                [
-                    "gemini",
-                    "/code-review",
-                    prompt,
-                ],
-                cwd=self.working_dir,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout,
-            )
-
-            if result.returncode == 0:
-                return result.stdout, "gemini/gemini-2.5-pro"
-
-        except Exception:
-            pass
-
-        # Fall back to regular prompt
-        full_prompt = f"""
-Review the code changes in this repository.
+        # Build full prompt for code review
+        full_prompt = f"""Review the code changes in this repository.
 
 {prompt}
 
-Analyze the git diff and changed files to provide your review.
-"""
+Analyze the git diff and changed files to provide your review. Output your findings in a structured format."""
 
-        result = subprocess.run(
-            [
-                "gemini",
-                "-p", full_prompt,
-            ],
-            cwd=self.working_dir,
-            capture_output=True,
-            text=True,
-            timeout=self.timeout,
-        )
+        process = None
+        try:
+            # Gemini CLI uses positional prompt (not -p which is deprecated)
+            # Use --yolo to auto-approve any tool calls
+            # Use --output-format text for clean output
+            process = subprocess.Popen(
+                [
+                    "gemini",
+                    "--yolo",
+                    "--output-format", "text",
+                    full_prompt,
+                ],
+                cwd=self.working_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            stdout, stderr = process.communicate(timeout=self.timeout)
 
-        if result.returncode != 0 and result.stderr:
-            logger.warning(f"Gemini returned non-zero: {result.stderr}")
+            if process.returncode != 0 and stderr:
+                logger.warning(f"Gemini returned non-zero: {stderr}")
 
-        output = result.stdout or result.stderr
-        return output, "gemini/gemini-2.5-pro"
+            output = stdout or stderr
+            return output, "gemini/gemini-2.5-pro"
+
+        except subprocess.TimeoutExpired:
+            if process:
+                process.kill()
+                process.wait()  # Ensure process is cleaned up
+            raise
+
+        finally:
+            if process and process.poll() is None:
+                process.kill()
+                process.wait()
 
     def check_tools_available(self) -> dict[str, bool]:
         """Check if required CLI tools are available."""
