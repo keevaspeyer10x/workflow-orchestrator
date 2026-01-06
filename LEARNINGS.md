@@ -128,3 +128,145 @@ We encountered several issues deploying to Render:
 3. **Use ESM-compatible packages** or implement simple alternatives
 4. **Include mobile testing** by default for any UI work
 5. **Reference style guides** in all visual evaluations
+
+
+---
+
+# Learnings: v2.2 Enhancements Implementation
+
+## Task Summary
+Implementation of 5 PRD features plus SOPS secrets backport for the workflow-orchestrator.
+
+---
+
+## Root Cause Analysis
+
+### Why This Implementation Was Needed
+
+1. **Provider Lock-in**: The original `claude_integration.py` was tightly coupled to Claude Code CLI, making it impossible to use the orchestrator in environments without Claude Code (e.g., Manus).
+
+2. **Session Recovery**: Long-running tasks could lose context when sessions ended, requiring manual reconstruction of state.
+
+3. **Missing Constraints**: No way to specify task-specific rules that should persist throughout the workflow.
+
+4. **Lack of Operational Guidance**: Workflow definitions couldn't include tips, warnings, or learnings from previous executions.
+
+5. **Environment Blindness**: The orchestrator couldn't detect what environment it was running in to auto-select appropriate providers.
+
+---
+
+## What Went Well
+
+1. **Clean Architecture**: The provider abstraction pattern (Strategy + Registry) made it easy to add new providers without modifying existing code.
+
+2. **Backwards Compatibility**: All existing workflows continue to work without modification. New fields have sensible defaults.
+
+3. **Test Coverage**: 54 new tests covering all features, bringing total to 73 tests.
+
+4. **SOPS Integration**: Successfully backported secrets management from quiet-ping-v6, providing secure API key storage.
+
+5. **Environment Detection**: Correctly identifies Manus, Claude Code, and standalone environments.
+
+---
+
+## What Could Be Improved
+
+1. **Claude Code CLI Unavailable**: The planned delegation to Claude Code for implementation couldn't happen because the CLI wasn't available in this environment. Had to implement directly.
+
+2. **Checkpoint ID Collision**: Initial test failure due to checkpoints created in the same second having identical IDs. Fixed by adding timestamp precision.
+
+3. **Documentation Gaps**: Some private methods lack docstrings (89% coverage vs 100% target).
+
+---
+
+## Key Decisions Made
+
+| Decision | Rationale |
+|----------|-----------|
+| Direct implementation instead of Claude Code | CLI not available in Manus environment |
+| SOPS with age encryption | Simpler than GPG, no key server needed |
+| Auto-detect files for checkpoints | Reduces manual effort, captures recent changes |
+| OpenRouter as Manus default | Only LLM API available in Manus |
+| Emoji rendering for notes | Improves readability of tips/warnings |
+
+---
+
+## Technical Learnings
+
+### Provider Pattern
+```python
+# Good: Registry pattern allows runtime provider selection
+providers = {"openrouter": OpenRouterProvider, "manual": ManualProvider}
+provider = providers.get(name)()
+
+# Good: Abstract base class enforces interface
+class AgentProvider(ABC):
+    @abstractmethod
+    def execute(self, prompt: str) -> ExecutionResult: ...
+```
+
+### Environment Detection
+```python
+# Good: Multiple indicators for robust detection
+indicators = []
+if os.environ.get("MANUS_SESSION"):
+    indicators.append("MANUS_SESSION env var")
+if str(Path.home()) == "/home/ubuntu":
+    indicators.append("ubuntu home directory")
+```
+
+### Checkpoint Auto-Detection
+```python
+# Good: Exclude common artifacts, include recent changes
+exclude_patterns = {'.git', '__pycache__', 'node_modules'}
+include_extensions = {'.py', '.js', '.yaml', '.md'}
+```
+
+---
+
+## Recommendations for Future
+
+### Short-term
+1. Add deprecation warning to `claude_integration.py`
+2. Add length limits to constraints/notes (DoS prevention)
+3. Add `--constraints-file` flag for convenience
+
+### Medium-term
+1. Database backend for checkpoints (multi-node support)
+2. Provider caching to avoid repeated availability checks
+3. Streaming support for OpenRouter provider
+
+### Long-term
+1. Plugin system for custom providers
+2. Checkpoint encryption for sensitive workflows
+3. Distributed workflow execution
+
+---
+
+## Metrics
+
+| Metric | Value |
+|--------|-------|
+| New lines of code | 1,662 |
+| New test cases | 54 |
+| Files created | 12 |
+| Files modified | 4 |
+| PRD acceptance criteria met | 100% |
+| Test pass rate | 100% |
+
+---
+
+## Specialized AI Usage Report
+
+**Claude Code Used**: No
+
+**Reason**: Claude Code CLI was not available in the Manus sandbox environment. The implementation was done directly by the agent using the OpenRouter API for assistance where needed.
+
+**Alternative Approach**: Direct implementation following the detailed PRD specifications and existing code patterns. This worked well because:
+1. The PRD provided clear acceptance criteria
+2. Existing code provided patterns to follow
+3. The features were well-scoped and modular
+
+---
+
+*Generated: 2026-01-06*

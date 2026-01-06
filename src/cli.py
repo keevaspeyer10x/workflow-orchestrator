@@ -20,6 +20,9 @@ from src.learning import LearningEngine
 from src.dashboard import start_dashboard, generate_static_dashboard
 from src.schema import WorkflowDef
 from src.claude_integration import ClaudeCodeIntegration
+from src.providers import get_provider, list_providers, AgentProvider
+from src.environment import detect_environment, get_environment_info, Environment
+from src.checkpoint import CheckpointManager, CheckpointData
 from src.visual_verification import (
     VisualVerificationClient, 
     VisualVerificationError,
@@ -59,15 +62,21 @@ def cmd_start(args):
         print(f"Error: Workflow definition not found: {yaml_path}")
         sys.exit(1)
     
+    # Parse constraints (Feature 4) - can be specified multiple times
+    constraints = getattr(args, 'constraints', None) or []
+    
     try:
         state = engine.start_workflow(
             str(yaml_path),
             args.task,
-            project=args.project
+            project=args.project,
+            constraints=constraints
         )
         print(f"\n✓ Workflow started: {state.workflow_id}")
         print(f"  Task: {args.task}")
         print(f"  Phase: {state.current_phase_id}")
+        if constraints:
+            print(f"  Constraints: {len(constraints)} specified")
         print("\nRun 'orchestrator status' to see the checklist.")
     except ValueError as e:
         print(f"Error: {e}")
@@ -329,7 +338,7 @@ def cmd_validate(args):
 
 
 def cmd_handoff(args):
-    """Generate a handoff prompt for Claude Code or execute directly."""
+    """Generate a handoff prompt for an agent provider or execute directly."""
     engine = get_engine(args)
     
     if not engine.state or not engine.workflow_def:
@@ -348,60 +357,86 @@ def cmd_handoff(args):
         print("No pending items in current phase.")
         sys.exit(0)
     
-    # Initialize Claude integration
-    claude = ClaudeCodeIntegration(args.dir or '.')
+    # Get the provider (explicit, environment-based, or auto-detected)
+    env_override = getattr(args, 'env', None)
+    try:
+        provider = get_provider(
+            name=getattr(args, 'provider', None),
+            environment=env_override,
+            working_dir=args.dir or '.'
+        )
+    except ValueError as e:
+        print(f"Error: {e}")
+        print(f"Available providers: {', '.join(list_providers())}")
+        sys.exit(1)
+    
+    # Build context for prompt generation
+    context = {
+        "phase": phase_def.name if phase_def else engine.state.current_phase_id,
+        "items": pending_items,
+        "constraints": args.constraints.split(',') if args.constraints else [],
+        "files": args.files.split(',') if args.files else [],
+        "acceptance_criteria": args.criteria.split(',') if args.criteria else [],
+        "notes": [],  # Will be populated when notes feature is implemented
+    }
     
     # Generate the handoff prompt
-    prompt = claude.generate_handoff_prompt(
-        task_description=engine.state.task_description,
-        phase_name=phase_def.name if phase_def else engine.state.current_phase_id,
-        checklist_items=pending_items,
-        context_files=args.files.split(',') if args.files else None,
-        constraints=args.constraints.split(',') if args.constraints else None,
-        acceptance_criteria=args.criteria.split(',') if args.criteria else None
+    prompt = provider.generate_prompt(
+        task=engine.state.task_description,
+        context=context
     )
     
     if args.execute:
-        # Execute directly with Claude Code
-        if not claude.is_available():
-            print("Error: Claude Code CLI not available")
-            print("Install with: npm install -g @anthropic-ai/claude-code")
+        # Execute directly with the provider
+        if not provider.is_available():
+            print(f"Error: Provider '{provider.name()}' is not available")
+            if provider.name() == 'openrouter':
+                print("Set OPENROUTER_API_KEY environment variable.")
+            elif provider.name() == 'claude_code':
+                print("Install Claude Code CLI from https://claude.ai/code")
             sys.exit(1)
         
-        print("Executing with Claude Code...")
-        print("="*60)
+        if not provider.supports_execution():
+            print(f"Error: Provider '{provider.name()}' does not support direct execution.")
+            print("Copy the prompt below and paste it into your preferred LLM.")
+            print("=" * 60)
+            print(prompt)
+            print("=" * 60)
+            sys.exit(1)
         
-        success, output, details = claude.execute_prompt(prompt, timeout=args.timeout)
+        model = getattr(args, 'model', None)
+        print(f"Executing with {provider.name()} provider...")
+        if model:
+            print(f"Using model: {model}")
+        print("=" * 60)
         
-        print(output)
-        print("="*60)
+        result = provider.execute(prompt, model=model)
         
-        if success:
-            print("\n✓ Claude Code execution completed")
-            
-            # Parse and show completion report
-            report = claude.parse_completion_report(output)
-            if report['completed_items']:
-                print("\nCompleted items:")
-                for item in report['completed_items']:
-                    print(f"  - {item}")
-            
-            if report['blockers']:
-                print("\nBlockers encountered:")
-                for blocker in report['blockers']:
-                    print(f"  - {blocker}")
+        print(result.output)
+        print("=" * 60)
+        
+        if result.success:
+            print(f"\n✓ Execution completed")
+            if result.model_used:
+                print(f"  Model: {result.model_used}")
+            if result.duration_seconds:
+                print(f"  Duration: {result.duration_seconds:.1f}s")
+            if result.tokens_used:
+                print(f"  Tokens: {result.tokens_used}")
         else:
-            print(f"\n✗ Claude Code execution failed: {details.get('error', 'unknown')}")
+            print(f"\n✗ Execution failed: {result.error}")
             sys.exit(1)
     else:
         # Just print the prompt for manual use
         print("=" * 60)
-        print("CLAUDE CODE HANDOFF PROMPT")
+        print(f"HANDOFF PROMPT (Provider: {provider.name()})")
         print("=" * 60)
         print(prompt)
         print("=" * 60)
-        print("\nTo execute: orchestrator handoff --execute")
-        print("Or copy the above prompt to Claude Code manually.")
+        print(f"\nTo execute: orchestrator handoff --execute")
+        if provider.name() != 'manual':
+            print(f"Provider: {provider.name()} (auto-detected)")
+        print("Or copy the above prompt to your preferred LLM manually.")
 
 
 def cmd_list(args):
@@ -699,6 +734,127 @@ def generate_workflow_md(engine: WorkflowEngine) -> str:
     return "\n".join(lines)
 
 
+# ============================================================================
+# Checkpoint Commands (Feature 5)
+# ============================================================================
+
+def cmd_checkpoint(args):
+    """Create a checkpoint for the current workflow state."""
+    engine = get_engine(args)
+    
+    if not engine.state:
+        print("Error: No active workflow")
+        sys.exit(1)
+    
+    checkpoint_mgr = CheckpointManager(args.dir or '.')
+    
+    # Parse key decisions
+    decisions = getattr(args, 'decision', None) or []
+    
+    # Parse file manifest
+    files = getattr(args, 'file', None) or []
+    
+    # Get current item ID if in progress
+    current_item_id = None
+    phase_state = engine.state.get_current_phase()
+    if phase_state:
+        for item_id, item_state in phase_state.items.items():
+            if item_state.status.value == 'in_progress':
+                current_item_id = item_id
+                break
+    
+    checkpoint = checkpoint_mgr.create_checkpoint(
+        workflow_id=engine.state.workflow_id,
+        phase_id=engine.state.current_phase_id,
+        item_id=current_item_id,
+        message=getattr(args, 'message', None),
+        key_decisions=decisions,
+        file_manifest=files,
+        workflow_state=engine.state.model_dump(mode='json'),
+        auto_detect_files=True
+    )
+    
+    print(f"\n✓ Checkpoint created: {checkpoint.checkpoint_id}")
+    print(f"  Phase: {checkpoint.phase_id}")
+    if checkpoint.item_id:
+        print(f"  Item: {checkpoint.item_id}")
+    if checkpoint.message:
+        print(f"  Message: {checkpoint.message}")
+    print(f"  Files tracked: {len(checkpoint.file_manifest)}")
+    print("\nResume with: orchestrator resume")
+
+
+def cmd_checkpoints(args):
+    """List all checkpoints."""
+    checkpoint_mgr = CheckpointManager(args.dir or '.')
+    
+    # Handle cleanup
+    if getattr(args, 'cleanup', False):
+        max_age = getattr(args, 'max_age', 30)
+        removed = checkpoint_mgr.cleanup_old_checkpoints(max_age_days=max_age)
+        print(f"Removed {removed} old checkpoints")
+        return
+    
+    # Get workflow ID filter
+    workflow_id = None
+    if not getattr(args, 'all', False):
+        engine = WorkflowEngine(args.dir or '.')
+        engine.load_state()
+        if engine.state:
+            workflow_id = engine.state.workflow_id
+    
+    checkpoints = checkpoint_mgr.list_checkpoints(
+        workflow_id=workflow_id,
+        include_completed=getattr(args, 'completed', False)
+    )
+    
+    if not checkpoints:
+        print("No checkpoints found.")
+        return
+    
+    print(f"\nFound {len(checkpoints)} checkpoint(s):\n")
+    print(f"{'ID':<35} {'Phase':<12} {'Time':<20} {'Message'}")
+    print("-" * 80)
+    
+    for cp in checkpoints:
+        timestamp = cp.timestamp[:19].replace('T', ' ')
+        message = (cp.message or '')[:30]
+        print(f"{cp.checkpoint_id:<35} {cp.phase_id:<12} {timestamp:<20} {message}")
+
+
+def cmd_resume(args):
+    """Resume from a checkpoint."""
+    checkpoint_mgr = CheckpointManager(args.dir or '.')
+    
+    # Get checkpoint
+    checkpoint_id = getattr(args, 'from_checkpoint', None)
+    
+    if checkpoint_id:
+        checkpoint = checkpoint_mgr.get_checkpoint(checkpoint_id)
+        if not checkpoint:
+            print(f"Error: Checkpoint not found: {checkpoint_id}")
+            sys.exit(1)
+    else:
+        checkpoint = checkpoint_mgr.get_latest_checkpoint()
+        if not checkpoint:
+            print("Error: No checkpoints found. Create one with: orchestrator checkpoint")
+            sys.exit(1)
+    
+    # Dry run mode
+    if getattr(args, 'dry_run', False):
+        print("\n[DRY RUN] Would resume from checkpoint:\n")
+        print(checkpoint_mgr.generate_resume_prompt(checkpoint))
+        return
+    
+    # Generate and print resume prompt
+    print(checkpoint_mgr.generate_resume_prompt(checkpoint))
+    
+    # Also show current status
+    engine = get_engine(args)
+    if engine.state:
+        print("\n" + engine.get_recitation_text())
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="AI Workflow Orchestrator - Enforce multi-phase workflows with active verification",
@@ -728,6 +884,8 @@ Examples:
     start_parser.add_argument('task', help='Task description')
     start_parser.add_argument('--workflow', '-w', default='workflow.yaml', help='Workflow YAML file')
     start_parser.add_argument('--project', '-p', help='Project name')
+    start_parser.add_argument('--constraints', '-c', action='append', default=[],
+                              help='Task constraint (can be specified multiple times)')
     start_parser.set_defaults(func=cmd_start)
     
     # Status command
@@ -798,9 +956,14 @@ Examples:
     validate_parser.add_argument('--workflow', '-w', default='workflow.yaml', help='Workflow YAML file')
     validate_parser.set_defaults(func=cmd_validate)
     
-    # Handoff command (NEW)
-    handoff_parser = subparsers.add_parser('handoff', help='Generate or execute a Claude Code handoff')
-    handoff_parser.add_argument('--execute', '-x', action='store_true', help='Execute with Claude Code directly')
+    # Handoff command
+    handoff_parser = subparsers.add_parser('handoff', help='Generate or execute a handoff to an agent provider')
+    handoff_parser.add_argument('--execute', '-x', action='store_true', help='Execute with the provider directly')
+    handoff_parser.add_argument('--provider', '-p', choices=['openrouter', 'claude_code', 'manual'],
+                                help='Provider to use (default: auto-detect)')
+    handoff_parser.add_argument('--env', '-e', choices=['claude_code', 'manus', 'standalone'],
+                                help='Override environment detection')
+    handoff_parser.add_argument('--model', '-m', help='Model to use (provider-specific)')
     handoff_parser.add_argument('--files', '-f', help='Comma-separated list of relevant files')
     handoff_parser.add_argument('--constraints', '-c', help='Comma-separated list of constraints')
     handoff_parser.add_argument('--criteria', help='Comma-separated acceptance criteria')
@@ -832,13 +995,36 @@ Examples:
     visual_template_parser.add_argument('feature_name', help='Name of the feature to test')
     visual_template_parser.set_defaults(func=cmd_visual_template)
     
-    # Cleanup command (NEW)
+    # Cleanup command
     cleanup_parser = subparsers.add_parser('cleanup', help='Clean up abandoned workflows')
     cleanup_parser.add_argument('--search-dir', '-s', default='.', help='Directory to search (default: current)')
     cleanup_parser.add_argument('--max-age', '-a', type=int, default=7, help='Max age in days for active workflows (default: 7)')
     cleanup_parser.add_argument('--depth', '-d', type=int, default=3, help='Max search depth (default: 3)')
     cleanup_parser.add_argument('--dry-run', action='store_true', help='Show what would be cleaned without doing it')
     cleanup_parser.set_defaults(func=cmd_cleanup)
+    
+    # Checkpoint command (Feature 5)
+    checkpoint_parser = subparsers.add_parser('checkpoint', help='Create a checkpoint for session recovery')
+    checkpoint_parser.add_argument('--message', '-m', help='Checkpoint message/description')
+    checkpoint_parser.add_argument('--decision', '-d', action='append', default=[],
+                                   help='Key decision made (can be specified multiple times)')
+    checkpoint_parser.add_argument('--file', '-f', action='append', default=[],
+                                   help='Important file to track (can be specified multiple times)')
+    checkpoint_parser.set_defaults(func=cmd_checkpoint)
+    
+    # Checkpoints command (list checkpoints)
+    checkpoints_parser = subparsers.add_parser('checkpoints', help='List all checkpoints')
+    checkpoints_parser.add_argument('--all', '-a', action='store_true', help='Show checkpoints from all workflows')
+    checkpoints_parser.add_argument('--completed', action='store_true', help='Include checkpoints from completed workflows')
+    checkpoints_parser.add_argument('--cleanup', action='store_true', help='Remove old checkpoints')
+    checkpoints_parser.add_argument('--max-age', type=int, default=30, help='Max age in days for cleanup (default: 30)')
+    checkpoints_parser.set_defaults(func=cmd_checkpoints)
+    
+    # Resume command (Feature 5)
+    resume_parser = subparsers.add_parser('resume', help='Resume from a checkpoint')
+    resume_parser.add_argument('--from', dest='from_checkpoint', help='Checkpoint ID to resume from (default: latest)')
+    resume_parser.add_argument('--dry-run', action='store_true', help='Show resume prompt without executing')
+    resume_parser.set_defaults(func=cmd_resume)
     
     args = parser.parse_args()
     

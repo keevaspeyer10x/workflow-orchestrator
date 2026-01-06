@@ -238,8 +238,15 @@ class WorkflowEngine:
     # Workflow Lifecycle
     # ========================================================================
     
-    def start_workflow(self, yaml_path: str, task_description: str, project: Optional[str] = None) -> WorkflowState:
-        """Start a new workflow instance."""
+    def start_workflow(self, yaml_path: str, task_description: str, project: Optional[str] = None, constraints: Optional[list[str]] = None) -> WorkflowState:
+        """Start a new workflow instance.
+        
+        Args:
+            yaml_path: Path to the workflow YAML definition
+            task_description: Description of the task
+            project: Optional project name
+            constraints: Optional list of task-specific constraints (Feature 4)
+        """
         # Load the workflow definition
         yaml_path_resolved = Path(yaml_path).resolve()
         self.load_workflow_def(str(yaml_path_resolved))
@@ -284,6 +291,7 @@ class WorkflowEngine:
             current_phase_id=first_phase.id,
             phases=phases,
             workflow_definition=workflow_def_dict,  # Version-locked definition
+            constraints=constraints or [],  # Feature 4: Task constraints
             metadata={
                 "workflow_yaml_path": str(yaml_path_resolved),
                 "workflow_yaml_checksum": yaml_checksum
@@ -800,7 +808,8 @@ class WorkflowEngine:
                     "skippable": item_def.skippable,
                     "status": item_state.status.value if item_state else "unknown",
                     "verification_type": item_def.verification.type.value,
-                    "skip_reason": item_state.skip_reason if item_state else None
+                    "skip_reason": item_state.skip_reason if item_state else None,
+                    "notes": item_def.notes if item_def.notes else []  # Feature 3: Operating notes
                 })
         
         # Count progress
@@ -844,9 +853,25 @@ class WorkflowEngine:
             f"Task: {status['task']}",
             f"Phase: {status['current_phase']['id']} - {status['current_phase']['name']}",
             f"Progress: {status['current_phase']['progress']}",
-            "",
-            "Checklist:"
         ]
+        
+        # Display constraints if present (Feature 4)
+        if self.state.constraints:
+            lines.append("")
+            lines.append("Constraints:")
+            for constraint in self.state.constraints:
+                lines.append(f"  - {constraint}")
+        
+        # Display phase notes if present (Feature 3)
+        phase_def = self.workflow_def.get_phase(self.state.current_phase_id)
+        if phase_def and phase_def.notes:
+            lines.append("")
+            lines.append("Phase Notes:")
+            for note in phase_def.notes:
+                lines.append(f"  {self._format_note(note)}")
+        
+        lines.append("")
+        lines.append("Checklist:")
         
         next_pending_item = None
         for item in status['checklist']:
@@ -860,6 +885,12 @@ class WorkflowEngine:
             lines.append(f"  {marker} [{req}] {item['id']} — {item['name']}")
             if item['skip_reason']:
                 lines.append(f"       └─ Skipped: {item['skip_reason']}")
+            
+            # Display item notes if present (Feature 3)
+            item_notes = item.get('notes', [])
+            if item_notes:
+                for note in item_notes:
+                    lines.append(f"       └─ {self._format_note(note)}")
             
             # Track first pending item for next action
             if not next_pending_item and status_val in ["pending", "failed"]:
@@ -887,6 +918,33 @@ class WorkflowEngine:
         lines.append("=" * 60)
         
         return "\n".join(lines)
+    
+    def _format_note(self, note: str) -> str:
+        """
+        Format a note with optional emoji rendering for categorized notes.
+        
+        Supports bracket prefixes:
+        - [tip] → 💡
+        - [caution] → ⚠️
+        - [learning] → 📚
+        - [context] → 📋
+        - [important] → ❗
+        """
+        emoji_map = {
+            '[tip]': '💡',
+            '[caution]': '⚠️',
+            '[learning]': '📚',
+            '[context]': '📋',
+            '[important]': '❗',
+            '[warning]': '⚠️',
+            '[note]': '📝',
+        }
+        
+        for prefix, emoji in emoji_map.items():
+            if note.lower().startswith(prefix):
+                return f"{emoji} {note[len(prefix):].strip()}"
+        
+        return note
     
     def get_all_phases(self) -> list[dict]:
         """Get all phases from the workflow definition (for dashboard)."""
