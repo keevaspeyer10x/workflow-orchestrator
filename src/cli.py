@@ -20,6 +20,13 @@ from src.learning import LearningEngine
 from src.dashboard import start_dashboard, generate_static_dashboard
 from src.schema import WorkflowDef
 from src.claude_integration import ClaudeCodeIntegration
+from src.visual_verification import (
+    VisualVerificationClient, 
+    VisualVerificationError,
+    create_desktop_viewport,
+    create_mobile_viewport,
+    format_verification_result
+)
 
 VERSION = "1.0.0"
 
@@ -469,6 +476,132 @@ def cmd_cleanup(args):
                 print(f"  - {wf['workflow_id']}: {wf['task'][:40]}...")
 
 
+def cmd_visual_verify(args):
+    """Run visual verification against a URL."""
+    try:
+        client = VisualVerificationClient()
+    except VisualVerificationError as e:
+        print(f"Error: {e}")
+        print("\nSet VISUAL_VERIFICATION_URL and VISUAL_VERIFICATION_API_KEY environment variables.")
+        sys.exit(1)
+    
+    # Load specification
+    spec_path = Path(args.spec)
+    if spec_path.exists():
+        with open(spec_path, 'r') as f:
+            specification = f.read()
+    else:
+        specification = args.spec
+    
+    # Load style guide if provided
+    style_guide_content = None
+    if args.style_guide:
+        style_guide_path = Path(args.style_guide)
+        if style_guide_path.exists():
+            with open(style_guide_path, 'r') as f:
+                style_guide_content = f.read()
+        else:
+            print(f"Warning: Style guide not found: {args.style_guide}")
+    
+    results = []
+    
+    # Desktop verification
+    print("Running desktop verification...")
+    try:
+        actions = [{"type": "screenshot", "name": "desktop"}]
+        if style_guide_content:
+            desktop_result = client.verify_with_style_guide(
+                args.url, specification, style_guide_content,
+                actions=actions,
+                viewport=create_desktop_viewport()
+            )
+        else:
+            desktop_result = client.verify(
+                args.url, specification,
+                actions=actions,
+                viewport=create_desktop_viewport()
+            )
+        desktop_result['viewport'] = 'desktop'
+        results.append(desktop_result)
+    except VisualVerificationError as e:
+        print(f"Desktop verification failed: {e}")
+        results.append({'status': 'error', 'viewport': 'desktop', 'reasoning': str(e)})
+    
+    # Mobile verification
+    if args.mobile:
+        print("Running mobile verification...")
+        try:
+            actions = [{"type": "screenshot", "name": "mobile"}]
+            if style_guide_content:
+                mobile_result = client.verify_with_style_guide(
+                    args.url, specification, style_guide_content,
+                    actions=actions,
+                    viewport=create_mobile_viewport()
+                )
+            else:
+                mobile_result = client.verify(
+                    args.url, specification,
+                    actions=actions,
+                    viewport=create_mobile_viewport()
+                )
+            mobile_result['viewport'] = 'mobile'
+            results.append(mobile_result)
+        except VisualVerificationError as e:
+            print(f"Mobile verification failed: {e}")
+            results.append({'status': 'error', 'viewport': 'mobile', 'reasoning': str(e)})
+    
+    # Output results
+    print("\n" + "="*60)
+    all_passed = all(r.get('status') == 'pass' for r in results)
+    
+    for result in results:
+        print(format_verification_result(result, result.get('viewport', 'unknown')))
+        print()
+    
+    if all_passed:
+        print("✓ ALL VERIFICATIONS PASSED")
+        sys.exit(0)
+    else:
+        print("✗ SOME VERIFICATIONS FAILED")
+        sys.exit(1)
+
+
+def cmd_visual_template(args):
+    """Generate a visual test template for a feature."""
+    template = f'''# Visual UAT Test: {args.feature_name}
+
+## Test URL
+{{{{base_url}}}}/path/to/feature
+
+## Pre-conditions
+- User is logged in
+- [Other setup requirements]
+
+## Actions to Perform
+1. Navigate to the page
+2. [Action 2]
+3. [Action 3]
+
+## Specific Checks
+- [ ] [Specific element] is visible
+- [ ] [Specific functionality] works
+- [ ] [Expected state] is achieved
+
+## Open-Ended Evaluation (Mandatory)
+1. Does this feature work as specified? Can the user complete the intended action?
+2. Is the design consistent with our style guide?
+3. Is the user journey intuitive? Would a first-time user understand what to do?
+4. How does it handle edge cases (errors, empty states, unexpected input)?
+5. Does it work well on mobile? Are there any responsive design issues?
+
+## Open-Ended Evaluation (Optional)
+- [ ] Accessibility: Are there any obvious accessibility concerns?
+- [ ] Visual hierarchy: Does the layout guide the user appropriately?
+- [ ] Performance: Do loading states feel responsive?
+'''
+    print(template)
+
+
 def cmd_generate_md(args):
     """Generate a human-readable WORKFLOW.md from current state."""
     engine = get_engine(args)
@@ -685,6 +818,19 @@ Examples:
     list_parser.add_argument('--json', action='store_true', help='Output as JSON')
     list_parser.add_argument('--active-only', action='store_true', help='Show only active workflows')
     list_parser.set_defaults(func=cmd_list)
+    
+    # Visual-verify command (NEW)
+    visual_verify_parser = subparsers.add_parser('visual-verify', help='Run visual verification against a URL')
+    visual_verify_parser.add_argument('--url', '-u', required=True, help='URL to verify')
+    visual_verify_parser.add_argument('--spec', '-s', required=True, help='Path to specification file or inline spec')
+    visual_verify_parser.add_argument('--no-mobile', dest='mobile', action='store_false', default=True, help='Skip mobile viewport test')
+    visual_verify_parser.add_argument('--style-guide', '-g', help='Path to style guide file')
+    visual_verify_parser.set_defaults(func=cmd_visual_verify)
+    
+    # Visual-template command (NEW)
+    visual_template_parser = subparsers.add_parser('visual-template', help='Generate a visual test template')
+    visual_template_parser.add_argument('feature_name', help='Name of the feature to test')
+    visual_template_parser.set_defaults(func=cmd_visual_template)
     
     # Cleanup command (NEW)
     cleanup_parser = subparsers.add_parser('cleanup', help='Clean up abandoned workflows')

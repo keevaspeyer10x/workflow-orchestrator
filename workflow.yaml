@@ -40,21 +40,6 @@ settings:
   # Principle: Use latest generation model available, don't hardcode specific versions
   # Examples: "gpt-4.1-mini" -> use latest GPT, "claude-3" -> use latest Claude
   review_model: "latest_available"
-  
-  # Visual verification settings
-  # Service URL and API key should be set via environment variables
-  visual_verification_url: "${VISUAL_VERIFICATION_URL}"
-  visual_verification_api_key: "${VISUAL_VERIFICATION_API_KEY}"
-  
-  # Path to style guide for visual evaluation (configurable per project)
-  style_guide_path: "docs/UI_DESIGN_BRIEF.md"
-  
-  # Enable mobile viewport testing (default: true)
-  # Set to false for desktop-only applications
-  mobile_check_enabled: true
-  
-  # Visual test mode: "quick" (specific checks + 2 key questions) or "full" (all evaluations)
-  visual_test_mode: "quick"
 
 phases:
   # ===========================================================================
