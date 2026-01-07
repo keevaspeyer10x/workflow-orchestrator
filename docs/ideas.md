@@ -20,6 +20,23 @@ Do we need items like a North Start or the Manus Custom Instructions
 
 Add a final stage - document - eg. not sure what it looks like, but update PRD, spec document, README files, set-up instructions etc. 
 
+Might need to chunk the work at some stages - if complex enough
+
+Design at the start, Document at the end.
+
+Should we have an AI critique the plan - or every step?
+
+Need a link to the relevant files in the comments after each section before approve. Review Things.
+
+Do we make a formal test phase?
+
+
+Start spinning up multiple agents - to massively accelerate what we'll do. 
+
+Provde a summary on screen before asking for approval
+
+I'd also always like to see a summary of the learnings and the feedback from the other AI models - at least how many issues they identified.
+
 
 Don't forget
 - In my installation instructions recommend running with no checking
