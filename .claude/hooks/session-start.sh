@@ -15,7 +15,13 @@ echo "=== Workflow Orchestrator Session Start ==="
 echo "Checking workflow orchestrator..."
 pip install -q --upgrade git+https://github.com/keevaspeyer10x/workflow-orchestrator.git 2>/dev/null || true
 
-# 2. Load secrets from simple encrypted file (preferred method)
+# 2. Install aider if not available (for Gemini reviews with repo context)
+if ! command -v aider &> /dev/null; then
+    echo "Installing aider-chat for reviews..."
+    pip install -q aider-chat 2>/dev/null || echo "Note: aider-chat install skipped"
+fi
+
+# 3. Load secrets from simple encrypted file (preferred method)
 SECRETS_FILE=".secrets.enc"
 
 if [ -f "$SECRETS_FILE" ]; then
@@ -59,7 +65,7 @@ else
     echo "      Run 'orchestrator secrets init' to set up secrets"
 fi
 
-# 3. Legacy: Load SOPS AGE key if available (for backwards compatibility)
+# 4. Legacy: Load SOPS AGE key if available (for backwards compatibility)
 KEY_FILE=".manus/keys/age.key.enc"
 if [ -f "$KEY_FILE" ] && [ -n "$SOPS_KEY_PASSWORD" ] && [ -z "$SOPS_AGE_KEY" ]; then
     AGE_KEY=$(echo "$SOPS_KEY_PASSWORD" | openssl enc -aes-256-cbc -pbkdf2 -d -in "$KEY_FILE" -pass stdin 2>/dev/null) || true
@@ -69,7 +75,7 @@ if [ -f "$KEY_FILE" ] && [ -n "$SOPS_KEY_PASSWORD" ] && [ -z "$SOPS_AGE_KEY" ]; 
     fi
 fi
 
-# 4. Check for local unencrypted key (for desktop use)
+# 5. Check for local unencrypted key (for desktop use)
 LOCAL_KEY=".manus/keys/age.key"
 if [ -f "$LOCAL_KEY" ] && [ -z "$SOPS_AGE_KEY" ]; then
     if [ -n "$CLAUDE_ENV_FILE" ]; then

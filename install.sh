@@ -5,6 +5,9 @@
 echo "Installing Workflow Orchestrator..."
 pip install -q --upgrade git+https://github.com/keevaspeyer10x/workflow-orchestrator.git
 
+echo "Installing review dependencies..."
+pip install -q aider-chat 2>/dev/null || echo "Note: aider-chat install skipped (optional)"
+
 echo "Enabling automatic updates for this repo..."
 orchestrator setup
 

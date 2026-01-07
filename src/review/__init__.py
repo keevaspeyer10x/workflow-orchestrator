@@ -21,6 +21,7 @@ from .router import ReviewRouter, ReviewMethod
 from .result import ReviewResult, ReviewFinding, Severity
 from .prompts import REVIEW_PROMPTS
 from .setup import setup_reviews, check_review_setup, ReviewSetup
+from .aider_executor import AiderExecutor
 
 __all__ = [
     # Context
@@ -39,4 +40,6 @@ __all__ = [
     "setup_reviews",
     "check_review_setup",
     "ReviewSetup",
+    # Executors
+    "AiderExecutor",
 ]

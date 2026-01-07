@@ -299,6 +299,57 @@ The orchestrator automatically detects your environment and adjusts:
 
 ---
 
+## AI Code Reviews
+
+The orchestrator includes a multi-model review system that catches issues AI coding agents often miss. Reviews use the best available method automatically.
+
+### Review Methods (Auto-Selected)
+
+| Method | Models | Context | Requirements |
+|--------|--------|---------|--------------|
+| **CLI** | Codex CLI + Gemini CLI | Full repo | Both CLIs installed |
+| **Aider** | Gemini via OpenRouter | Full repo (via repo map) | `pip install aider-chat` + `OPENROUTER_API_KEY` |
+| **API** | Any OpenRouter model | Injected context | `OPENROUTER_API_KEY` |
+
+**Recommended:** Aider provides the best balance of model quality (Gemini) and repo context. It's automatically installed with the orchestrator.
+
+### Check Review Status
+
+```bash
+orchestrator review --status
+```
+
+Shows which methods are available and which will be used.
+
+### Running Reviews
+
+```bash
+# Run all reviews
+orchestrator review
+
+# Run specific review
+orchestrator review --type security
+orchestrator review --type consistency
+orchestrator review --type quality
+orchestrator review --type holistic
+
+# Force a specific method
+orchestrator review --method aider
+orchestrator review --method api
+```
+
+### What Aider Provides
+
+Aider uses a "repo map" feature that efficiently summarizes your codebase structure to the LLM. This means:
+
+- **Full codebase awareness** - Knows about existing utilities, patterns, and conventions
+- **Better consistency reviews** - Can find where you're duplicating code
+- **More accurate security reviews** - Understands data flow across files
+
+Aider runs invisibly - you just see the review results.
+
+---
+
 ## Secrets Management
 
 The orchestrator supports multiple secret sources, checked in priority order:

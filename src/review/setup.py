@@ -19,6 +19,7 @@ class ReviewSetup:
     """Current review infrastructure status."""
     codex_cli: bool = False
     gemini_cli: bool = False
+    aider_cli: bool = False
     openrouter_key: bool = False
     github_actions: bool = False
     gemini_styleguide: bool = False
@@ -29,12 +30,17 @@ class ReviewSetup:
         return self.codex_cli and self.gemini_cli
 
     @property
+    def aider_available(self) -> bool:
+        """Aider requires both the CLI and OpenRouter API key."""
+        return self.aider_cli and self.openrouter_key
+
+    @property
     def api_available(self) -> bool:
         return self.openrouter_key
 
     @property
     def any_available(self) -> bool:
-        return self.cli_available or self.api_available
+        return self.cli_available or self.aider_available or self.api_available
 
     @property
     def fully_configured(self) -> bool:
@@ -44,6 +50,9 @@ class ReviewSetup:
         """Get the best available method."""
         if self.cli_available:
             return "cli"
+        # Prefer aider over raw API since it has repo context
+        if self.aider_available:
+            return "aider"
         if self.api_available:
             return "api"
         return "unavailable"
@@ -58,6 +67,7 @@ def check_review_setup(working_dir: Path) -> ReviewSetup:
     # CLI tools
     setup.codex_cli = shutil.which("codex") is not None
     setup.gemini_cli = shutil.which("gemini") is not None
+    setup.aider_cli = shutil.which("aider") is not None
 
     # API key
     setup.openrouter_key = bool(os.environ.get("OPENROUTER_API_KEY"))
