@@ -1,168 +1,187 @@
-# Implementation Plan: Roadmap Items CORE-007, CORE-008, ARCH-001, WF-004
+# Implementation Plan: Multi-Source Secrets Manager
 
 ## Overview
 
-This plan covers 4 low-complexity roadmap items that improve code quality, security, and developer experience.
+Implement a `SecretsManager` that provides unified access to secrets from multiple sources, enabling the orchestrator to work across different environments (local dev, CI/CD, Claude Code Web).
 
-## Items to Implement
+## Problem Statement
 
-### 1. CORE-007: Deprecate Legacy Claude Integration
-**File:** `src/claude_integration.py`
+When using workflow-orchestrator in Claude Code Web:
+- Environment variables don't persist across sessions
+- SOPS requires the AGE key, which has the same delivery problem
+- No way to access secrets without manual pasting each session
 
-**Tasks:**
-- Add deprecation warning at module import
-- Point users to `src.providers.claude_code` as the replacement
+## Solution
 
-**Implementation:**
+Multi-source secrets manager that tries sources in priority order:
+1. **Environment Variables** - Direct env var lookup (highest priority)
+2. **SOPS-encrypted files** - Decrypt using SOPS_AGE_KEY
+3. **GitHub Private Repo** - Fetch from user's private secrets repo
+
+This complements existing SOPS infrastructure rather than replacing it.
+
+---
+
+## Design Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Priority order | env → SOPS → GitHub | Env vars fastest, SOPS for teams, GitHub for Claude Code Web |
+| Config location | User config + workflow.yaml | Personal settings separate from project |
+| GitHub format | Simple text files | One secret per file, easy to manage |
+| Caching | In-memory only | Never persist decrypted secrets to disk |
+
+---
+
+## Implementation Steps
+
+### Step 1: Create SecretsManager Class
+
 ```python
-import warnings
-warnings.warn(
-    "claude_integration module is deprecated. Use src.providers.claude_code instead.",
-    DeprecationWarning,
-    stacklevel=2
-)
+# src/secrets.py
+class SecretsManager:
+    """Multi-source secrets management."""
+
+    def __init__(self, config: dict = None, working_dir: Path = None):
+        self._config = config or {}
+        self._working_dir = working_dir or Path.cwd()
+        self._cache = {}
+
+    def get_secret(self, name: str) -> Optional[str]:
+        """Get a secret, trying sources in priority order."""
+        if name in self._cache:
+            return self._cache[name]
+
+        # 1. Environment variable
+        if value := os.environ.get(name):
+            return value
+
+        # 2. SOPS
+        if value := self._try_sops(name):
+            self._cache[name] = value
+            return value
+
+        # 3. GitHub repo
+        if value := self._try_github_repo(name):
+            self._cache[name] = value
+            return value
+
+        return None
+```
+
+### Step 2: SOPS Integration
+
+- Look for `.manus/secrets.enc.yaml` or configured path
+- Require `SOPS_AGE_KEY` env var for decryption
+- Use subprocess to call `sops -d` with `--extract` for specific keys
+- Fall through gracefully if SOPS not installed
+
+### Step 3: GitHub Repo Integration
+
+- Use `gh api` to fetch from private repo
+- Repo configured via `secrets_repo` in user config
+- Files stored as `{SECRET_NAME}` (no extension)
+- Base64 decode the content from GitHub API response
+
+### Step 4: User Configuration
+
+Create `~/.config/orchestrator/config.yaml`:
+```yaml
+secrets_repo: keevaspeyer10x/secrets
+```
+
+Add CLI commands:
+```bash
+orchestrator config set secrets_repo keevaspeyer10x/secrets
+orchestrator config get secrets_repo
+orchestrator config list
+```
+
+### Step 5: CLI Secrets Commands
+
+```bash
+# Test if a secret is accessible
+orchestrator secrets test OPENROUTER_API_KEY
+
+# Show which source a secret comes from
+orchestrator secrets source OPENROUTER_API_KEY
+
+# List configured sources
+orchestrator secrets sources
+```
+
+### Step 6: Integration with Providers
+
+Update `OpenRouterProvider` and review system to use `SecretsManager`:
+```python
+# In provider initialization
+secrets = SecretsManager(config, working_dir)
+api_key = secrets.get_secret("OPENROUTER_API_KEY")
 ```
 
 ---
 
-### 2. CORE-008: Input Length Limits
-**Files:** `src/cli.py`, `src/validation.py` (new)
+## File Changes Summary
 
-**Tasks:**
-- Create new `src/validation.py` module with constants and validation functions
-- Add `MAX_CONSTRAINT_LENGTH = 1000` constant
-- Add `MAX_NOTE_LENGTH = 500` constant
-- Validate constraints in `cmd_start()` before storing
-- Validate notes in `cmd_complete()`, `cmd_approve_item()`, `cmd_finish()`
-- Add tests for validation
+### New Files
+| File | Description |
+|------|-------------|
+| `src/secrets.py` | SecretsManager class |
+| `tests/test_secrets.py` | Unit tests |
 
-**Implementation:**
-```python
-# src/validation.py
-MAX_CONSTRAINT_LENGTH = 1000
-MAX_NOTE_LENGTH = 500
-
-def validate_constraint(constraint: str) -> str:
-    if len(constraint) > MAX_CONSTRAINT_LENGTH:
-        raise ValueError(f"Constraint exceeds {MAX_CONSTRAINT_LENGTH} characters")
-    return constraint
-
-def validate_note(note: str) -> str:
-    if note and len(note) > MAX_NOTE_LENGTH:
-        raise ValueError(f"Note exceeds {MAX_NOTE_LENGTH} characters")
-    return note
-```
+### Modified Files
+| File | Changes |
+|------|---------|
+| `src/cli.py` | Add `config` and `secrets` commands |
+| `src/config.py` | Add user config support |
+| `src/providers/openrouter.py` | Use SecretsManager for API key |
+| `src/review/api_executor.py` | Use SecretsManager |
+| `docs/SETUP_GUIDE.md` | Document secrets configuration |
+| `CLAUDE.md` | Add secrets setup instructions |
 
 ---
 
-### 3. ARCH-001: Extract Retry Logic
-**Files:** `src/utils.py` (new), `src/visual_verification.py`
+## Security Considerations
 
-**Tasks:**
-- Create new `src/utils.py` module with reusable retry decorator
-- Implement `@retry_with_backoff` decorator with configurable:
-  - `max_retries` (default: 3)
-  - `base_delay` (default: 1.0 seconds)
-  - `max_delay` (default: 60 seconds)
-  - `exceptions` (tuple of exception types to catch)
-- Refactor `visual_verification.py` to use the new decorator
-- Add tests for retry utility
-
-**Implementation:**
-```python
-# src/utils.py
-import time
-import functools
-from typing import Tuple, Type
-
-def retry_with_backoff(
-    max_retries: int = 3,
-    base_delay: float = 1.0,
-    max_delay: float = 60.0,
-    exceptions: Tuple[Type[Exception], ...] = (Exception,)
-):
-    """Decorator that retries a function with exponential backoff."""
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            last_error = None
-            for attempt in range(max_retries):
-                try:
-                    return func(*args, **kwargs)
-                except exceptions as e:
-                    last_error = e
-                    if attempt < max_retries - 1:
-                        delay = min(base_delay * (2 ** attempt), max_delay)
-                        time.sleep(delay)
-            raise last_error
-        return wrapper
-    return decorator
-```
+1. **Never log secrets** - All secret values redacted in output
+2. **Cache in memory only** - No disk persistence of decrypted secrets
+3. **GitHub repo validation** - Only fetch from user-configured repo
+4. **SOPS key handling** - SOPS_AGE_KEY only read from env (not cached)
 
 ---
 
-### 4. WF-004: Auto-Archive Workflow Documents
-**File:** `src/engine.py`
+## Test Cases
 
-**Tasks:**
-- Add `archive_existing_docs()` method to `WorkflowEngine`
-- Call it in `start_workflow()` before creating new state
-- Archive files: `docs/plan.md`, `docs/risk_analysis.md`, `tests/test_cases.md`
-- Create archive directory: `docs/archive/`
-- Naming format: `{date}_{task_slug}_{type}.md`
-- Add `--no-archive` flag to start command
-- Log archived files
+### Unit Tests
+- `test_get_from_env` - Returns env var when set
+- `test_get_from_sops` - Decrypts from SOPS file
+- `test_get_from_github` - Fetches from GitHub repo
+- `test_priority_order` - Env beats SOPS beats GitHub
+- `test_caching` - Second call uses cache
+- `test_not_found` - Returns None when not in any source
+- `test_sops_not_installed` - Falls through gracefully
+- `test_github_not_configured` - Falls through gracefully
 
-**Implementation:**
-```python
-def archive_existing_docs(self, task_slug: str) -> list[str]:
-    """Archive existing workflow docs before starting new workflow."""
-    docs_to_archive = [
-        ("docs/plan.md", "plan"),
-        ("docs/risk_analysis.md", "risk"),
-        ("tests/test_cases.md", "test_cases"),
-    ]
-    archive_dir = self.working_dir / "docs" / "archive"
-    archive_dir.mkdir(parents=True, exist_ok=True)
-
-    archived = []
-    date_str = datetime.now().strftime("%Y-%m-%d")
-
-    for doc_path, suffix in docs_to_archive:
-        src = self.working_dir / doc_path
-        if src.exists():
-            dst = archive_dir / f"{date_str}_{task_slug}_{suffix}.md"
-            # Handle duplicate names by adding counter
-            counter = 1
-            while dst.exists():
-                dst = archive_dir / f"{date_str}_{task_slug}_{suffix}_{counter}.md"
-                counter += 1
-            src.rename(dst)
-            archived.append(str(dst))
-
-    return archived
-```
+### Integration Tests
+- `test_provider_uses_secrets_manager` - OpenRouterProvider integrates
+- `test_review_uses_secrets_manager` - Review system integrates
 
 ---
 
-## Implementation Order
+## Success Criteria
 
-1. **ARCH-001** (Extract Retry Logic) - Creates utility used by other code
-2. **CORE-007** (Deprecation Warning) - Simple, standalone change
-3. **CORE-008** (Input Validation) - Creates validation module
-4. **WF-004** (Auto-Archive) - Modifies workflow engine
+1. Secrets accessible from env vars (existing behavior preserved)
+2. Secrets accessible from SOPS when SOPS_AGE_KEY provided
+3. Secrets accessible from GitHub private repo
+4. User can configure secrets_repo via CLI
+5. All existing tests pass
+6. Documentation updated
 
-## Files to Create
-- `src/utils.py` - Reusable utilities (retry decorator)
-- `src/validation.py` - Input validation functions
+---
 
-## Files to Modify
-- `src/claude_integration.py` - Add deprecation warning
-- `src/cli.py` - Add validation calls, --no-archive flag
-- `src/engine.py` - Add archive_existing_docs method
-- `src/visual_verification.py` - Refactor to use retry utility
+## Backwards Compatibility
 
-## Tests to Add
-- `tests/test_utils.py` - Test retry decorator
-- `tests/test_validation.py` - Test input validation
-- Update `tests/test_v2_2_features.py` - Test auto-archive
+- All existing env var usage continues to work unchanged
+- SOPS infrastructure unchanged (additive)
+- New sources are fallbacks, not replacements
+- No breaking changes to existing workflows

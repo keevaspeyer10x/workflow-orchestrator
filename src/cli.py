@@ -35,6 +35,16 @@ from src.review import (
 )
 from src.config import find_workflow_path, get_default_workflow_content, is_using_bundled_workflow
 from src.validation import validate_constraints, validate_note
+from src.secrets import (
+    SecretsManager,
+    get_secrets_manager,
+    get_user_config,
+    get_user_config_value,
+    set_user_config_value,
+    init_secrets_interactive,
+    CONFIG_FILE,
+    SIMPLE_SECRETS_FILE,
+)
 
 VERSION = "2.0.0"
 
@@ -1108,6 +1118,53 @@ pip install -q --upgrade git+https://github.com/keevaspeyer10x/workflow-orchestr
 HOOK_MARKER = "# Added by: orchestrator install-hook"
 
 
+def _find_secrets_source() -> Path | None:
+    """Find an existing secrets file to copy from.
+
+    Checks in order:
+    1. Orchestrator installation directory
+    2. User config directory (~/.config/orchestrator/)
+
+    Returns:
+        Path to secrets file if found, None otherwise.
+    """
+    # Check orchestrator installation directory
+    src_dir = Path(__file__).parent
+    orchestrator_secrets = src_dir.parent / SIMPLE_SECRETS_FILE
+    if orchestrator_secrets.exists():
+        return orchestrator_secrets
+
+    # Check user config directory
+    user_secrets = Path.home() / ".config" / "orchestrator" / "secrets.enc"
+    if user_secrets.exists():
+        return user_secrets
+
+    return None
+
+
+def _copy_secrets_to_repo(source: Path, working_dir: Path) -> bool:
+    """Copy secrets file to a repo.
+
+    Args:
+        source: Source secrets file path
+        working_dir: Target repo directory
+
+    Returns:
+        True if copied successfully
+    """
+    import shutil
+
+    dest = working_dir / SIMPLE_SECRETS_FILE
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        shutil.copy(source, dest)
+        return True
+    except Exception as e:
+        print(f"Error copying secrets: {e}")
+        return False
+
+
 def cmd_setup(args):
     """Set up automatic updates for this repo, or remove the setup."""
     working_dir = Path(args.dir or '.')
@@ -1180,6 +1237,28 @@ def cmd_setup(args):
     print("")
     print("The orchestrator will automatically update when you start a new Claude Code session.")
     print("Works in both Claude Code CLI and Claude Code Web.")
+
+    # Check if secrets need to be copied
+    local_secrets = working_dir / SIMPLE_SECRETS_FILE
+    if not local_secrets.exists():
+        source_secrets = _find_secrets_source()
+        if source_secrets:
+            print("")
+            print(f"Found encrypted secrets at: {source_secrets}")
+
+            # Auto-copy if --copy-secrets flag or prompt user
+            if getattr(args, 'copy_secrets', False):
+                if _copy_secrets_to_repo(source_secrets, working_dir):
+                    print(f"✓ Secrets copied to {local_secrets}")
+                    print("  Set SECRETS_PASSWORD env var to decrypt in Claude Code Web")
+            else:
+                print("Run with --copy-secrets to copy them to this repo")
+                print("  orchestrator setup --copy-secrets")
+        else:
+            print("")
+            print("No secrets file found in this repo.")
+            print("Run 'orchestrator secrets init' to set up encrypted API keys")
+
     print("")
     print("To disable: orchestrator setup --remove")
 
@@ -1213,6 +1292,118 @@ def cmd_setup_reviews(args):
         print("  2. Customize .gemini/styleguide.md for your project")
         print("  3. Update AGENTS.md with your project conventions")
         print("  4. Push to GitHub to enable PR reviews")
+
+
+def cmd_config(args):
+    """Manage orchestrator configuration."""
+    action = args.action
+
+    if action == "set":
+        if not args.key or not args.value:
+            print("Error: 'config set' requires KEY and VALUE arguments")
+            sys.exit(1)
+        set_user_config_value(args.key, args.value)
+        print(f"✓ Set {args.key} = {args.value}")
+        print(f"  Saved to: {CONFIG_FILE}")
+
+    elif action == "get":
+        if not args.key:
+            print("Error: 'config get' requires KEY argument")
+            sys.exit(1)
+        value = get_user_config_value(args.key)
+        if value is not None:
+            print(value)
+        else:
+            print(f"(not set)")
+            sys.exit(1)
+
+    elif action == "list":
+        config = get_user_config()
+        if not config:
+            print("No configuration set")
+            print(f"\nConfig file: {CONFIG_FILE}")
+            return
+        print("Current configuration:")
+        for key, value in sorted(config.items()):
+            print(f"  {key}: {value}")
+        print(f"\nConfig file: {CONFIG_FILE}")
+
+    else:
+        print(f"Unknown action: {action}")
+        print("Available actions: set, get, list")
+        sys.exit(1)
+
+
+def cmd_secrets(args):
+    """Manage secrets and test secret access."""
+    working_dir = Path(args.dir or '.')
+    action = args.action
+
+    if action == "init":
+        # Secrets setup (interactive or from environment)
+        password = getattr(args, 'password', None)
+        from_env = getattr(args, 'from_env', False)
+        init_secrets_interactive(working_dir, password=password, from_env=from_env)
+        return
+
+    secrets = get_secrets_manager(working_dir=working_dir)
+
+    if action == "test":
+        if not args.name:
+            print("Error: 'secrets test' requires NAME argument")
+            sys.exit(1)
+        value = secrets.get_secret(args.name)
+        if value is not None:
+            print(f"✓ Secret '{args.name}' is accessible")
+            print(f"  Length: {len(value)} characters")
+        else:
+            print(f"✗ Secret '{args.name}' not found in any source")
+            sys.exit(1)
+
+    elif action == "source":
+        if not args.name:
+            print("Error: 'secrets source' requires NAME argument")
+            sys.exit(1)
+        source = secrets.get_source(args.name)
+        if source:
+            print(source)
+        else:
+            print("(not found)")
+            sys.exit(1)
+
+    elif action == "sources":
+        sources = secrets.list_sources()
+        print("Secret Sources:")
+        print("")
+        for name, info in sources.items():
+            status = "✓" if info["available"] else "✗"
+            print(f"  {status} {name}: {info['description']}")
+            if name == "simple":
+                if not info.get("file_exists"):
+                    print(f"      - File not found: {info.get('file_path')}")
+                    print("      - Run: orchestrator secrets init")
+                if not info.get("password_set"):
+                    print("      - SECRETS_PASSWORD not set")
+            elif name == "sops":
+                if not info.get("installed"):
+                    print("      - SOPS not installed")
+                if not info.get("key_set"):
+                    print("      - SOPS_AGE_KEY not set")
+                if not info.get("file_exists"):
+                    print(f"      - File not found: {info.get('file_path')}")
+            elif name == "github":
+                if not info.get("installed"):
+                    print("      - GitHub CLI (gh) not installed")
+                if not info.get("configured"):
+                    print("      - secrets_repo not configured")
+                    print("      - Run: orchestrator config set secrets_repo OWNER/REPO")
+                elif info.get("repo"):
+                    print(f"      - Repo: {info.get('repo')}")
+
+    else:
+        print(f"Unknown action: {action}")
+        print("Available actions: init, test, source, sources")
+        sys.exit(1)
 
 
 def main():
@@ -1424,7 +1615,23 @@ Examples:
     setup_parser.add_argument('--dir', '-d', help='Target directory (default: current)')
     setup_parser.add_argument('--force', '-f', action='store_true', help='Overwrite existing setup')
     setup_parser.add_argument('--remove', action='store_true', help='Remove auto-updates from this repo')
+    setup_parser.add_argument('--copy-secrets', action='store_true', help='Copy encrypted secrets from orchestrator repo')
     setup_parser.set_defaults(func=cmd_setup)
+
+    # Config command
+    config_parser = subparsers.add_parser('config', help='Manage orchestrator configuration')
+    config_parser.add_argument('action', choices=['set', 'get', 'list'], help='Config action')
+    config_parser.add_argument('key', nargs='?', help='Configuration key')
+    config_parser.add_argument('value', nargs='?', help='Configuration value (for set)')
+    config_parser.set_defaults(func=cmd_config)
+
+    # Secrets command
+    secrets_parser = subparsers.add_parser('secrets', help='Manage and test secret access')
+    secrets_parser.add_argument('action', choices=['init', 'test', 'source', 'sources'], help='Secrets action')
+    secrets_parser.add_argument('name', nargs='?', help='Secret name (for test/source)')
+    secrets_parser.add_argument('--password', help='Encryption password for init (otherwise prompted)')
+    secrets_parser.add_argument('--from-env', action='store_true', help='Read API keys from environment instead of prompting')
+    secrets_parser.set_defaults(func=cmd_secrets)
 
     args = parser.parse_args()
     

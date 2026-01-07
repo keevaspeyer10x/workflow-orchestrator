@@ -4,8 +4,10 @@
 .env.*.local
 
 # Plaintext secrets (encrypted versions are safe to commit)
+.secrets.yaml
 .manus/secrets.yaml
 .secrets.reference
+.manus/keys/age.key
 
 # Python
 __pycache__/

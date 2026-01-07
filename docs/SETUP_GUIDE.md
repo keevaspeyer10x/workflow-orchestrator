@@ -178,6 +178,14 @@ This creates a hook that:
 - Works in both Claude Code CLI and Claude Code Web
 - Always gets the latest version from GitHub
 
+**Copy secrets too:** If you have encrypted secrets set up in another repo, use:
+
+```bash
+orchestrator setup --copy-secrets
+```
+
+This will automatically copy your `.secrets.enc` file to the new repo.
+
 **Your files are safe:** Auto-updates only update the orchestrator code. Your repo-specific files (`workflow.yaml`, workflow state, logs) are never modified.
 
 To disable: `orchestrator setup --remove`
@@ -293,9 +301,64 @@ The orchestrator automatically detects your environment and adjusts:
 
 ## Secrets Management
 
-### Using SOPS (Recommended for Teams)
+The orchestrator supports multiple secret sources, checked in priority order:
 
-The orchestrator supports SOPS-encrypted secrets:
+1. **Environment Variables** (highest priority)
+2. **Password-encrypted file** (recommended for Claude Code Web)
+3. **SOPS-encrypted files** (for teams with existing SOPS setup)
+4. **GitHub Private Repos** (requires `gh` CLI authentication)
+
+### Check Available Sources
+
+```bash
+orchestrator secrets sources
+```
+
+### Option 1: Password-Encrypted File (Recommended)
+
+The simplest approach for Claude Code Web. One password unlocks all your API keys.
+
+**One-time setup (run once in any repo):**
+
+```bash
+orchestrator secrets init
+```
+
+This will:
+1. Prompt you for your API keys (OpenRouter, Anthropic, OpenAI, etc.)
+2. Ask you to set an encryption password
+3. Create `.secrets.enc` (safe to commit!)
+
+**Commit the encrypted file:**
+
+```bash
+git add .secrets.enc
+git commit -m "Add encrypted secrets"
+git push
+```
+
+**Using in Claude Code Web:**
+
+When starting a new task, set one environment variable:
+- `SECRETS_PASSWORD` = your chosen password
+
+That's it! The SessionStart hook automatically decrypts and loads all your API keys.
+
+**Cross-repo usage:** Copy `.secrets.enc` to any repo. Same password works everywhere.
+
+### Option 2: Environment Variables
+
+For desktop use or when you don't need persistence:
+
+```bash
+# Set in your shell profile
+export ANTHROPIC_API_KEY="sk-ant-xxxxx"
+export OPENROUTER_API_KEY="sk-or-xxxxx"
+```
+
+### Option 3: SOPS (for Teams)
+
+For teams with existing SOPS infrastructure:
 
 ```bash
 # Install SOPS and age
@@ -306,15 +369,20 @@ age-keygen -o ~/.sops-key.txt
 
 # Create encrypted secrets
 sops --encrypt --age $(cat ~/.sops-key.txt | grep "public key" | cut -d: -f2 | tr -d ' ') \
-    secrets.yaml > secrets.enc.yaml
+    secrets.yaml > .manus/secrets.enc.yaml
+
+# Set the key for decryption
+export SOPS_AGE_KEY="AGE-SECRET-KEY-..."
 ```
 
-### Using Environment Variables
+### Testing Secret Access
 
 ```bash
-# Set in your shell profile
-export ANTHROPIC_API_KEY="sk-ant-xxxxx"
-export OPENROUTER_API_KEY="sk-or-xxxxx"
+# Test if a secret is accessible
+orchestrator secrets test OPENROUTER_API_KEY
+
+# See which source provides a secret
+orchestrator secrets source OPENROUTER_API_KEY
 ```
 
 ---

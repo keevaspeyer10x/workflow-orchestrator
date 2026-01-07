@@ -1,257 +1,273 @@
-# Test Cases: Roadmap Items CORE-007, CORE-008, ARCH-001, WF-004
+# Test Cases: Multi-Source Secrets Manager
 
-## CORE-007: Deprecate Legacy Claude Integration
+## Unit Tests
 
-### TC-DEP-001: Deprecation Warning on Import
-**Component:** `src/claude_integration.py`
-**Description:** Importing module shows deprecation warning
-**Input:** `import src.claude_integration`
-**Expected:** `DeprecationWarning` raised pointing to caller
+### SecretsManager Core Tests
+
+#### TC-SEC-001: Get Secret from Environment
+**Component:** `src/secrets.py`
+**Description:** Returns secret from environment variable
+**Setup:** Set `TEST_SECRET=value` in environment
+**Input:** `secrets.get_secret("TEST_SECRET")`
+**Expected:** Returns "value"
 **Priority:** High
 
-### TC-DEP-002: Functionality Still Works
-**Component:** `src/claude_integration.py`
-**Description:** Module still functions after deprecation warning
-**Input:** `from src.claude_integration import ClaudeCodeIntegration`
-**Expected:** Can instantiate and use class
+#### TC-SEC-002: Environment Priority Over SOPS
+**Component:** `src/secrets.py`
+**Description:** Env var takes precedence over SOPS
+**Setup:** Set env var AND have same secret in SOPS
+**Input:** `secrets.get_secret("DUAL_SECRET")`
+**Expected:** Returns env var value, not SOPS value
 **Priority:** High
 
-### TC-DEP-003: Warning Points to Correct File
-**Component:** `src/claude_integration.py`
-**Description:** Stacklevel correctly points to importing code
-**Input:** Import from test file
-**Expected:** Warning shows test file as source, not claude_integration.py
+#### TC-SEC-003: Environment Priority Over GitHub
+**Component:** `src/secrets.py`
+**Description:** Env var takes precedence over GitHub
+**Setup:** Set env var AND have same secret in GitHub repo
+**Input:** `secrets.get_secret("DUAL_SECRET")`
+**Expected:** Returns env var value
+**Priority:** High
+
+#### TC-SEC-004: Secret Not Found Returns None
+**Component:** `src/secrets.py`
+**Description:** Returns None when secret not in any source
+**Input:** `secrets.get_secret("NONEXISTENT_SECRET")`
+**Expected:** Returns None
+**Priority:** High
+
+#### TC-SEC-005: Caching Works
+**Component:** `src/secrets.py`
+**Description:** Second call uses cached value
+**Setup:** Mock SOPS to return value once
+**Input:** Call `get_secret` twice
+**Expected:** SOPS called only once, both return same value
 **Priority:** Medium
 
----
-
-## CORE-008: Input Length Limits
-
-### TC-VAL-001: Valid Constraint Under Limit
-**Component:** `src/validation.py`
-**Description:** Constraints under 1000 chars accepted
-**Input:** `validate_constraint("short constraint")`
-**Expected:** Returns input unchanged
+#### TC-SEC-006: Cache Only In Memory
+**Component:** `src/secrets.py`
+**Description:** Cache not persisted to disk
+**Setup:** Get a secret, check filesystem
+**Expected:** No cache files created anywhere
 **Priority:** High
 
-### TC-VAL-002: Valid Constraint At Limit
-**Component:** `src/validation.py`
-**Description:** Constraint exactly 1000 chars accepted
-**Input:** `validate_constraint("a" * 1000)`
-**Expected:** Returns input unchanged
+### SOPS Integration Tests
+
+#### TC-SOPS-001: Get Secret from SOPS
+**Component:** `src/secrets.py`
+**Description:** Decrypts and returns secret from SOPS file
+**Setup:** Create encrypted SOPS file, set SOPS_AGE_KEY
+**Input:** `secrets.get_secret("OPENROUTER_API_KEY")`
+**Expected:** Returns decrypted value
 **Priority:** High
 
-### TC-VAL-003: Constraint Over Limit Rejected
-**Component:** `src/validation.py`
-**Description:** Constraint over 1000 chars rejected
-**Input:** `validate_constraint("a" * 1001)`
-**Expected:** Raises `ValueError` with clear message
+#### TC-SOPS-002: SOPS Not Installed Falls Through
+**Component:** `src/secrets.py`
+**Description:** Gracefully skips SOPS when not installed
+**Setup:** Mock shutil.which("sops") to return None
+**Input:** `secrets.get_secret("SECRET")`
+**Expected:** Continues to GitHub source, no error
 **Priority:** High
 
-### TC-VAL-004: Valid Note Under Limit
-**Component:** `src/validation.py`
-**Description:** Notes under 500 chars accepted
-**Input:** `validate_note("short note")`
-**Expected:** Returns input unchanged
+#### TC-SOPS-003: SOPS_AGE_KEY Not Set Falls Through
+**Component:** `src/secrets.py`
+**Description:** Skips SOPS when key not set
+**Setup:** Ensure SOPS_AGE_KEY not in env
+**Input:** `secrets.get_secret("SECRET")`
+**Expected:** Continues to GitHub source, no error
 **Priority:** High
 
-### TC-VAL-005: Note At Limit
-**Component:** `src/validation.py`
-**Description:** Note exactly 500 chars accepted
-**Input:** `validate_note("a" * 500)`
-**Expected:** Returns input unchanged
-**Priority:** High
-
-### TC-VAL-006: Note Over Limit Rejected
-**Component:** `src/validation.py`
-**Description:** Note over 500 chars rejected
-**Input:** `validate_note("a" * 501)`
-**Expected:** Raises `ValueError` with clear message
-**Priority:** High
-
-### TC-VAL-007: None Note Accepted
-**Component:** `src/validation.py`
-**Description:** None/empty notes pass validation
-**Input:** `validate_note(None)`, `validate_note("")`
-**Expected:** Returns input unchanged
+#### TC-SOPS-004: SOPS File Not Found Falls Through
+**Component:** `src/secrets.py`
+**Description:** Skips SOPS when file doesn't exist
+**Setup:** Configure nonexistent sops_file path
+**Input:** `secrets.get_secret("SECRET")`
+**Expected:** Continues to GitHub source, no error
 **Priority:** Medium
 
-### TC-VAL-008: CLI Start Validates Constraints
+#### TC-SOPS-005: SOPS Decryption Error Falls Through
+**Component:** `src/secrets.py`
+**Description:** Handles decryption errors gracefully
+**Setup:** Corrupt SOPS file or wrong key
+**Input:** `secrets.get_secret("SECRET")`
+**Expected:** Logs error, continues to GitHub source
+**Priority:** Medium
+
+### GitHub Repo Integration Tests
+
+#### TC-GH-001: Get Secret from GitHub Repo
+**Component:** `src/secrets.py`
+**Description:** Fetches secret from private GitHub repo
+**Setup:** Configure secrets_repo, mock gh api response
+**Input:** `secrets.get_secret("OPENROUTER_API_KEY")`
+**Expected:** Returns file content from repo
+**Priority:** High
+
+#### TC-GH-002: GitHub Repo Not Configured Falls Through
+**Component:** `src/secrets.py`
+**Description:** Skips GitHub when not configured
+**Setup:** No secrets_repo in config
+**Input:** `secrets.get_secret("SECRET")`
+**Expected:** Returns None (no more sources)
+**Priority:** High
+
+#### TC-GH-003: GitHub Secret Not Found Falls Through
+**Component:** `src/secrets.py`
+**Description:** Handles 404 from GitHub gracefully
+**Setup:** Configure repo, mock 404 response
+**Input:** `secrets.get_secret("NONEXISTENT")`
+**Expected:** Returns None
+**Priority:** High
+
+#### TC-GH-004: GitHub Auth Error Falls Through
+**Component:** `src/secrets.py`
+**Description:** Handles 401/403 gracefully
+**Setup:** Mock auth error from gh api
+**Input:** `secrets.get_secret("SECRET")`
+**Expected:** Logs warning, returns None
+**Priority:** Medium
+
+#### TC-GH-005: GitHub Rate Limit Handled
+**Component:** `src/secrets.py`
+**Description:** Handles 429 rate limit
+**Setup:** Mock 429 response
+**Input:** `secrets.get_secret("SECRET")`
+**Expected:** Logs warning, returns None
+**Priority:** Medium
+
+#### TC-GH-006: Invalid Repo Format Rejected
+**Component:** `src/secrets.py`
+**Description:** Validates repo format (owner/name)
+**Setup:** Configure secrets_repo="invalid"
+**Input:** `secrets.get_secret("SECRET")`
+**Expected:** Logs warning, skips GitHub source
+**Priority:** Medium
+
+### CLI Config Command Tests
+
+#### TC-CLI-001: Config Set Command
 **Component:** `src/cli.py`
-**Description:** Start command validates constraint length
-**Input:** `orchestrator start "task" --constraints "a"*1001`
-**Expected:** Error message about constraint length
+**Description:** Sets config value in user config
+**Input:** `orchestrator config set secrets_repo owner/repo`
+**Expected:** Value saved to ~/.config/orchestrator/config.yaml
 **Priority:** High
 
-### TC-VAL-009: CLI Complete Validates Notes
+#### TC-CLI-002: Config Get Command
 **Component:** `src/cli.py`
-**Description:** Complete command validates note length
-**Input:** `orchestrator complete item_id --notes "a"*501`
-**Expected:** Error message about note length
+**Description:** Gets config value
+**Setup:** Set secrets_repo in config
+**Input:** `orchestrator config get secrets_repo`
+**Expected:** Prints "owner/repo"
 **Priority:** High
 
----
-
-## ARCH-001: Extract Retry Logic
-
-### TC-RTY-001: Successful First Attempt
-**Component:** `src/utils.py`
-**Description:** No retry when function succeeds
-**Input:** Function that succeeds immediately
-**Expected:** Returns result, no retries
-**Priority:** High
-
-### TC-RTY-002: Success After Retries
-**Component:** `src/utils.py`
-**Description:** Retries until success within limit
-**Input:** Function that fails twice then succeeds
-**Expected:** Returns result after 3rd attempt
-**Priority:** High
-
-### TC-RTY-003: All Retries Exhausted
-**Component:** `src/utils.py`
-**Description:** Raises last error after max retries
-**Input:** Function that always fails, max_retries=3
-**Expected:** Raises exception after 3 attempts
-**Priority:** High
-
-### TC-RTY-004: Exponential Backoff Timing
-**Component:** `src/utils.py`
-**Description:** Delays follow exponential pattern
-**Input:** Function that fails, base_delay=1.0
-**Expected:** Delays are ~1s, ~2s, ~4s (approx)
-**Priority:** Medium
-
-### TC-RTY-005: Max Delay Respected
-**Component:** `src/utils.py`
-**Description:** Delay never exceeds max_delay
-**Input:** base_delay=10, max_delay=15, many retries
-**Expected:** Delays capped at 15s
-**Priority:** Medium
-
-### TC-RTY-006: Specific Exception Types
-**Component:** `src/utils.py`
-**Description:** Only catches specified exceptions
-**Input:** exceptions=(ValueError,), raise TypeError
-**Expected:** TypeError propagates immediately
-**Priority:** High
-
-### TC-RTY-007: Function Signature Preserved
-**Component:** `src/utils.py`
-**Description:** Decorated function keeps name/docstring
-**Input:** Decorated function
-**Expected:** `__name__` and `__doc__` preserved
-**Priority:** Low
-
-### TC-RTY-008: Visual Verification Uses Utility
-**Component:** `src/visual_verification.py`
-**Description:** Refactored code uses retry utility
-**Input:** Call verify() method
-**Expected:** Retry behavior unchanged from before
-**Priority:** High
-
----
-
-## WF-004: Auto-Archive Workflow Documents
-
-### TC-ARC-001: Archive Existing Plan
-**Component:** `src/engine.py`
-**Description:** Archives docs/plan.md when starting workflow
-**Setup:** Create docs/plan.md with content
-**Input:** `orchestrator start "New task"`
-**Expected:** plan.md moved to docs/archive/{date}_{slug}_plan.md
-**Priority:** High
-
-### TC-ARC-002: Archive Risk Analysis
-**Component:** `src/engine.py`
-**Description:** Archives docs/risk_analysis.md
-**Setup:** Create docs/risk_analysis.md
-**Input:** `orchestrator start "New task"`
-**Expected:** File moved to archive
-**Priority:** High
-
-### TC-ARC-003: Archive Test Cases
-**Component:** `src/engine.py`
-**Description:** Archives tests/test_cases.md
-**Setup:** Create tests/test_cases.md
-**Input:** `orchestrator start "New task"`
-**Expected:** File moved to archive
-**Priority:** High
-
-### TC-ARC-004: Skip Missing Files
-**Component:** `src/engine.py`
-**Description:** No error if files don't exist
-**Setup:** Empty docs/ directory
-**Input:** `orchestrator start "New task"`
-**Expected:** Workflow starts normally
-**Priority:** High
-
-### TC-ARC-005: Create Archive Directory
-**Component:** `src/engine.py`
-**Description:** Creates docs/archive/ if missing
-**Setup:** No archive directory
-**Input:** `orchestrator start "New task"` with existing docs
-**Expected:** Archive directory created
-**Priority:** High
-
-### TC-ARC-006: Handle Duplicate Names
-**Component:** `src/engine.py`
-**Description:** Adds counter suffix for duplicates
-**Setup:** Archive file with same date/slug already exists
-**Input:** Start second workflow same day
-**Expected:** File named with _1 suffix
-**Priority:** Medium
-
-### TC-ARC-007: No-Archive Flag
+#### TC-CLI-003: Config List Command
 **Component:** `src/cli.py`
-**Description:** --no-archive skips archiving
-**Setup:** docs/plan.md exists
-**Input:** `orchestrator start "Task" --no-archive`
-**Expected:** plan.md not moved
+**Description:** Lists all config values
+**Input:** `orchestrator config list`
+**Expected:** Shows all configured values
+**Priority:** Medium
+
+#### TC-CLI-004: Config File Created on First Set
+**Component:** `src/cli.py`
+**Description:** Creates config dir and file if needed
+**Setup:** Remove ~/.config/orchestrator/
+**Input:** `orchestrator config set secrets_repo owner/repo`
+**Expected:** Directory and file created
+**Priority:** Medium
+
+### CLI Secrets Command Tests
+
+#### TC-CLI-005: Secrets Test Command - Found
+**Component:** `src/cli.py`
+**Description:** Tests if secret is accessible
+**Setup:** Set TEST_SECRET in env
+**Input:** `orchestrator secrets test TEST_SECRET`
+**Expected:** Prints success message
 **Priority:** High
 
-### TC-ARC-008: Archive Logged
-**Component:** `src/engine.py`
-**Description:** Log event for archived files
-**Input:** Start workflow with docs to archive
-**Expected:** Log entry shows archived files
-**Priority:** Low
-
-### TC-ARC-009: Archived Content Intact
-**Component:** `src/engine.py`
-**Description:** Archived files have same content
-**Setup:** plan.md with specific content
-**Input:** Start workflow
-**Expected:** Archived file content matches original
+#### TC-CLI-006: Secrets Test Command - Not Found
+**Component:** `src/cli.py`
+**Description:** Reports when secret not found
+**Input:** `orchestrator secrets test NONEXISTENT`
+**Expected:** Prints not found message
 **Priority:** High
 
----
+#### TC-CLI-007: Secrets Source Command
+**Component:** `src/cli.py`
+**Description:** Shows which source provides secret
+**Setup:** Set TEST_SECRET in env
+**Input:** `orchestrator secrets source TEST_SECRET`
+**Expected:** Prints "env"
+**Priority:** Medium
+
+#### TC-CLI-008: Secrets Sources Command
+**Component:** `src/cli.py`
+**Description:** Lists available sources and their status
+**Input:** `orchestrator secrets sources`
+**Expected:** Shows env (always), SOPS (if installed), GitHub (if configured)
+**Priority:** Medium
+
+### Security Tests
+
+#### TC-SECURITY-001: Secret Values Never Logged
+**Component:** `src/secrets.py`
+**Description:** No secret values appear in logs
+**Setup:** Enable debug logging, fetch secret
+**Expected:** Only secret names logged, never values
+**Priority:** High
+
+#### TC-SECURITY-002: Secret Values Redacted in Errors
+**Component:** `src/secrets.py`
+**Description:** Errors don't expose secret values
+**Setup:** Trigger error with secret in path
+**Expected:** [REDACTED] in error message
+**Priority:** High
+
+#### TC-SECURITY-003: SOPS_AGE_KEY Not Cached
+**Component:** `src/secrets.py`
+**Description:** AGE key only read from env, not cached
+**Expected:** No AGE key stored in SecretsManager
+**Priority:** High
 
 ## Integration Tests
 
-### TC-INT-001: Full Workflow With All Features
-**Description:** Start workflow exercising all 4 features
-**Steps:**
-1. Import claude_integration (see warning)
-2. Start workflow with long constraint (rejected)
-3. Start workflow with valid constraint
-4. Verify docs archived
-5. Complete item with long note (rejected)
-6. Complete item with valid note
-**Expected:** All behaviors work together
+### TC-INT-001: Full Priority Chain
+**Description:** Verify env → SOPS → GitHub priority
+**Setup:** Same secret in all three sources
+**Expected:** Returns env value
 **Priority:** High
 
-### TC-INT-002: Existing Tests Still Pass
-**Description:** No regressions from changes
-**Input:** `pytest tests/`
-**Expected:** All existing tests pass
+### TC-INT-002: Provider Uses SecretsManager
+**Description:** OpenRouterProvider gets API key from SecretsManager
+**Setup:** Configure secrets_repo with OPENROUTER_API_KEY
+**Expected:** Provider works with fetched key
 **Priority:** High
 
----
+### TC-INT-003: Review System Uses SecretsManager
+**Description:** Review API executor gets key from SecretsManager
+**Setup:** Configure secrets
+**Expected:** Reviews work with fetched keys
+**Priority:** Medium
+
+## Backwards Compatibility Tests
+
+### TC-BC-001: Existing Env Var Usage Unchanged
+**Description:** Direct OPENROUTER_API_KEY env var still works
+**Setup:** Set OPENROUTER_API_KEY directly
+**Input:** Use OpenRouterProvider
+**Expected:** Works exactly as before
+**Priority:** High
+
+### TC-BC-002: Existing SOPS Scripts Work
+**Description:** .manus/decrypt-secrets.sh still works
+**Setup:** Existing SOPS infrastructure
+**Input:** Run existing decrypt script
+**Expected:** Script works unchanged
+**Priority:** High
 
 ## Coverage Requirements
 
-- 100% coverage for `src/validation.py`
-- 100% coverage for `src/utils.py`
-- 90%+ coverage for archive logic in `src/engine.py`
-- All error paths tested
+- Minimum 90% coverage for `src/secrets.py`
+- All source fallthrough paths tested
+- All error paths have tests
+- No secret values in test output
+- Integration tests marked with `@pytest.mark.integration`

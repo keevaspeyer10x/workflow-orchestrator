@@ -564,6 +564,7 @@ Model versions in config become stale as new models are released. Currently requ
 1. `./orchestrator update-models` - Query OpenRouter API for latest models
 2. Auto-suggest updates when newer models detected
 3. Optional "latest" alias that resolves dynamically
+4. **Auto-update if last update > 30 days** (with user confirmation option)
 
 **Implementation Notes:**
 ```python
@@ -578,14 +579,67 @@ def get_latest_models():
     latest_gemini = max([m for m in models if "gemini-3" in m["id"]],
                         key=lambda m: m["created"])
     return {"codex": latest_openai["id"], "gemini": latest_gemini["id"]}
+
+def check_and_auto_update():
+    """Auto-update if stale (> 30 days since last update)."""
+    last_update = get_last_model_update_timestamp()
+    if (datetime.now() - last_update).days > 30:
+        logger.info("Models not updated in 30+ days, auto-updating...")
+        update_models(auto=True)
 ```
 
 **Tasks:**
 - [ ] Add `update-models` CLI command
 - [ ] Query OpenRouter API for model list
 - [ ] Update workflow.yaml models section
+- [ ] Update FUNCTION_CALLING_MODELS in src/providers/openrouter.py
 - [ ] Add `--check-models` flag to review command
 - [ ] Warn when using outdated models
+- [ ] **Auto-update if > 30 days stale** (store last_update timestamp)
+- [ ] Add `--no-auto-update` flag to disable
+
+---
+
+#### CORE-018: Dynamic Function Calling Detection
+**Status:** Planned
+**Complexity:** Low
+**Priority:** Medium
+**Source:** Function calling implementation (this workflow)
+**Description:** Detect model function calling support from OpenRouter API instead of static list.
+
+**Problem Solved:**
+FUNCTION_CALLING_MODELS is a static list that requires manual updates. New models may support function calling but aren't in the list.
+
+**Current State:**
+- Static set in `src/providers/openrouter.py`
+- Prefix matching for versioned models
+- Conservative default (unknown = no function calling)
+
+**Desired Behavior:**
+1. Query OpenRouter API for model capabilities
+2. Cache results locally (avoid repeated API calls)
+3. Fall back to static list if API unavailable
+4. Update static list when new models detected
+
+**Implementation Notes:**
+```python
+def get_model_capabilities(model_id: str) -> dict:
+    """Query OpenRouter for model capabilities."""
+    response = requests.get(f"https://openrouter.ai/api/v1/models/{model_id}")
+    model_info = response.json()
+    return {
+        "supports_function_calling": model_info.get("supports_tools", False),
+        "context_length": model_info.get("context_length", 0),
+        "supports_vision": model_info.get("supports_vision", False),
+    }
+```
+
+**Tasks:**
+- [ ] Add `get_model_capabilities()` function
+- [ ] Cache capabilities in `.model_capabilities.json`
+- [ ] Integrate with `_supports_function_calling()`
+- [ ] Fall back to static list on API error
+- [ ] Add to `update-models` command
 
 ---
 
@@ -938,9 +992,9 @@ class EncryptedCheckpointBackend(CheckpointBackend):
 ## Security Improvements
 
 ### SEC-001: HTTPS Enforcement
-**Status:** Planned  
-**Complexity:** Low  
-**Source:** Security Review (Score: 7/10)  
+**Status:** Planned
+**Complexity:** Low
+**Source:** Security Review (Score: 7/10)
 **Description:** Validate that `visual_verification_url` uses HTTPS to prevent API key transmission over insecure connections.
 
 **Implementation:**
@@ -948,6 +1002,130 @@ class EncryptedCheckpointBackend(CheckpointBackend):
 if not service_url.startswith('https://'):
     raise VisualVerificationError("Service URL must use HTTPS")
 ```
+
+---
+
+### SEC-004: Cross-Repo Secrets Copy Command
+**Status:** Planned
+**Complexity:** Low
+**Priority:** High
+**Source:** Secrets Management Code Review
+**Description:** Add `orchestrator secrets copy` command to easily copy encrypted secrets to other repos.
+
+**Problem Solved:**
+Currently users must manually copy `.manus/secrets.enc` between repos. This is error-prone and not discoverable.
+
+**Desired Behavior:**
+```bash
+# Copy secrets to another repo
+orchestrator secrets copy /path/to/other/repo
+
+# Copy from another repo to current
+orchestrator secrets copy --from /path/to/source/repo
+```
+
+**Implementation Notes:**
+```python
+def cmd_secrets_copy(args):
+    """Copy encrypted secrets between repos."""
+    source = Path(args.from_dir or '.') / '.manus/secrets.enc'
+    dest = Path(args.to_dir or '.') / '.manus/secrets.enc'
+
+    if not source.exists():
+        print(f"Error: No secrets file at {source}")
+        return False
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(source, dest)
+    print(f"✓ Copied secrets to {dest}")
+```
+
+**Tasks:**
+- [ ] Add `secrets copy` subcommand to CLI
+- [ ] Support `--from` and `--to` flags
+- [ ] Validate source file exists
+- [ ] Create destination directory if needed
+- [ ] Add to documentation
+
+---
+
+### SEC-005: Per-User Encrypted Secrets
+**Status:** Planned
+**Complexity:** Medium
+**Priority:** Medium
+**Source:** Secrets Management Code Review
+**Description:** Support per-user encrypted secrets files for true multi-user scenarios.
+
+**Problem Solved:**
+Current single `.manus/secrets.enc` means all users share the same password and see the same secrets. Teams need user-specific API keys.
+
+**Desired Behavior:**
+```bash
+# Initialize secrets for current user
+orchestrator secrets init --user
+
+# Creates .manus/secrets.enc.USERNAME (e.g., .manus/secrets.enc.alice)
+
+# Each user sets their own SECRETS_PASSWORD
+# Files are gitignored by default
+```
+
+**Implementation Notes:**
+```python
+SIMPLE_SECRETS_FILE_TEMPLATE = ".manus/secrets.enc.{username}"
+
+def get_secrets_file(user_specific: bool = False) -> Path:
+    if user_specific:
+        username = os.environ.get('USER', 'default')
+        return Path(SIMPLE_SECRETS_FILE_TEMPLATE.format(username=username))
+    return Path(SIMPLE_SECRETS_FILE)
+
+# SecretsManager checks both:
+# 1. User-specific file first
+# 2. Shared file as fallback
+```
+
+**Tasks:**
+- [ ] Add `--user` flag to `secrets init`
+- [ ] Update SecretsManager to check user-specific file first
+- [ ] Add `.manus/secrets.enc.*` to default .gitignore
+- [ ] Update SessionStart hook to handle user-specific files
+- [ ] Document multi-user setup
+
+---
+
+### SEC-006: OAuth-Based Secrets (Future)
+**Status:** Planned
+**Complexity:** High
+**Priority:** Low
+**Source:** Secrets Management Code Review
+**Description:** OAuth-based secrets storage for fully invisible UX (no password per session).
+
+**Problem Solved:**
+Users must enter `SECRETS_PASSWORD` each Claude Code Web session. True "invisible" secrets would require no per-session input.
+
+**Desired Behavior:**
+1. User authenticates once via OAuth (GitHub, Google, etc.)
+2. Secrets stored server-side, keyed to user identity
+3. Claude Code Web sessions auto-retrieve via OAuth token
+4. No password required per session
+
+**Architecture Notes:**
+- Requires server-side component (secrets vault)
+- OAuth provider integration for identity
+- Token exchange for secrets retrieval
+- Beyond current CLI-only architecture
+
+**Consideration:**
+This is a significant architectural change. May be better suited for a separate "Orchestrator Cloud" service rather than CLI enhancement.
+
+**Tasks:**
+- [ ] Design secrets vault API
+- [ ] Implement OAuth integration (GitHub first)
+- [ ] Create server-side storage
+- [ ] Add `orchestrator auth login` command
+- [ ] Update SecretsManager to use OAuth source
+- [ ] Document OAuth setup
 
 ---
 
