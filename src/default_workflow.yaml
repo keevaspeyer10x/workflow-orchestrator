@@ -105,15 +105,27 @@ phases:
         skip_conditions: ["new_project", "no_roadmap_exists"]
 
       - id: "clarifying_questions"
-        name: "Ask Clarifying Questions"
-        description: "Before creating a plan, ask the user clarifying questions to ensure full understanding. For EACH question you MUST provide: 1) Your RECOMMENDATION (what you think is best), 2) ALTERNATIVES (other valid options), 3) TRADEOFFS (why you recommend one over others). Format: '**Q1: [Question]** | Recommendation: X | Alternatives: Y, Z | Tradeoffs: ...' This helps users make informed decisions quickly."
+        name: "Present Clarifying Questions"
+        description: "Present clarifying questions to ensure full understanding. For EACH question provide: 1) RECOMMENDATION, 2) ALTERNATIVES, 3) TRADEOFFS. Format: '**Q1: [Question]** | Recommendation: X | Alternatives: Y, Z | Tradeoffs: ...'"
         required: true
         skippable: true
         skip_conditions: ["requirements_crystal_clear", "user_provided_full_context"]
         notes:
-          - "[caution] Never ask open-ended questions without recommendations. Users should be able to say 'yes, use your recommendations' and move forward."
           - "[tip] Format each question as: Question → Recommendation → Alternatives → Tradeoffs"
           - "[example] 'Should we include run_command? Recommendation: No (security risk). Alternatives: Yes with allowlist, Yes unrestricted. Tradeoffs: Security vs flexibility.'"
+
+      - id: "questions_answered"
+        name: "User Answers Questions"
+        description: "Wait for user to answer clarifying questions or confirm recommendations. Do NOT proceed until user explicitly responds."
+        required: true
+        skippable: true
+        skip_conditions: ["clarifying_questions_skipped"]
+        verification:
+          type: "manual_gate"
+          description: "User must provide answers or confirm 'use your recommendations'"
+        notes:
+          - "[caution] This is a BLOCKING gate. Cannot proceed without user input."
+          - "[tip] User can say 'use your recommendations' to accept all defaults."
 
       - id: "initial_plan"
         name: "Generate initial plan"
@@ -270,7 +282,45 @@ phases:
           description: "User to confirm manual smoke test passed."
 
   # ===========================================================================
-  # PHASE 5: LEARN
+  # PHASE 5: DOCUMENT (WF-009)
+  # ===========================================================================
+  - id: "DOCUMENT"
+    name: "Documentation Update"
+    description: "Update documentation to reflect changes. Optional phase - can be skipped for small changes with no user-facing impact."
+    items:
+      - id: "update_readme"
+        name: "Update README if needed"
+        description: "Review and update README.md for any new features, changed behavior, or updated setup instructions."
+        required: false
+        skippable: true
+        skip_conditions: ["no_user_facing_changes", "internal_refactor_only"]
+
+      - id: "update_setup_guide"
+        name: "Update setup/installation instructions"
+        description: "Ensure setup guides and installation instructions reflect any new dependencies or configuration requirements."
+        required: false
+        skippable: true
+        skip_conditions: ["no_setup_changes", "no_new_dependencies"]
+
+      - id: "update_api_docs"
+        name: "Update API documentation"
+        description: "Document any new CLI commands, options, or API changes. Update help text and examples."
+        required: false
+        skippable: true
+        skip_conditions: ["no_api_changes", "no_cli_changes"]
+
+      - id: "changelog_entry"
+        name: "Add changelog entry"
+        description: "Add an entry to CHANGELOG.md describing what changed. Required for all non-trivial changes."
+        required: true
+        skippable: true
+        skip_conditions: ["trivial_change", "documentation_only"]
+        verification:
+          type: "file_exists"
+          path: "CHANGELOG.md"
+
+  # ===========================================================================
+  # PHASE 6: LEARN
   # ===========================================================================
   - id: "LEARN"
     name: "Learning & Documentation"

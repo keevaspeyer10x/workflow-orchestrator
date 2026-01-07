@@ -1,145 +1,302 @@
-# Implementation Plan: CORE-006, SEC-004, CORE-017, CORE-018
+# Implementation Plan: Workflow Improvements WF-005 through WF-009
 
-## Overview
+## Executive Summary
 
-Implementing four roadmap items to improve provider management, secrets handling, and model configuration:
-
-1. **CORE-006**: Automatic Connector Detection with User Fallback
-2. **SEC-004**: Cross-Repo Secrets Copy Command
-3. **CORE-017**: Auto-Update Review Models
-4. **CORE-018**: Dynamic Function Calling Detection
-
----
-
-## CORE-006: Automatic Connector Detection with User Fallback
-
-### Goal
-Automatically detect available agent connectors and ask user before defaulting to manual implementation when preferred provider is unavailable.
-
-### Implementation
-
-**Files to modify:**
-- `src/environment.py` - Add Manus connector detection
-- `src/providers/__init__.py` - Add `get_available_providers()` and interactive selection
-- `src/cli.py` - Add `--interactive` flag to handoff command
-
-**Changes:**
-
-1. **environment.py**:
-   - Add `detect_manus_connector()` function that checks for direct Manus API access
-   - Add `get_available_connectors()` to return list of all detectable connectors
-
-2. **providers/__init__.py**:
-   - Add `get_available_providers()` function returning list of available providers
-   - Add `prompt_user_for_provider()` interactive function for CLI selection
-   - Update `_auto_detect_provider()` to use interactive selection when preferred unavailable
-
-3. **cli.py**:
-   - Add `--interactive` flag to `handoff` command
-   - Show available options when provider unavailable and `--interactive` set
-
----
-
-## SEC-004: Cross-Repo Secrets Copy Command
-
-### Goal
-Add `orchestrator secrets copy` command to easily copy encrypted secrets between repositories.
-
-### Implementation
-
-**Files to modify:**
-- `src/cli.py` - Add `copy` action to secrets subcommand
-- `src/secrets.py` - Add helper function for copying
-
-**Changes:**
-
-1. **cli.py**:
-   - Extend `cmd_secrets()` to handle `copy` action
-   - Support `--from` and `--to` flags for source/destination directories
-   - Validate source file exists before copying
-   - Create destination directory if needed
-
-2. **secrets.py**:
-   - Add `copy_secrets_file()` helper function
-
----
-
-## CORE-017: Auto-Update Review Models
-
-### Goal
-Automatically detect and use latest available AI models for reviews, with auto-update if stale.
-
-### Implementation
-
-**Files to modify:**
-- `src/cli.py` - Add `update-models` command
-- `src/providers/openrouter.py` - Add model update logic
-- New: `src/model_registry.py` - Model registry with staleness checking
-
-**Changes:**
-
-1. **model_registry.py** (new file):
-   - Store last update timestamp in `.model_registry.json`
-   - `get_latest_models()` - Query OpenRouter API for available models
-   - `is_registry_stale()` - Check if > 30 days since last update
-   - `update_registry()` - Fetch and store latest model info
-   - `get_recommended_model()` - Get latest recommended model by category
-
-2. **cli.py**:
-   - Add `update-models` command
-   - Add `--check-models` flag to review command
-   - Add `--no-auto-update` flag to disable auto-updates
-
-3. **openrouter.py**:
-   - Update `FUNCTION_CALLING_MODELS` from registry
-   - Add staleness warning when using outdated models
-
----
-
-## CORE-018: Dynamic Function Calling Detection
-
-### Goal
-Detect model function calling support from OpenRouter API instead of static list.
-
-### Implementation
-
-**Files to modify:**
-- `src/model_registry.py` - Add capability detection (builds on CORE-017)
-- `src/providers/openrouter.py` - Use dynamic detection
-
-**Changes:**
-
-1. **model_registry.py**:
-   - `get_model_capabilities()` - Query OpenRouter for model capabilities
-   - Cache capabilities in `.model_registry.json`
-   - `supports_function_calling()` - Check if model supports tools
-
-2. **openrouter.py**:
-   - Update `_supports_function_calling()` to use registry
-   - Fall back to static list if registry unavailable/stale
-
----
+Implement 5 workflow improvements to make the development process more autonomous and robust:
+- **WF-008** (Priority): AI critique at phase gates for early issue detection
+- **WF-005**: Summary before approval gates for informed decisions
+- **WF-009**: Document phase for consistent documentation updates
+- **WF-006**: File links in status output for faster review
+- **WF-007**: Learnings to roadmap pipeline for continuous improvement
 
 ## Implementation Order
 
-1. **CORE-017 + CORE-018** (together, since they share the model registry)
-   - Create `model_registry.py`
-   - Add CLI commands
-   - Update openrouter.py
+Based on the goal of **autonomous and robust development**, prioritized by impact:
 
-2. **CORE-006** (provider detection)
-   - Update environment.py
-   - Update providers/__init__.py
-   - Update CLI
-
-3. **SEC-004** (secrets copy)
-   - Update secrets.py
-   - Update CLI
+1. **WF-008: AI Critique at Phase Gates** (HIGH - enables autonomous quality)
+2. **WF-005: Summary Before Approval Gates** (HIGH - enables informed decisions)
+3. **WF-009: Document Phase** (MEDIUM - workflow.yaml change)
+4. **WF-006: File Links in Status** (LOW - metadata enhancement)
+5. **WF-007: Learnings to Roadmap** (LOW - requires AI parsing)
 
 ---
 
-## Testing Strategy
+## Phase 1: WF-008 - AI Critique at Phase Gates
 
-- Unit tests for new functions
-- Integration tests for CLI commands
-- Mock OpenRouter API responses for model registry tests
+### Goal
+Add lightweight AI critique at each phase transition to catch issues early, before they compound.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     cmd_advance() in cli.py                      │
+├─────────────────────────────────────────────────────────────────┤
+│ 1. Check can_advance_phase()                                     │
+│ 2. Collect critique context (items, git diff, constraints)       │
+│ 3. Call PhaseCritique.run() → ReviewRouter → gemini-2.0-flash   │
+│ 4. Display critique results                                      │
+│ 5. If critical issues: prompt user (continue/address)            │
+│ 6. Execute advance_phase()                                       │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### New Files
+- `src/critique.py` - PhaseCritique class
+
+### Modified Files
+- `src/cli.py` - Integrate critique into cmd_advance()
+- `src/default_workflow.yaml` - Add `phase_critique: true` setting
+- `workflow.yaml` - Add `phase_critique: true` setting
+
+### Implementation Details
+
+```python
+# src/critique.py
+class PhaseCritique:
+    """Lightweight AI critique at phase transitions."""
+
+    def __init__(self, working_dir: Path):
+        self.working_dir = working_dir
+        self.router = ReviewRouter(working_dir, context_limit=8000)
+
+    def collect_context(self, engine: WorkflowEngine) -> dict:
+        """Gather context for critique."""
+        return {
+            "task": engine.state.task_description,
+            "constraints": engine.state.constraints,
+            "current_phase": engine.state.current_phase_id,
+            "next_phase": self._get_next_phase_id(engine),
+            "completed_items": self._get_completed_items(engine),
+            "skipped_items": engine.get_skipped_items(engine.state.current_phase_id),
+            "git_diff_stat": self._get_git_diff_stat(),
+        }
+
+    def run(self, context: dict, transition: str) -> CritiqueResult:
+        """Run critique for a specific transition."""
+        prompt = CRITIQUE_PROMPTS[transition].format(**context)
+        result = self.router.execute_review("critique", prompt)
+        return CritiqueResult.from_review(result)
+
+class CritiqueResult:
+    observations: list[Observation]  # warnings, passes
+    recommendation: str
+    should_block: bool  # True if critical issues found
+```
+
+### Critique Prompts by Transition
+
+| Transition | Focus Areas |
+|------------|-------------|
+| PLAN → EXECUTE | Requirements clarity, risk identification, test strategy |
+| EXECUTE → REVIEW | All items complete, tests passing, no TODO comments |
+| REVIEW → VERIFY | Review findings addressed, no unresolved issues |
+| VERIFY → LEARN | Verification passed, any remaining concerns |
+
+### Configuration
+
+```yaml
+# workflow.yaml
+settings:
+  phase_critique: true  # Enable/disable critique
+  critique_model: "latest"  # Use latest available model (resolves via ModelRegistry)
+  critique_block_on_critical: true  # Block on critical issues
+```
+
+**Note:** The `critique_model: "latest"` setting uses the ModelRegistry (CORE-017) to resolve to the current best model (e.g., Gemini 3 Pro when available). This ensures critique always uses cutting-edge models.
+
+---
+
+## Phase 2: WF-005 - Summary Before Approval Gates
+
+### Goal
+Show a concise summary before any manual approval gate to enable informed decisions.
+
+### Modified Files
+- `src/cli.py` - Add `generate_phase_summary()`, integrate into `cmd_advance()`
+
+### Implementation Details
+
+```python
+def generate_phase_summary(engine: WorkflowEngine) -> str:
+    """Generate summary of current phase for approval."""
+    phase_id = engine.state.current_phase_id
+    phase = engine.state.phases[phase_id]
+
+    # Completed items with notes
+    completed = [(id, item.notes) for id, item in phase.items.items()
+                 if item.status == ItemStatus.COMPLETED]
+
+    # Skipped items with reasons
+    skipped = engine.get_skipped_items(phase_id)
+
+    # Git diff stat
+    diff_stat = subprocess.run(
+        ["git", "diff", "--stat", "HEAD~5"],  # Last 5 commits
+        capture_output=True, text=True
+    ).stdout
+
+    return format_summary(completed, skipped, diff_stat)
+```
+
+### Output Format
+```
+============================================================
+📋 PHASE SUMMARY: EXECUTE → REVIEW
+============================================================
+Completed Items (4):
+  ✓ implement_core_logic - "Added PhaseCritique class"
+  ✓ write_unit_tests - "23 tests, all passing"
+  ...
+
+Skipped Items (1):
+  ⊘ performance_tests - "Deferred - not applicable"
+
+Files Modified (since phase start):
+  src/critique.py | 145 ++++++++++++
+  src/cli.py      |  42 ++++--
+  tests/test_critique.py | 89 ++++++++
+  3 files changed, 276 insertions(+), 8 deletions(-)
+
+Ready to advance to REVIEW phase? [Y/n]
+============================================================
+```
+
+---
+
+## Phase 3: WF-009 - Document Phase
+
+### Goal
+Add optional DOCUMENT phase to ensure documentation stays current.
+
+### Modified Files
+- `src/default_workflow.yaml` - Add DOCUMENT phase
+- `workflow.yaml` - Add DOCUMENT phase
+
+### Phase Definition
+
+```yaml
+- id: DOCUMENT
+  name: Documentation Update
+  type: documentation
+  description: Update documentation to reflect changes
+  items:
+    - id: update_readme
+      name: Update README if needed
+      description: Review and update README.md for any new features or changes
+      optional: true
+    - id: update_setup_guide
+      name: Update setup/installation instructions
+      description: Ensure setup guides reflect current installation process
+      optional: true
+    - id: update_api_docs
+      name: Update API documentation
+      description: Document any new CLI commands or options
+      optional: true
+    - id: changelog_entry
+      name: Add changelog entry
+      description: Document changes in CHANGELOG.md
+      required: true
+      gate: manual
+```
+
+---
+
+## Phase 4: WF-006 - File Links in Status Output
+
+### Goal
+Include file paths in completion metadata for faster human review.
+
+### Modified Files
+- `src/schema.py` - Add `files_modified` field to ItemState
+- `src/engine.py` - Track files on item completion
+- `src/cli.py` - Display files in status output
+
+### Implementation Details
+
+```python
+# src/schema.py - Add to ItemState
+class ItemState:
+    # ... existing fields ...
+    files_modified: Optional[list[str]] = None  # New field
+
+# src/engine.py - Track files on completion
+def complete_item(self, item_id: str, notes: str = "", files: list[str] = None):
+    # ... existing logic ...
+    if files is None:
+        # Auto-detect from git diff
+        files = self._get_changed_files_since_item_start()
+    item.files_modified = files
+```
+
+---
+
+## Phase 5: WF-007 - Learnings to Roadmap Pipeline
+
+### Goal
+Automatically suggest roadmap items from captured learnings.
+
+### New Files
+- `src/learnings_pipeline.py` - Parse learnings and suggest roadmap items
+
+### Implementation Details
+
+```python
+def analyze_learnings(learnings_file: Path) -> list[RoadmapSuggestion]:
+    """Parse learnings for actionable patterns."""
+    patterns = [
+        r"should (\w+)",
+        r"next time (\w+)",
+        r"need to (\w+)",
+        r"could improve (\w+)",
+    ]
+    # ... pattern matching and suggestion generation
+```
+
+---
+
+## Test Strategy
+
+| Feature | Test Count | Type |
+|---------|------------|------|
+| WF-008 Critique | 15 | Unit + Integration |
+| WF-005 Summary | 8 | Unit |
+| WF-009 Document Phase | 5 | Integration |
+| WF-006 File Links | 10 | Unit |
+| WF-007 Learnings | 8 | Unit |
+
+---
+
+## Risk Assessment
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| Critique API failures | Medium | Low | Graceful fallback (continue without critique) |
+| Critique too slow | Low | Medium | Use fast model (gemini-flash), timeout |
+| Over-blocking | Medium | High | Advisory mode by default |
+| Context too large | Medium | Medium | Truncate to 8k tokens |
+
+---
+
+## Success Criteria
+
+1. **WF-008**: AI critique runs at each phase transition, catching at least 1 issue in 5 workflows
+2. **WF-005**: Summary displayed before every advance command
+3. **WF-009**: DOCUMENT phase appears in workflow.yaml
+4. **WF-006**: Files appear in status output for completed items
+5. **WF-007**: Learnings suggest at least one roadmap item when actionable patterns found
+
+---
+
+## Timeline
+
+| Phase | Items | Effort |
+|-------|-------|--------|
+| 1: WF-008 | Critique class, prompts, CLI integration | ~2 hours |
+| 2: WF-005 | Summary generation | ~1 hour |
+| 3: WF-009 | Workflow.yaml update | ~15 min |
+| 4: WF-006 | File tracking | ~1 hour |
+| 5: WF-007 | Learnings pipeline | ~1.5 hours |
+| Testing | All features | ~1 hour |
+
+**Total: ~7 hours**
