@@ -51,10 +51,10 @@ htmlcov/
 .tox/
 .nox/
 
-# Workflow state (optional - uncomment if you don't want to track state)
-# .workflow_state.json
-# .workflow_log.jsonl
-# .workflow_checkpoints/
+# Workflow state (ignored by default - these are session-specific)
+.workflow_state.json
+.workflow_log.jsonl
+.workflow_checkpoints/
 
 # Model registry cache (local per-project)
 .model_registry.json

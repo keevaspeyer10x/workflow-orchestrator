@@ -1,134 +1,151 @@
-# Test Cases: Workflow Improvements WF-005 through WF-009
+# Test Cases: Roadmap Items Implementation
 
-## WF-008: AI Critique at Phase Gates
+## CORE-012: OpenRouter Streaming Support
 
-### Unit Tests (`tests/test_critique.py`)
+### Unit Tests (`tests/test_openrouter_streaming.py`)
 
-| ID | Test Name | Description | Expected Result |
-|----|-----------|-------------|-----------------|
-| C1 | test_critique_context_collection | Collect context from engine state | Dict with task, constraints, items, skipped |
-| C2 | test_critique_context_truncation | Large context truncated to 8k tokens | Context ≤ 8000 chars |
-| C3 | test_critique_prompt_plan_execute | Generate PLAN→EXECUTE prompt | Contains requirements focus |
-| C4 | test_critique_prompt_execute_review | Generate EXECUTE→REVIEW prompt | Contains completion focus |
-| C5 | test_critique_result_parsing | Parse review result into observations | CritiqueResult with observations list |
-| C6 | test_critique_critical_detection | Detect critical issues | should_block = True |
-| C7 | test_critique_no_critical | All warnings, no criticals | should_block = False |
-| C8 | test_critique_api_failure_graceful | API throws exception | Returns None, logs warning |
-| C9 | test_critique_timeout | API exceeds 30s timeout | TimeoutError caught, continue |
-| C10 | test_critique_disabled | phase_critique: false in settings | Critique not called |
+1. **test_execute_streaming_yields_chunks**
+   - Mock streaming response with multiple chunks
+   - Verify each chunk is yielded in order
+   - Verify final ExecutionResult contains complete text
+
+2. **test_execute_streaming_handles_interruption**
+   - Mock connection interruption mid-stream
+   - Verify partial content is returned
+   - Verify error is logged
+
+3. **test_streaming_disabled_with_tools**
+   - Request streaming with tools enabled
+   - Verify falls back to non-streaming execution
+   - Verify warning is logged
+
+4. **test_stream_flag_in_cli**
+   - Call handoff with --stream flag
+   - Verify streaming execution is triggered
+
+## VV-001: Auto-load Style Guide
+
+### Unit Tests (`tests/test_visual_verification.py`)
+
+1. **test_auto_load_style_guide_on_init**
+   - Create client with style_guide_path
+   - Verify style guide content is loaded
+
+2. **test_verify_includes_style_guide_automatically**
+   - Mock verify endpoint
+   - Verify specification includes style guide content
+
+3. **test_verify_without_style_guide_when_disabled**
+   - Set include_style_guide=False
+   - Verify specification does NOT include style guide
+
+4. **test_missing_style_guide_logs_warning**
+   - Provide non-existent path
+   - Verify warning logged, no error raised
+
+## VV-002: Workflow Step Integration
 
 ### Integration Tests
 
-| ID | Test Name | Description | Expected Result |
-|----|-----------|-------------|-----------------|
-| C11 | test_advance_with_critique | Full advance flow with critique | Critique output shown before advance |
-| C12 | test_advance_critique_blocking | Critical issue found | User prompted to continue/address |
-| C13 | test_advance_no_critique_flag | --no-critique flag | Critique skipped, advance proceeds |
-| C14 | test_advance_critique_failure | API failure during advance | Warning shown, advance continues |
+1. **test_run_all_visual_tests_finds_test_files**
+   - Create test files in tests/visual/
+   - Call run_all_visual_tests()
+   - Verify all files are discovered
 
----
+2. **test_visual_tests_respect_app_url_setting**
+   - Configure app_url in workflow settings
+   - Verify tests use configured URL
 
-## WF-005: Summary Before Approval Gates
+## VV-003: Visual Test Discovery
 
-### Unit Tests (`tests/test_summary.py`)
+### Unit Tests
 
-| ID | Test Name | Description | Expected Result |
-|----|-----------|-------------|-----------------|
-| S1 | test_summary_completed_items | Summarize completed items | Shows item IDs and notes |
-| S2 | test_summary_skipped_items | Include skipped items | Shows skip reasons |
-| S3 | test_summary_git_diff_stat | Include git diff stat | Shows files changed count |
-| S4 | test_summary_empty_phase | No items completed | Shows "No items completed" |
-| S5 | test_summary_format | Output formatting | Correct box drawing chars |
-| S6 | test_format_duration | Duration formatting | "2h 15m" format |
+1. **test_discover_visual_tests_finds_markdown_files**
+   - Create test files with YAML frontmatter
+   - Verify all are discovered
 
-### Integration Tests
+2. **test_parse_test_file_extracts_metadata**
+   - Parse file with url, viewport, tags
+   - Verify all fields extracted correctly
 
-| ID | Test Name | Description | Expected Result |
-|----|-----------|-------------|-----------------|
-| S7 | test_advance_shows_summary | Summary before advance | Summary printed before prompt |
-| S8 | test_advance_yes_flag | --yes flag skips prompt | No interactive prompt |
+3. **test_filter_tests_by_tag**
+   - Create tests with different tags
+   - Filter by specific tag
+   - Verify only matching tests returned
 
----
+### CLI Tests
 
-## WF-009: Document Phase
+4. **test_visual_verify_all_command**
+   - Run `orchestrator visual-verify-all`
+   - Verify all tests executed
+   - Verify summary output
 
-### Integration Tests (`tests/test_document_phase.py`)
+## VV-004: Baseline Screenshot Management
 
-| ID | Test Name | Description | Expected Result |
-|----|-----------|-------------|-----------------|
-| D1 | test_workflow_has_document_phase | DOCUMENT phase in workflow | Phase exists after VERIFY |
-| D2 | test_document_phase_items | Check required items | changelog_entry is required |
-| D3 | test_skip_document_phase | Skip entire phase | Phase can be skipped |
-| D4 | test_document_phase_optional_items | Optional items skippable | update_readme etc. optional |
-| D5 | test_workflow_order | Phase ordering correct | PLAN→EXECUTE→REVIEW→VERIFY→DOCUMENT→LEARN |
+### Unit Tests
 
----
+1. **test_save_baseline_creates_file**
+   - Run verification with --save-baseline
+   - Verify baseline saved to correct path
 
-## WF-006: File Links in Status Output
+2. **test_compare_with_baseline_detects_differences**
+   - Save baseline, modify page, run comparison
+   - Verify difference detected
 
-### Unit Tests (`tests/test_file_links.py`)
+3. **test_baseline_directory_created_if_missing**
+   - Delete baselines directory
+   - Save baseline
+   - Verify directory created
 
-| ID | Test Name | Description | Expected Result |
-|----|-----------|-------------|-----------------|
-| F1 | test_item_state_files_field | ItemState has files_modified | Field exists, Optional[list] |
-| F2 | test_complete_item_with_files | Pass files to complete_item | Files stored in state |
-| F3 | test_complete_item_auto_detect | Auto-detect from git diff | Changed files captured |
-| F4 | test_status_shows_files | Status output includes files | File paths displayed |
-| F5 | test_status_no_files | No files tracked | No files section shown |
-| F6 | test_files_flag_filter | --files flag controls display | Files shown/hidden |
+## VV-006: Cost Tracking
 
-### Schema Tests
+### Unit Tests
 
-| ID | Test Name | Description | Expected Result |
-|----|-----------|-------------|-----------------|
-| F7 | test_state_backward_compat | Load state without files_modified | Loads successfully, field = None |
-| F8 | test_state_save_with_files | Save state with files | JSON includes files array |
+1. **test_cost_tracker_accumulates_costs**
+   - Log multiple verification costs
+   - Verify total is correct
 
----
+2. **test_show_cost_flag_displays_costs**
+   - Run verification with --show-cost
+   - Verify cost information displayed
 
-## WF-007: Learnings to Roadmap Pipeline
+3. **test_costs_logged_to_file**
+   - Run verifications
+   - Verify costs written to .visual_verification_costs.json
 
-### Unit Tests (`tests/test_learnings_pipeline.py`)
+## WF-003: Model Selection Guidance
 
-| ID | Test Name | Description | Expected Result |
-|----|-----------|-------------|-----------------|
-| L1 | test_pattern_should | Detect "should X" pattern | Extracts suggestion |
-| L2 | test_pattern_next_time | Detect "next time X" pattern | Extracts suggestion |
-| L3 | test_pattern_need_to | Detect "need to X" pattern | Extracts suggestion |
-| L4 | test_no_patterns | No actionable patterns | Empty suggestions list |
-| L5 | test_categorize_suggestion | Assign prefix (CORE-, WF-, etc) | Correct prefix assigned |
-| L6 | test_format_roadmap_entry | Generate markdown entry | Valid roadmap format |
-| L7 | test_multiple_learnings | Multiple learnings parsed | All suggestions extracted |
-| L8 | test_duplicate_detection | Same suggestion twice | Deduplicated |
+### Unit Tests (`tests/test_model_registry.py` additions)
 
----
+1. **test_get_latest_model_codex_category**
+   - Call get_latest_model('codex')
+   - Verify returns latest OpenAI model
 
-## Test Execution Commands
+2. **test_get_latest_model_gemini_category**
+   - Call get_latest_model('gemini')
+   - Verify returns latest Gemini model
 
-```bash
-# Run all new tests
-pytest tests/test_critique.py tests/test_summary.py tests/test_document_phase.py tests/test_file_links.py tests/test_learnings_pipeline.py -v
+3. **test_get_latest_model_fallback_on_error**
+   - Mock registry unavailable
+   - Verify returns hardcoded fallback
 
-# Run with coverage
-pytest tests/test_critique.py tests/test_summary.py tests/test_document_phase.py tests/test_file_links.py tests/test_learnings_pipeline.py --cov=src --cov-report=term-missing
+## Changelog Automation
 
-# Run only unit tests (fast)
-pytest tests/test_critique.py tests/test_summary.py tests/test_file_links.py tests/test_learnings_pipeline.py -v -k "not integration"
-```
+### Unit Tests (`tests/test_changelog_automation.py`)
 
-## Coverage Targets
+1. **test_parse_completed_roadmap_items**
+   - Parse ROADMAP.md with completed items
+   - Verify correct items extracted
 
-| Module | Target | Reason |
-|--------|--------|--------|
-| src/critique.py | 90% | New core feature |
-| src/cli.py (new code) | 85% | Critical user interface |
-| src/schema.py (changes) | 100% | Must not break existing |
-| src/engine.py (changes) | 85% | Core logic |
-| src/learnings_pipeline.py | 80% | Pattern matching may have edge cases |
+2. **test_append_to_changelog**
+   - Append completed items
+   - Verify correct format in CHANGELOG.md
 
-## Acceptance Criteria
+3. **test_remove_completed_from_roadmap**
+   - Remove completed items
+   - Verify ROADMAP.md updated correctly
+   - Verify backup created
 
-1. All 46 tests pass
-2. No regressions in existing tests
-3. Coverage targets met
-4. Manual verification: run full workflow with all features enabled
+4. **test_workflow_item_prompts_for_changelog**
+   - Run LEARN phase update_changelog_roadmap item
+   - Verify user prompted to update changelog

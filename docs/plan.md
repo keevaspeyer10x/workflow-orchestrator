@@ -1,302 +1,163 @@
-# Implementation Plan: Workflow Improvements WF-005 through WF-009
+# Implementation Plan: Roadmap Items CORE-012, VV-001-004, VV-006, WF-003
 
-## Executive Summary
+## Overview
 
-Implement 5 workflow improvements to make the development process more autonomous and robust:
-- **WF-008** (Priority): AI critique at phase gates for early issue detection
-- **WF-005**: Summary before approval gates for informed decisions
-- **WF-009**: Document phase for consistent documentation updates
-- **WF-006**: File links in status output for faster review
-- **WF-007**: Learnings to roadmap pipeline for continuous improvement
+Implement 8 roadmap items plus changelog automation:
+- **CORE-012**: OpenRouter Streaming Support
+- **VV-001**: Auto-load Style Guide in Visual Verification
+- **VV-002**: Workflow Step Integration for Visual Tests
+- **VV-003**: Visual Test Discovery
+- **VV-004**: Baseline Screenshot Management
+- **VV-006**: Cost Tracking for Visual Tests
+- **WF-003**: Model Selection Guidance
+- **NEW**: Changelog/Roadmap automation in LEARN phase
 
-## Implementation Order
+## Implementation Details
 
-Based on the goal of **autonomous and robust development**, prioritized by impact:
+### 1. CORE-012: OpenRouter Streaming Support
 
-1. **WF-008: AI Critique at Phase Gates** (HIGH - enables autonomous quality)
-2. **WF-005: Summary Before Approval Gates** (HIGH - enables informed decisions)
-3. **WF-009: Document Phase** (MEDIUM - workflow.yaml change)
-4. **WF-006: File Links in Status** (LOW - metadata enhancement)
-5. **WF-007: Learnings to Roadmap** (LOW - requires AI parsing)
+**Files to modify:**
+- `src/providers/openrouter.py`
 
----
+**Changes:**
+1. Add `execute_streaming()` method that yields chunks
+2. Add `--stream` flag to handoff command in `src/cli.py`
+3. Handle stream interruption gracefully
+4. Add progress indicator for non-streaming mode
 
-## Phase 1: WF-008 - AI Critique at Phase Gates
-
-### Goal
-Add lightweight AI critique at each phase transition to catch issues early, before they compound.
-
-### Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     cmd_advance() in cli.py                      │
-├─────────────────────────────────────────────────────────────────┤
-│ 1. Check can_advance_phase()                                     │
-│ 2. Collect critique context (items, git diff, constraints)       │
-│ 3. Call PhaseCritique.run() → ReviewRouter → gemini-2.0-flash   │
-│ 4. Display critique results                                      │
-│ 5. If critical issues: prompt user (continue/address)            │
-│ 6. Execute advance_phase()                                       │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### New Files
-- `src/critique.py` - PhaseCritique class
-
-### Modified Files
-- `src/cli.py` - Integrate critique into cmd_advance()
-- `src/default_workflow.yaml` - Add `phase_critique: true` setting
-- `workflow.yaml` - Add `phase_critique: true` setting
-
-### Implementation Details
-
+**Implementation:**
 ```python
-# src/critique.py
-class PhaseCritique:
-    """Lightweight AI critique at phase transitions."""
-
-    def __init__(self, working_dir: Path):
-        self.working_dir = working_dir
-        self.router = ReviewRouter(working_dir, context_limit=8000)
-
-    def collect_context(self, engine: WorkflowEngine) -> dict:
-        """Gather context for critique."""
-        return {
-            "task": engine.state.task_description,
-            "constraints": engine.state.constraints,
-            "current_phase": engine.state.current_phase_id,
-            "next_phase": self._get_next_phase_id(engine),
-            "completed_items": self._get_completed_items(engine),
-            "skipped_items": engine.get_skipped_items(engine.state.current_phase_id),
-            "git_diff_stat": self._get_git_diff_stat(),
-        }
-
-    def run(self, context: dict, transition: str) -> CritiqueResult:
-        """Run critique for a specific transition."""
-        prompt = CRITIQUE_PROMPTS[transition].format(**context)
-        result = self.router.execute_review("critique", prompt)
-        return CritiqueResult.from_review(result)
-
-class CritiqueResult:
-    observations: list[Observation]  # warnings, passes
-    recommendation: str
-    should_block: bool  # True if critical issues found
+def execute_streaming(self, prompt: str, model: Optional[str] = None) -> Generator[str, None, ExecutionResult]:
+    """Stream response chunks for real-time display."""
+    response = requests.post(
+        self.API_URL,
+        headers=headers,
+        json={**payload, "stream": True},
+        stream=True
+    )
+    for line in response.iter_lines():
+        if line.startswith(b'data: '):
+            chunk = json.loads(line[6:])
+            if chunk != '[DONE]':
+                yield chunk['choices'][0]['delta'].get('content', '')
 ```
 
-### Critique Prompts by Transition
+### 2. VV-001: Auto-load Style Guide
 
-| Transition | Focus Areas |
-|------------|-------------|
-| PLAN → EXECUTE | Requirements clarity, risk identification, test strategy |
-| EXECUTE → REVIEW | All items complete, tests passing, no TODO comments |
-| REVIEW → VERIFY | Review findings addressed, no unresolved issues |
-| VERIFY → LEARN | Verification passed, any remaining concerns |
+**Files to modify:**
+- `src/visual_verification.py`
 
-### Configuration
+**Changes:**
+1. Add `style_guide_path` parameter to `__init__`
+2. Auto-load style guide content if path provided and file exists
+3. Automatically include in all `verify()` calls
+4. Add `include_style_guide: bool = True` parameter to override
 
-```yaml
-# workflow.yaml
-settings:
-  phase_critique: true  # Enable/disable critique
-  critique_model: "latest"  # Use latest available model (resolves via ModelRegistry)
-  critique_block_on_critical: true  # Block on critical issues
+### 3. VV-002: Workflow Step Integration
+
+**Files to modify:**
+- `src/visual_verification.py`
+- `src/cli.py`
+
+**Changes:**
+1. Add `run_all_visual_tests()` function
+2. Parse test files from `tests/visual/` directory
+3. Integrate with orchestrator's `visual_regression_test` item
+4. Add `app_url` setting to workflow.yaml
+
+### 4. VV-003: Visual Test Discovery
+
+**Files to modify:**
+- `src/visual_verification.py`
+- `src/cli.py`
+
+**Changes:**
+1. Add `visual-verify-all` CLI command
+2. Define test file format (YAML frontmatter + markdown body)
+3. Scan `tests/visual/*.md` for test files
+4. Support filtering by tag/feature
+
+**Test file format:**
+```markdown
+---
+url: /dashboard
+viewport: desktop
+tags: [core, dashboard]
+---
+# Dashboard Visual Test
+
+The dashboard should display:
+- User greeting in top-left
+- Navigation sidebar
+- Main content area with widgets
 ```
 
-**Note:** The `critique_model: "latest"` setting uses the ModelRegistry (CORE-017) to resolve to the current best model (e.g., Gemini 3 Pro when available). This ensures critique always uses cutting-edge models.
+### 5. VV-004: Baseline Screenshot Management
 
----
+**Files to modify:**
+- `src/visual_verification.py`
 
-## Phase 2: WF-005 - Summary Before Approval Gates
+**Changes:**
+1. Add `save_baseline()` method to save screenshots
+2. Add `compare_with_baseline()` method for comparison
+3. Store baselines in `tests/visual/baselines/`
+4. Add `--save-baseline` flag to CLI
+5. Add image diff for pixel comparison (optional, AI comparison primary)
 
-### Goal
-Show a concise summary before any manual approval gate to enable informed decisions.
+### 6. VV-006: Cost Tracking
 
-### Modified Files
-- `src/cli.py` - Add `generate_phase_summary()`, integrate into `cmd_advance()`
+**Files to modify:**
+- `src/visual_verification.py`
 
-### Implementation Details
+**Changes:**
+1. Track token usage from API responses (if available)
+2. Add `CostTracker` class to aggregate costs
+3. Store per-test and per-run costs
+4. Add `--show-cost` flag to CLI commands
+5. Log costs to `.visual_verification_costs.json`
 
-```python
-def generate_phase_summary(engine: WorkflowEngine) -> str:
-    """Generate summary of current phase for approval."""
-    phase_id = engine.state.current_phase_id
-    phase = engine.state.phases[phase_id]
+### 7. WF-003: Model Selection Guidance
 
-    # Completed items with notes
-    completed = [(id, item.notes) for id, item in phase.items.items()
-                 if item.status == ItemStatus.COMPLETED]
+**Files to modify:**
+- `src/model_registry.py`
+- `src/default_workflow.yaml`
 
-    # Skipped items with reasons
-    skipped = engine.get_skipped_items(phase_id)
+**Changes:**
+1. Add `get_latest_model(category: str)` method to ModelRegistry
+2. Categories: `codex` (code-focused), `gemini` (long-context), `claude` (general)
+3. Use model registry cache to determine latest available
+4. Update workflow.yaml to use `review_model: "latest_available"`
 
-    # Git diff stat
-    diff_stat = subprocess.run(
-        ["git", "diff", "--stat", "HEAD~5"],  # Last 5 commits
-        capture_output=True, text=True
-    ).stdout
+### 8. Changelog/Roadmap Automation (NEW)
 
-    return format_summary(completed, skipped, diff_stat)
-```
+**Files to modify:**
+- `src/default_workflow.yaml`
+- `src/cli.py`
+- `src/engine.py` (optional helper methods)
 
-### Output Format
-```
-============================================================
-📋 PHASE SUMMARY: EXECUTE → REVIEW
-============================================================
-Completed Items (4):
-  ✓ implement_core_logic - "Added PhaseCritique class"
-  ✓ write_unit_tests - "23 tests, all passing"
-  ...
+**Changes:**
+1. Add `update_changelog_roadmap` item to LEARN phase
+2. Add `roadmap_file` and `changelog_file` settings to workflow.yaml
+3. Create helper to parse ROADMAP.md for completed items
+4. Create helper to append to CHANGELOG.md
+5. Create helper to remove completed items from ROADMAP.md
 
-Skipped Items (1):
-  ⊘ performance_tests - "Deferred - not applicable"
+## Execution Strategy
 
-Files Modified (since phase start):
-  src/critique.py | 145 ++++++++++++
-  src/cli.py      |  42 ++++--
-  tests/test_critique.py | 89 ++++++++
-  3 files changed, 276 insertions(+), 8 deletions(-)
+**Use Claude Code for implementation** - This is a substantial set of features requiring:
+- Multiple file modifications
+- Test creation
+- Integration with existing code
 
-Ready to advance to REVIEW phase? [Y/n]
-============================================================
-```
+## Dependencies
 
----
+- Existing `ModelRegistry` class (CORE-017/CORE-018)
+- Existing `VisualVerificationClient` class
+- External visual-verification-service (user's repo)
 
-## Phase 3: WF-009 - Document Phase
+## Testing Strategy
 
-### Goal
-Add optional DOCUMENT phase to ensure documentation stays current.
-
-### Modified Files
-- `src/default_workflow.yaml` - Add DOCUMENT phase
-- `workflow.yaml` - Add DOCUMENT phase
-
-### Phase Definition
-
-```yaml
-- id: DOCUMENT
-  name: Documentation Update
-  type: documentation
-  description: Update documentation to reflect changes
-  items:
-    - id: update_readme
-      name: Update README if needed
-      description: Review and update README.md for any new features or changes
-      optional: true
-    - id: update_setup_guide
-      name: Update setup/installation instructions
-      description: Ensure setup guides reflect current installation process
-      optional: true
-    - id: update_api_docs
-      name: Update API documentation
-      description: Document any new CLI commands or options
-      optional: true
-    - id: changelog_entry
-      name: Add changelog entry
-      description: Document changes in CHANGELOG.md
-      required: true
-      gate: manual
-```
-
----
-
-## Phase 4: WF-006 - File Links in Status Output
-
-### Goal
-Include file paths in completion metadata for faster human review.
-
-### Modified Files
-- `src/schema.py` - Add `files_modified` field to ItemState
-- `src/engine.py` - Track files on item completion
-- `src/cli.py` - Display files in status output
-
-### Implementation Details
-
-```python
-# src/schema.py - Add to ItemState
-class ItemState:
-    # ... existing fields ...
-    files_modified: Optional[list[str]] = None  # New field
-
-# src/engine.py - Track files on completion
-def complete_item(self, item_id: str, notes: str = "", files: list[str] = None):
-    # ... existing logic ...
-    if files is None:
-        # Auto-detect from git diff
-        files = self._get_changed_files_since_item_start()
-    item.files_modified = files
-```
-
----
-
-## Phase 5: WF-007 - Learnings to Roadmap Pipeline
-
-### Goal
-Automatically suggest roadmap items from captured learnings.
-
-### New Files
-- `src/learnings_pipeline.py` - Parse learnings and suggest roadmap items
-
-### Implementation Details
-
-```python
-def analyze_learnings(learnings_file: Path) -> list[RoadmapSuggestion]:
-    """Parse learnings for actionable patterns."""
-    patterns = [
-        r"should (\w+)",
-        r"next time (\w+)",
-        r"need to (\w+)",
-        r"could improve (\w+)",
-    ]
-    # ... pattern matching and suggestion generation
-```
-
----
-
-## Test Strategy
-
-| Feature | Test Count | Type |
-|---------|------------|------|
-| WF-008 Critique | 15 | Unit + Integration |
-| WF-005 Summary | 8 | Unit |
-| WF-009 Document Phase | 5 | Integration |
-| WF-006 File Links | 10 | Unit |
-| WF-007 Learnings | 8 | Unit |
-
----
-
-## Risk Assessment
-
-| Risk | Likelihood | Impact | Mitigation |
-|------|------------|--------|------------|
-| Critique API failures | Medium | Low | Graceful fallback (continue without critique) |
-| Critique too slow | Low | Medium | Use fast model (gemini-flash), timeout |
-| Over-blocking | Medium | High | Advisory mode by default |
-| Context too large | Medium | Medium | Truncate to 8k tokens |
-
----
-
-## Success Criteria
-
-1. **WF-008**: AI critique runs at each phase transition, catching at least 1 issue in 5 workflows
-2. **WF-005**: Summary displayed before every advance command
-3. **WF-009**: DOCUMENT phase appears in workflow.yaml
-4. **WF-006**: Files appear in status output for completed items
-5. **WF-007**: Learnings suggest at least one roadmap item when actionable patterns found
-
----
-
-## Timeline
-
-| Phase | Items | Effort |
-|-------|-------|--------|
-| 1: WF-008 | Critique class, prompts, CLI integration | ~2 hours |
-| 2: WF-005 | Summary generation | ~1 hour |
-| 3: WF-009 | Workflow.yaml update | ~15 min |
-| 4: WF-006 | File tracking | ~1 hour |
-| 5: WF-007 | Learnings pipeline | ~1.5 hours |
-| Testing | All features | ~1 hour |
-
-**Total: ~7 hours**
+1. Unit tests for each new function/method
+2. Integration tests for CLI commands
+3. Mock the visual verification service for VV tests
+4. Test streaming with mock HTTP responses
