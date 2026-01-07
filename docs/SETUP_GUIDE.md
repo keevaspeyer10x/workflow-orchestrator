@@ -184,7 +184,7 @@ This creates a hook that:
 orchestrator setup --copy-secrets
 ```
 
-This will automatically copy your `.manus/secrets.enc` file to the new repo.
+This will automatically copy your `.secrets.enc` file to the new repo.
 
 **Your files are safe:** Auto-updates only update the orchestrator code. Your repo-specific files (`workflow.yaml`, workflow state, logs) are never modified.
 
@@ -327,12 +327,12 @@ orchestrator secrets init
 This will:
 1. Prompt you for your API keys (OpenRouter, Anthropic, OpenAI, etc.)
 2. Ask you to set an encryption password
-3. Create `.manus/secrets.enc` (safe to commit!)
+3. Create `.secrets.enc` (safe to commit!)
 
 **Commit the encrypted file:**
 
 ```bash
-git add .manus/secrets.enc
+git add .secrets.enc
 git commit -m "Add encrypted secrets"
 git push
 ```
@@ -344,7 +344,7 @@ When starting a new task, set one environment variable:
 
 That's it! The SessionStart hook automatically decrypts and loads all your API keys.
 
-**Cross-repo usage:** Copy `.manus/secrets.enc` to any repo. Same password works everywhere.
+**Cross-repo usage:** Copy `.secrets.enc` to any repo. Same password works everywhere.
 
 ### Option 2: Environment Variables
 

@@ -31,8 +31,8 @@ logger = logging.getLogger(__name__)
 CONFIG_DIR = Path.home() / ".config" / "orchestrator"
 CONFIG_FILE = CONFIG_DIR / "config.yaml"
 
-# Simple encrypted secrets file (password-based)
-SIMPLE_SECRETS_FILE = ".manus/secrets.enc"
+# Simple encrypted secrets file (password-based) - at repo root
+SIMPLE_SECRETS_FILE = ".secrets.enc"
 
 
 class SecretsManager:

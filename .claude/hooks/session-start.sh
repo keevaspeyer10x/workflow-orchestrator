@@ -16,7 +16,7 @@ echo "Checking workflow orchestrator..."
 pip install -q --upgrade git+https://github.com/keevaspeyer10x/workflow-orchestrator.git 2>/dev/null || true
 
 # 2. Load secrets from simple encrypted file (preferred method)
-SECRETS_FILE=".manus/secrets.enc"
+SECRETS_FILE=".secrets.enc"
 
 if [ -f "$SECRETS_FILE" ]; then
     if [ -n "$SECRETS_PASSWORD" ]; then
