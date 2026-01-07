@@ -1037,12 +1037,20 @@ def cmd_review_status(args):
     if not setup.codex_cli or not setup.gemini_cli:
         print("                  Install: npm install -g @openai/codex @google/gemini-cli")
 
+    # Aider (Gemini via OpenRouter with full repo context)
+    aider_status = "✓" if setup.aider_cli else "✗"
+    aider_note = " (gemini via openrouter)" if setup.aider_available else ""
+    print(f"  Aider:          {aider_status} aider{aider_note}")
+
+    if not setup.aider_cli:
+        print("                  Install: pip install aider-chat")
+
     # API key
     api_status = "✓" if setup.openrouter_key else "✗"
     print(f"  API Key:        {api_status} OPENROUTER_API_KEY")
 
     if not setup.openrouter_key:
-        print("                  Set environment variable for API mode")
+        print("                  Set environment variable for API/Aider mode")
 
     # GitHub Actions
     actions_status = "✓" if setup.github_actions else "✗"
@@ -1058,12 +1066,16 @@ def cmd_review_status(args):
     # Recommended action
     if setup.cli_available:
         print("  ✓ Ready to run reviews using CLI mode (best experience)")
+    elif setup.aider_available:
+        print("  ✓ Ready to run reviews using Aider (full repo context via repo map)")
     elif setup.api_available:
-        print("  ⚠️  CLI tools not installed. Will use API mode (reduced context)")
-        print("     For better reviews, install: npm install -g @openai/codex @google/gemini-cli")
+        print("  ⚠️  CLI/Aider not available. Will use API mode (reduced context)")
+        print("     For better reviews, install: pip install aider-chat")
     else:
         print("  ✗ No review method available!")
-        print("     Install CLIs or set OPENROUTER_API_KEY")
+        print("     Install: pip install aider-chat")
+        print("     Or: npm install -g @openai/codex @google/gemini-cli")
+        print("     And set: OPENROUTER_API_KEY")
 
     if not setup.github_actions:
         print()
@@ -1589,7 +1601,7 @@ Examples:
     review_parser.add_argument('review_type', nargs='?',
                                choices=['security', 'consistency', 'quality', 'holistic', 'all'],
                                default='all', help='Review type to run (default: all)')
-    review_parser.add_argument('--method', '-m', choices=['auto', 'cli', 'api'],
+    review_parser.add_argument('--method', '-m', choices=['auto', 'cli', 'aider', 'api'],
                                default='auto', help='Execution method (default: auto-detect)')
     review_parser.add_argument('--json', action='store_true', help='Output as JSON')
     review_parser.set_defaults(func=cmd_review)

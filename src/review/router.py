@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 class ReviewMethod(Enum):
     """Available review execution methods."""
     CLI = "cli"
+    AIDER = "aider"
     API = "api"
     GITHUB_ACTIONS = "github-actions"
     UNAVAILABLE = "unavailable"
@@ -70,6 +71,7 @@ class ReviewRouter:
 
         # Initialize executors lazily
         self._cli_executor = None
+        self._aider_executor = None
         self._api_executor = None
 
     @property
@@ -86,6 +88,11 @@ class ReviewRouter:
         gemini_status = "✓" if self.setup.gemini_cli else "✗"
         lines.append(f"  CLI Tools:      {codex_status} codex, {gemini_status} gemini")
 
+        # Aider (Gemini via OpenRouter with repo context)
+        aider_status = "✓" if self.setup.aider_cli else "✗"
+        aider_note = " (gemini via openrouter)" if self.setup.aider_available else ""
+        lines.append(f"  Aider:          {aider_status} aider{aider_note}")
+
         # API key
         api_status = "✓" if self.setup.openrouter_key else "✗"
         lines.append(f"  API Key:        {api_status} OPENROUTER_API_KEY")
@@ -101,8 +108,9 @@ class ReviewRouter:
         if self._method == ReviewMethod.UNAVAILABLE:
             lines.append("")
             lines.append("  ⚠️  No review method available!")
-            lines.append("  Run: npm install -g @openai/codex @google/gemini-cli")
-            lines.append("  Or set: OPENROUTER_API_KEY")
+            lines.append("  Run: pip install aider-chat")
+            lines.append("  Or: npm install -g @openai/codex @google/gemini-cli")
+            lines.append("  And set: OPENROUTER_API_KEY")
 
         return "\n".join(lines)
 
@@ -123,6 +131,8 @@ class ReviewRouter:
 
         if self._method == ReviewMethod.CLI:
             return self._execute_cli(review_type)
+        elif self._method == ReviewMethod.AIDER:
+            return self._execute_aider(review_type)
         elif self._method == ReviewMethod.API:
             return self._execute_api(review_type)
         else:
@@ -131,7 +141,7 @@ class ReviewRouter:
                 success=False,
                 model_used="none",
                 method_used="unavailable",
-                error="No review method available. Install CLIs or set OPENROUTER_API_KEY."
+                error="No review method available. Install aider-chat, CLIs, or set OPENROUTER_API_KEY."
             )
 
     def _execute_cli(self, review_type: str) -> ReviewResult:
@@ -142,6 +152,15 @@ class ReviewRouter:
             self._cli_executor = CLIExecutor(self.working_dir)
 
         return self._cli_executor.execute(review_type)
+
+    def _execute_aider(self, review_type: str) -> ReviewResult:
+        """Execute review using Aider with OpenRouter."""
+        from .aider_executor import AiderExecutor
+
+        if self._aider_executor is None:
+            self._aider_executor = AiderExecutor(self.working_dir)
+
+        return self._aider_executor.execute(review_type)
 
     def _execute_api(self, review_type: str) -> ReviewResult:
         """Execute review using OpenRouter API."""

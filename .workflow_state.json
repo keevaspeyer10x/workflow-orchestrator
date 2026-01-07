@@ -1,26 +1,26 @@
 {
-  "workflow_id": "wf_817c51c8",
+  "workflow_id": "wf_6c1adfb1",
   "workflow_type": "General Development Workflow",
   "workflow_version": "2.1",
-  "task_description": "Review and finalize secrets management implementation",
+  "task_description": "Integrate Aider as invisible review provider for Gemini with full repo context",
   "project": null,
   "status": "active",
-  "current_phase_id": "PLAN",
+  "current_phase_id": "EXECUTE",
   "phases": {
     "PLAN": {
       "id": "PLAN",
-      "status": "active",
-      "started_at": "2026-01-07T02:07:28.102109Z",
-      "completed_at": null,
+      "status": "completed",
+      "started_at": "2026-01-07T03:31:52.884847Z",
+      "completed_at": "2026-01-07T03:38:10.168475Z",
       "items": {
         "check_roadmap": {
           "id": "check_roadmap",
           "status": "completed",
           "started_at": null,
-          "completed_at": "2026-01-07T02:07:44.991796Z",
+          "completed_at": "2026-01-07T03:32:32.139868Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "Review is for existing secrets implementation - no roadmap items to check",
+          "notes": "Reviewed ROADMAP.md - CORE-016 Multi-Model Review Routing already completed. This task adds Aider as additional review provider alongside existing OpenRouter implementation.",
           "verification_result": null,
           "retry_count": 0
         },
@@ -29,8 +29,8 @@
           "status": "skipped",
           "started_at": null,
           "completed_at": null,
-          "skipped_at": "2026-01-07T02:07:53.081967Z",
-          "skip_reason": "This is a code review task - requirements are clear",
+          "skipped_at": "2026-01-07T03:32:41.654053Z",
+          "skip_reason": "Requirements clear from discussion: Add Aider as invisible review provider for Gemini with full repo context. No open questions.",
           "notes": null,
           "verification_result": null,
           "retry_count": 0
@@ -39,13 +39,13 @@
           "id": "initial_plan",
           "status": "completed",
           "started_at": null,
-          "completed_at": "2026-01-07T02:08:02.279587Z",
+          "completed_at": "2026-01-07T03:33:58.460164Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "Review plan: 1) Security audit, 2) Multi-user readiness, 3) UX assessment, 4) Code quality. Security fixes already applied.",
+          "notes": "Created implementation plan in docs/plan.md covering: AiderExecutor class, router integration, setup checks, and user experience. Key approach: Use aider --message for non-interactive reviews with full repo context.",
           "verification_result": {
             "type": "file_exists",
-            "timestamp": "2026-01-07T02:08:02.278384+00:00",
+            "timestamp": "2026-01-07T03:33:58.459140+00:00",
             "path": "/home/user/workflow-orchestrator/docs/plan.md",
             "exists": true
           },
@@ -55,13 +55,13 @@
           "id": "risk_analysis",
           "status": "completed",
           "started_at": null,
-          "completed_at": "2026-01-07T02:08:11.950091Z",
+          "completed_at": "2026-01-07T03:34:37.488373Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "Risks identified: 1) Password still required each session (UX friction), 2) Per-repo secrets file (cross-repo friction), 3) Single password = all users share secrets. Mitigations: SOPS for multi-user, docs for cross-repo copy.",
+          "notes": "Created risk analysis in docs/risk_analysis.md. Overall risk: LOW. Key mitigations: graceful fallback to OpenRouter API, timeout handling, --no-auto-commits and --no-git flags for safety.",
           "verification_result": {
             "type": "file_exists",
-            "timestamp": "2026-01-07T02:08:11.949184+00:00",
+            "timestamp": "2026-01-07T03:34:37.487566+00:00",
             "path": "/home/user/workflow-orchestrator/docs/risk_analysis.md",
             "exists": true
           },
@@ -71,13 +71,13 @@
           "id": "define_test_cases",
           "status": "completed",
           "started_at": null,
-          "completed_at": "2026-01-07T02:08:21.432202Z",
+          "completed_at": "2026-01-07T03:35:12.009254Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "Test cases: 31 unit tests already passing. Manual tests: encryption/decryption via stdin works, password not visible in ps.",
+          "notes": "Created 10 test cases in tests/test_cases.md covering: AiderExecutor (success, timeout, not found, parsing), ReviewSetup (aider detection), ReviewRouter (routing, fallback, status), and end-to-end integration.",
           "verification_result": {
             "type": "file_exists",
-            "timestamp": "2026-01-07T02:08:21.430966+00:00",
+            "timestamp": "2026-01-07T03:35:12.008321+00:00",
             "path": "/home/user/workflow-orchestrator/tests/test_cases.md",
             "exists": true
           },
@@ -85,47 +85,51 @@
         },
         "user_approval": {
           "id": "user_approval",
-          "status": "pending",
+          "status": "completed",
           "started_at": null,
-          "completed_at": null,
+          "completed_at": "2026-01-07T03:38:09.577729Z",
           "skipped_at": null,
           "skip_reason": null,
           "notes": null,
-          "verification_result": null,
+          "verification_result": {
+            "approved": true,
+            "approved_at": "2026-01-07T03:38:09.577742+00:00",
+            "type": "manual_gate"
+          },
           "retry_count": 0
         }
       }
     },
     "EXECUTE": {
       "id": "EXECUTE",
-      "status": "pending",
-      "started_at": null,
+      "status": "active",
+      "started_at": "2026-01-07T03:38:10.168908Z",
       "completed_at": null,
       "items": {
         "handoff_decision": {
           "id": "handoff_decision",
-          "status": "pending",
+          "status": "completed",
           "started_at": null,
-          "completed_at": null,
+          "completed_at": "2026-01-07T03:38:29.745664Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": null,
-          "verification_result": null,
-          "retry_count": 0
-        },
-        "implement_code": {
-          "id": "implement_code",
-          "status": "pending",
-          "started_at": null,
-          "completed_at": null,
-          "skipped_at": null,
-          "skip_reason": null,
-          "notes": null,
+          "notes": "Already executing in Claude Code - no handoff needed. Proceeding with direct implementation.",
           "verification_result": null,
           "retry_count": 0
         },
         "write_tests": {
           "id": "write_tests",
+          "status": "completed",
+          "started_at": null,
+          "completed_at": "2026-01-07T03:39:21.927939Z",
+          "skipped_at": null,
+          "skip_reason": null,
+          "notes": "Created tests/test_review_aider.py with 9 tests covering AiderExecutor, ReviewSetup, and ReviewRouter. Tests fail as expected (RED phase) - aider_executor module doesn't exist yet.",
+          "verification_result": null,
+          "retry_count": 0
+        },
+        "implement_code": {
+          "id": "implement_code",
           "status": "pending",
           "started_at": null,
           "completed_at": null,
@@ -269,8 +273,8 @@
           "verification_result": null,
           "retry_count": 0
         },
-        "approve_learnings": {
-          "id": "approve_learnings",
+        "propose_actions": {
+          "id": "propose_actions",
           "status": "pending",
           "started_at": null,
           "completed_at": null,
@@ -280,8 +284,8 @@
           "verification_result": null,
           "retry_count": 0
         },
-        "update_roadmap": {
-          "id": "update_roadmap",
+        "approve_actions": {
+          "id": "approve_actions",
           "status": "pending",
           "started_at": null,
           "completed_at": null,
@@ -291,8 +295,8 @@
           "verification_result": null,
           "retry_count": 0
         },
-        "backport_improvements": {
-          "id": "backport_improvements",
+        "apply_approved_actions": {
+          "id": "apply_approved_actions",
           "status": "pending",
           "started_at": null,
           "completed_at": null,
@@ -312,12 +316,23 @@
           "notes": null,
           "verification_result": null,
           "retry_count": 0
+        },
+        "commit_and_sync": {
+          "id": "commit_and_sync",
+          "status": "pending",
+          "started_at": null,
+          "completed_at": null,
+          "skipped_at": null,
+          "skip_reason": null,
+          "notes": null,
+          "verification_result": null,
+          "retry_count": 0
         }
       }
     }
   },
-  "created_at": "2026-01-07T02:07:28.102478Z",
-  "updated_at": "2026-01-07T02:08:21.432221Z",
+  "created_at": "2026-01-07T03:31:52.885273Z",
+  "updated_at": "2026-01-07T03:39:21.927956Z",
   "completed_at": null,
   "metadata": {
     "workflow_yaml_path": "/home/user/workflow-orchestrator/workflow.yaml",
@@ -358,7 +373,7 @@
           {
             "id": "clarifying_questions",
             "name": "Ask Clarifying Questions",
-            "description": "Before creating a plan, ask the user clarifying questions to ensure full understanding. MUST provide RECOMMENDED ANSWERS with each question. Examples: What does the issue look like? Is this a regression? What's the expected behavior? Which areas are affected?",
+            "description": "Before creating a plan, ask the user clarifying questions to ensure full understanding. For EACH question you MUST provide: 1) Your RECOMMENDATION (what you think is best), 2) ALTERNATIVES (other valid options), 3) TRADEOFFS (why you recommend one over others). Format: '**Q1: [Question]** | Recommendation: X | Alternatives: Y, Z | Tradeoffs: ...' This helps users make informed decisions quickly.",
             "required": true,
             "skippable": true,
             "skip_conditions": [
@@ -373,7 +388,11 @@
               "description": null
             },
             "agent": null,
-            "notes": []
+            "notes": [
+              "[caution] Never ask open-ended questions without recommendations. Users should be able to say 'yes, use your recommendations' and move forward.",
+              "[tip] Format each question as: Question \u2192 Recommendation \u2192 Alternatives \u2192 Tradeoffs",
+              "[example] 'Should we include run_command? Recommendation: No (security risk). Alternatives: Yes with allowlist, Yes unrestricted. Tradeoffs: Security vs flexibility.'"
+            ]
           },
           {
             "id": "initial_plan",
@@ -472,12 +491,16 @@
               "description": null
             },
             "agent": null,
-            "notes": []
+            "notes": [
+              "[caution] BEFORE deciding, verify agent availability: 1) Check if Claude Code CLI is installed (`which claude`), 2) Check for Manus direct connector, 3) Check for OpenRouter API key. If primary agent unavailable, ASK USER about alternatives before proceeding.",
+              "[tip] Use `orchestrator handoff --provider auto` to auto-detect the best available provider for your environment.",
+              "[learning] Different environments have different agent access: Claude Code CLI (local dev), Manus direct connector (Manus sandbox), OpenRouter API (universal fallback)."
+            ]
           },
           {
-            "id": "implement_code",
-            "name": "Implement feature code",
-            "description": "Write the application code that satisfies the requirements. Use Claude Code unless explicitly decided otherwise in handoff_decision.",
+            "id": "write_tests",
+            "name": "Write tests (RED phase)",
+            "description": "Write test code from test_cases.md BEFORE implementation. Tests should fail initially - this verifies they actually test something. TDD: Red-Green-Refactor.",
             "required": true,
             "skippable": false,
             "skip_conditions": [],
@@ -489,24 +512,30 @@
               "description": null
             },
             "agent": null,
-            "notes": []
+            "notes": [
+              "[caution] Write tests BEFORE implementation code. Tests that pass before code is written are not testing anything.",
+              "[tip] Run tests after writing - they SHOULD fail. If they pass, the test is not testing new functionality.",
+              "[learning] Post-implementation tests tend to verify 'what was built' rather than 'what should be built', leading to gaps."
+            ]
           },
           {
-            "id": "write_tests",
-            "name": "Write tests",
-            "description": "Implement the test cases defined in the planning phase. For UI changes, include screenshot/visual regression tests where appropriate.",
+            "id": "implement_code",
+            "name": "Implement feature code (GREEN phase)",
+            "description": "Write the minimal application code to make tests pass. TDD: Red-Green-Refactor.",
             "required": true,
             "skippable": false,
             "skip_conditions": [],
             "verification": {
-              "type": "command",
+              "type": "none",
               "path": null,
-              "command": "{{test_command}}",
+              "command": null,
               "expect_exit_code": 0,
               "description": null
             },
             "agent": null,
-            "notes": []
+            "notes": [
+              "[tip] Write just enough code to make the failing tests pass. Refactor later."
+            ]
           },
           {
             "id": "all_tests_pass",
@@ -527,7 +556,11 @@
           }
         ],
         "exit_gate": null,
-        "notes": []
+        "notes": [
+          "[caution] Before implementing, verify that your chosen agent/provider is actually available. If Claude Code CLI is not installed, check for alternative connectors (e.g., Manus direct connection, OpenRouter API).",
+          "[tip] If the preferred agent is unavailable, ASK THE USER before defaulting to manual implementation. They may know of alternative connection methods.",
+          "[learning] From v2.2: Claude Code CLI may not be available in all environments (e.g., Manus sandbox), but alternative connectors often exist."
+        ]
       },
       {
         "id": "REVIEW",
@@ -687,7 +720,7 @@
       {
         "id": "LEARN",
         "name": "Learning & Documentation",
-        "description": "Document learnings and update knowledge base. Learnings must be approved before being embedded in the process.",
+        "description": "Document learnings, propose actions, get user approval, then apply. Actions are only embedded after explicit user approval.",
         "agent": null,
         "executor": null,
         "items": [
@@ -711,7 +744,7 @@
           {
             "id": "document_learnings",
             "name": "Document Learnings",
-            "description": "Create or update LEARNINGS.md with: 1) Problem summary, 2) Root cause analysis, 3) Fix applied, 4) Systemic insights (broader implications), 5) Prevention measures, 6) Audit recommendations, 7) Workflow improvements identified.",
+            "description": "Create or update LEARNINGS.md with: 1) Problem summary, 2) Root cause analysis, 3) Fix applied, 4) Systemic insights, 5) Prevention measures.",
             "required": true,
             "skippable": false,
             "skip_conditions": [],
@@ -726,9 +759,30 @@
             "notes": []
           },
           {
-            "id": "approve_learnings",
-            "name": "User Approval of Learnings",
-            "description": "User must review and approve the documented learnings before they are committed. This ensures learnings are accurate, complete, and valuable for future reference.",
+            "id": "propose_actions",
+            "name": "Propose Recommended Actions",
+            "description": "Based on learnings, propose specific actions to prevent recurrence. List each action clearly: 1) What to change, 2) Which file(s) affected, 3) Whether it's immediate (apply now) or roadmap (future). Present to user for approval.",
+            "required": true,
+            "skippable": false,
+            "skip_conditions": [],
+            "verification": {
+              "type": "none",
+              "path": null,
+              "command": null,
+              "expect_exit_code": 0,
+              "description": null
+            },
+            "agent": null,
+            "notes": [
+              "[tip] Be specific: 'Reorder EXECUTE items in workflow.yaml' not 'improve workflow'",
+              "[tip] Categorize: APPLY NOW (small, safe) vs ROADMAP (large, needs design)",
+              "[caution] User must approve actions before any changes are made"
+            ]
+          },
+          {
+            "id": "approve_actions",
+            "name": "User Approval of Proposed Actions",
+            "description": "User reviews proposed actions and approves which ones to apply. User may reject, modify, or defer actions. Only approved actions proceed to implementation.",
             "required": true,
             "skippable": false,
             "skip_conditions": [],
@@ -737,39 +791,19 @@
               "path": null,
               "command": null,
               "expect_exit_code": 0,
-              "description": "User must review LEARNINGS.md and run 'orchestrator approve-item approve_learnings' to confirm learnings are correct and complete."
+              "description": "User must review proposed actions and run 'orchestrator approve-item approve_actions' to confirm which actions to apply."
             },
             "agent": null,
             "notes": []
           },
           {
-            "id": "update_roadmap",
-            "name": "Update Roadmap with Audit Items",
-            "description": "Add any audit recommendations from LEARNINGS.md to ROADMAP.md for future tracking.",
+            "id": "apply_approved_actions",
+            "name": "Apply Approved Actions",
+            "description": "Apply the user-approved actions: update workflow.yaml, add to ROADMAP.md, backport to bundled defaults, etc. Only apply what was explicitly approved.",
             "required": true,
             "skippable": true,
             "skip_conditions": [
-              "no_audit_recommendations"
-            ],
-            "verification": {
-              "type": "file_exists",
-              "path": "ROADMAP.md",
-              "command": null,
-              "expect_exit_code": 0,
-              "description": null
-            },
-            "agent": null,
-            "notes": []
-          },
-          {
-            "id": "backport_improvements",
-            "name": "Backport Universal Improvements",
-            "description": "Identify any improvements that are universally applicable (not project-specific) and backport them to the workflow-orchestrator repository. This includes workflow changes, bug fixes, and documentation improvements.",
-            "required": true,
-            "skippable": true,
-            "skip_conditions": [
-              "no_universal_improvements",
-              "project_specific_only"
+              "no_actions_approved"
             ],
             "verification": {
               "type": "none",
@@ -779,12 +813,15 @@
               "description": null
             },
             "agent": null,
-            "notes": []
+            "notes": [
+              "[caution] Only apply actions the user approved in previous step",
+              "[tip] For workflow changes, update both workflow.yaml AND src/default_workflow.yaml"
+            ]
           },
           {
             "id": "update_knowledge_base",
             "name": "Update Knowledge Base",
-            "description": "Update any relevant project documentation or knowledge base with approved learnings.",
+            "description": "Update any relevant project documentation with approved learnings.",
             "required": false,
             "skippable": true,
             "skip_conditions": [],
@@ -797,23 +834,77 @@
             },
             "agent": null,
             "notes": []
+          },
+          {
+            "id": "commit_and_sync",
+            "name": "Commit and Sync Changes",
+            "description": "Ask user if they are ready to commit and sync to main. If approved: 1) Run git status/diff, 2) Auto-generate commit message from workflow task and changes, 3) Stage relevant files (exclude .env, secrets, workflow state), 4) Commit and push.",
+            "required": true,
+            "skippable": true,
+            "skip_conditions": [
+              "no_changes_to_commit",
+              "user_will_commit_manually"
+            ],
+            "verification": {
+              "type": "manual_gate",
+              "path": null,
+              "command": null,
+              "expect_exit_code": 0,
+              "description": "User confirms ready to commit and sync changes to main."
+            },
+            "agent": null,
+            "notes": [
+              "[tip] Auto-generate commit message: summarize the task from workflow state + key changes from git diff",
+              "[tip] Commit message format: 'feat/fix/chore: <summary from task>' with bullet points of what changed",
+              "[caution] Exclude from commit: .env, .workflow_state.json, .workflow_log.jsonl, secrets, credentials"
+            ]
           }
         ],
         "exit_gate": null,
-        "notes": []
+        "notes": [
+          "[caution] Never apply learnings to workflow/roadmap without user approval first.",
+          "[tip] Propose specific actions, not vague improvements. User should know exactly what will change."
+        ]
       }
     ],
     "settings": {
-      "test_command": "npm run build",
+      "test_command": "python -m pytest tests/ -v --tb=short",
       "build_command": "npm run build",
       "lint_command": "npm run lint",
       "docs_dir": "docs",
       "tests_dir": "tests",
       "default_executor": "claude_code",
-      "review_model": "latest_available"
+      "review_model": "latest_available",
+      "reviews": {
+        "enabled": true,
+        "on_by_default": true,
+        "method": "auto",
+        "types": {
+          "security_review": "codex",
+          "quality_review": "codex",
+          "consistency_review": "gemini",
+          "holistic_review": "gemini"
+        },
+        "models": {
+          "cli": {
+            "codex": "gpt-5.1-codex-max",
+            "gemini": "gemini-3-pro-preview"
+          },
+          "api": {
+            "codex": "openai/gpt-5.1",
+            "gemini": "google/gemini-3-pro-preview"
+          }
+        },
+        "github_actions": {
+          "required_for_merge": true
+        },
+        "fallback_to_api": true
+      }
     }
   },
   "constraints": [
-    "Focus on security, multi-user readiness, and UX"
+    "Aider must be invisible to user - just another model option",
+    "Add aider as review provider alongside openrouter",
+    "Install aider-chat as dependency"
   ]
 }
