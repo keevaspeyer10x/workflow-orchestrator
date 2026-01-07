@@ -4,7 +4,7 @@
   "workflow_version": "2.1",
   "task_description": "Add function calling support to OpenRouter provider for interactive repo context",
   "project": null,
-  "status": "active",
+  "status": "completed",
   "current_phase_id": "LEARN",
   "phases": {
     "PLAN": {
@@ -310,44 +310,53 @@
         },
         "approve_learnings": {
           "id": "approve_learnings",
-          "status": "pending",
+          "status": "completed",
           "started_at": null,
-          "completed_at": null,
+          "completed_at": "2026-01-07T00:49:20.225572Z",
           "skipped_at": null,
           "skip_reason": null,
           "notes": null,
-          "verification_result": null,
+          "verification_result": {
+            "approved": true,
+            "approved_at": "2026-01-07T00:49:20.225585+00:00",
+            "type": "manual_gate"
+          },
           "retry_count": 0
         },
         "update_roadmap": {
           "id": "update_roadmap",
-          "status": "pending",
+          "status": "completed",
           "started_at": null,
-          "completed_at": null,
+          "completed_at": "2026-01-07T00:49:20.680337Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": null,
-          "verification_result": null,
+          "notes": "Added CORE-018 for dynamic function calling detection. Updated CORE-017 with auto-update tasks.",
+          "verification_result": {
+            "type": "file_exists",
+            "timestamp": "2026-01-07T00:49:20.679611+00:00",
+            "path": "/home/user/workflow-orchestrator/ROADMAP.md",
+            "exists": true
+          },
           "retry_count": 0
         },
         "backport_improvements": {
           "id": "backport_improvements",
-          "status": "pending",
+          "status": "completed",
           "started_at": null,
-          "completed_at": null,
+          "completed_at": "2026-01-07T00:49:21.154004Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": null,
+          "notes": "Clarifying questions improvement already backported to workflow.yaml",
           "verification_result": null,
           "retry_count": 0
         },
         "update_knowledge_base": {
           "id": "update_knowledge_base",
-          "status": "pending",
+          "status": "skipped",
           "started_at": null,
           "completed_at": null,
-          "skipped_at": null,
-          "skip_reason": null,
+          "skipped_at": "2026-01-07T00:49:21.630245Z",
+          "skip_reason": "No external knowledge base configured",
           "notes": null,
           "verification_result": null,
           "retry_count": 0
@@ -356,8 +365,8 @@
     }
   },
   "created_at": "2026-01-06T22:01:21.098840Z",
-  "updated_at": "2026-01-06T22:49:26.134591Z",
-  "completed_at": null,
+  "updated_at": "2026-01-07T00:49:30.457101Z",
+  "completed_at": "2026-01-07T00:49:30.457087Z",
   "metadata": {
     "workflow_yaml_path": "/home/user/workflow-orchestrator/workflow.yaml",
     "workflow_yaml_checksum": "9b4c35c72a050c63"
