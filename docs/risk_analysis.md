@@ -1,8 +1,8 @@
-# Risk Analysis: OpenRouter Function Calling for Interactive Repo Context
+# Risk Analysis: Multi-Source Secrets Manager
 
 ## Executive Summary
 
-This feature adds function calling support to the OpenRouter provider, allowing models to interactively request file/code context. Overall risk is **LOW to MEDIUM** due to read-only operations and graceful fallback design.
+This feature adds a unified secrets manager that fetches secrets from env vars, SOPS, or GitHub private repos. Overall risk is **LOW to MEDIUM** due to read-only operations, no disk persistence of decrypted secrets, and additive design that preserves existing behavior.
 
 ---
 
@@ -10,156 +10,160 @@ This feature adds function calling support to the OpenRouter provider, allowing 
 
 | Risk | Likelihood | Impact | Severity | Mitigation |
 |------|------------|--------|----------|------------|
-| R1: Path traversal | Medium | High | **Medium** | Validate paths, sandbox to working_dir |
-| R2: Large file memory issues | Low | Medium | **Low** | Soft warning at 2MB, stream large files |
-| R3: Infinite tool call loop | Low | Medium | **Low** | Soft warning at 50 calls, model decides |
-| R4: API cost explosion | Medium | Medium | **Medium** | Log call counts, user visibility |
-| R5: Breaking existing behavior | Low | High | **Medium** | Auto-detect, preserve fallback path |
-| R6: Model compatibility issues | Medium | Low | **Low** | Maintain fallback, test major models |
+| R1: Secret exposure in logs | Medium | High | **Medium** | Never log secret values, redact in errors |
+| R2: GitHub repo misconfiguration | Medium | Medium | **Medium** | Validate repo access, clear error messages |
+| R3: SOPS decryption failures | Low | Low | **Low** | Graceful fallthrough, clear diagnostics |
+| R4: Cache persistence risks | Low | High | **Medium** | Memory-only cache, no disk writes |
+| R5: Breaking existing behavior | Low | High | **Medium** | Env vars checked first, additive design |
+| R6: GitHub API rate limits | Low | Low | **Low** | Cache results, minimal API calls |
 
 ---
 
 ## Detailed Risk Analysis
 
-### R1: Path Traversal Attacks
+### R1: Secret Exposure in Logs
 
-**Description:** A malicious or confused model could request files outside the working directory (e.g., `../../etc/passwd`).
+**Description:** Secrets could accidentally be logged, exposed in error messages, or included in exception traces.
 
-**Likelihood:** Medium - Models may generate unexpected paths.
+**Likelihood:** Medium - Easy to accidentally log a secret value.
 
-**Impact:** High - Could expose sensitive system files.
+**Impact:** High - Secret compromise requires rotation.
 
 **Mitigation:**
-1. Resolve all paths relative to `working_dir`
-2. Validate resolved path is within `working_dir` using `Path.resolve()`
-3. Return error for paths outside sandbox
-4. Never use user/model input directly in file operations
+1. Never log secret values, only names
+2. Redact any potential secret values in error messages
+3. Use `[REDACTED]` placeholder consistently
+4. Review all logging statements for secret exposure
 
 **Implementation:**
 ```python
-def safe_read_file(path: str, working_dir: Path) -> str:
-    resolved = (working_dir / path).resolve()
-    if not resolved.is_relative_to(working_dir):
-        return {"error": "Path outside working directory", "path": path}
-    # ... proceed with read
+def get_secret(self, name: str) -> Optional[str]:
+    logger.debug(f"Fetching secret: {name}")  # Never log value
+    if value := self._try_sops(name):
+        logger.debug(f"Found {name} in SOPS")  # Don't log value
+        return value
+    # ...
 ```
 
 ---
 
-### R2: Large File Memory Issues
+### R2: GitHub Repo Misconfiguration
 
-**Description:** Reading very large files (multi-GB) could exhaust memory.
+**Description:** User configures wrong repo, public repo, or repo they don't have access to.
 
-**Likelihood:** Low - Most code files are small; 2MB warning catches edge cases.
+**Likelihood:** Medium - Configuration errors are common.
 
-**Impact:** Medium - Process crash, poor UX.
+**Impact:** Medium - Secrets not found, confusing errors.
 
 **Mitigation:**
-1. Soft warning at 2MB (log, don't block)
-2. For files >10MB, consider streaming/chunking
-3. Return file size in response so model can decide
-4. Truncate extremely large files (>50MB) with clear message
+1. Validate repo format (owner/name)
+2. Check repo accessibility before attempting fetch
+3. Clear error messages explaining what's wrong
+4. Document expected repo structure
 
 **Implementation:**
 ```python
-def execute_read_file(path: str, working_dir: Path) -> dict:
-    file_size = file_path.stat().st_size
-    if file_size > 2 * 1024 * 1024:  # 2MB
-        logger.warning(f"Large file ({file_size / 1024 / 1024:.1f}MB): {path}")
-    if file_size > 50 * 1024 * 1024:  # 50MB
-        return {"content": "(file too large - 50MB limit)", "truncated": True}
-    # ... read file
+def _try_github_repo(self, name: str) -> Optional[str]:
+    repo = self._config.get("secrets_repo")
+    if not repo or "/" not in repo:
+        logger.debug("No valid secrets_repo configured")
+        return None
+    # ... validate repo access
 ```
 
 ---
 
-### R3: Infinite Tool Call Loop
+### R3: SOPS Decryption Failures
 
-**Description:** Model keeps calling tools without producing final output.
+**Description:** SOPS not installed, wrong key, corrupted file, or other decryption issues.
 
-**Likelihood:** Low - Modern models handle tool loops well.
+**Likelihood:** Low - SOPS is well-tested; users typically test setup.
 
-**Impact:** Medium - Wasted API costs, hung execution.
+**Impact:** Low - Falls through to next source gracefully.
 
 **Mitigation:**
-1. Soft warning at 50 calls (log, don't block)
-2. Hard limit at 200 calls as safety net
-3. Include call count in final result metadata
-4. Log each tool call for debugging
+1. Check if SOPS is installed before attempting
+2. Verify SOPS_AGE_KEY is set before attempting
+3. Catch all SOPS errors and fall through
+4. Log diagnostic info for debugging
 
 **Implementation:**
 ```python
-MAX_TOOL_CALLS = 200  # Hard safety limit
-
-while call_count < MAX_TOOL_CALLS:
-    if call_count == 50:
-        logger.warning("50+ tool calls - consider optimizing prompt")
-    # ... execute tool
-else:
-    return ExecutionResult(
-        success=False,
-        error=f"Exceeded maximum tool calls ({MAX_TOOL_CALLS})"
-    )
+def _try_sops(self, name: str) -> Optional[str]:
+    if not shutil.which("sops"):
+        logger.debug("SOPS not installed, skipping")
+        return None
+    if not os.environ.get("SOPS_AGE_KEY"):
+        logger.debug("SOPS_AGE_KEY not set, skipping")
+        return None
+    # ... attempt decryption
 ```
 
 ---
 
-### R4: API Cost Explosion
+### R4: Cache Persistence Risks
 
-**Description:** Many tool calls = many API round-trips = high costs.
+**Description:** Decrypted secrets persisted to disk could be exposed.
 
-**Likelihood:** Medium - Complex tasks may need many file reads.
+**Likelihood:** Low - Design explicitly avoids disk writes.
 
-**Impact:** Medium - Unexpected bills for users.
+**Impact:** High - Persistent secret exposure.
 
 **Mitigation:**
-1. Log total tool calls prominently in output
-2. Include token usage in ExecutionResult metadata
-3. Document expected costs in user guide
-4. Consider adding `--max-tools` CLI flag (future enhancement)
+1. Cache in memory only (Python dict)
+2. Never write decrypted secrets to files
+3. Clear cache on manager destruction
+4. Document that secrets are never persisted
+
+**Implementation:**
+```python
+class SecretsManager:
+    def __init__(self):
+        self._cache = {}  # Memory only
+        # Never: self._cache_file.write(...)
+```
 
 ---
 
 ### R5: Breaking Existing Behavior
 
-**Description:** Changes to `execute()` could break existing workflows.
+**Description:** Changes could break existing env var-based secret access.
 
-**Likelihood:** Low - Design preserves existing code path.
+**Likelihood:** Low - Env vars are checked first, no changes to that path.
 
 **Impact:** High - User workflows fail unexpectedly.
 
 **Mitigation:**
-1. Auto-detection: only use tools if model supports it
-2. Preserve `_execute_basic()` as unchanged fallback
-3. Extensive testing of both paths
-4. Clear logging of which path is used
+1. Env vars always checked first (highest priority)
+2. Existing code paths unchanged
+3. New sources are additive fallbacks
+4. Extensive testing of existing behavior
 
 **Implementation:**
 ```python
-def execute(self, prompt: str, model: str = None) -> ExecutionResult:
-    if self._supports_function_calling(model):
-        logger.info(f"Using function calling with {model}")
-        return self.execute_with_tools(prompt, model)
-    else:
-        logger.info(f"Using basic execution with {model}")
-        return self._execute_basic(prompt, model)
+def get_secret(self, name: str) -> Optional[str]:
+    # ALWAYS check env first - preserves existing behavior
+    if value := os.environ.get(name):
+        return value
+    # New sources are fallbacks only
+    # ...
 ```
 
 ---
 
-### R6: Model Compatibility Issues
+### R6: GitHub API Rate Limits
 
-**Description:** Different models may have different function calling formats/behaviors.
+**Description:** Excessive API calls could hit GitHub rate limits.
 
-**Likelihood:** Medium - OpenRouter normalizes, but edge cases exist.
+**Likelihood:** Low - Secrets fetched once and cached.
 
-**Impact:** Low - Falls back gracefully.
+**Impact:** Low - Temporary inability to fetch, falls through.
 
 **Mitigation:**
-1. Start with known-good models (GPT-4+, Claude 3+, Gemini Pro)
-2. Maintain allowlist of tested models
-3. Fallback to basic execution on any tool-related errors
-4. Log model-specific issues for improvement
+1. Cache all fetched secrets
+2. Minimize API calls (one per secret, once per session)
+3. Handle rate limit errors gracefully
+4. Document caching behavior
 
 ---
 
@@ -169,17 +173,18 @@ def execute(self, prompt: str, model: str = None) -> ExecutionResult:
 
 | Capability | Status | Reason |
 |------------|--------|--------|
-| Shell command execution | **Excluded** | High risk, not needed for context |
-| File writing | **Excluded** | Out of scope, security risk |
-| Network requests | **Excluded** | Out of scope, security risk |
-| Environment variables | **Excluded** | Could leak secrets |
+| Disk persistence of secrets | **Excluded** | High exposure risk |
+| Logging secret values | **Excluded** | Log exposure risk |
+| Caching SOPS_AGE_KEY | **Excluded** | Key should only come from env |
+| Fetching from arbitrary URLs | **Excluded** | Only configured GitHub repo |
 
 ### Defense in Depth
 
-1. **Path sandboxing**: All file operations restricted to working_dir
-2. **Read-only**: No write operations exposed
-3. **No execution**: No shell/command capabilities
-4. **Graceful failures**: Errors return messages, never crash
+1. **Priority ordering**: Env vars first (fastest, most secure)
+2. **Memory-only cache**: No disk persistence
+3. **Redaction**: All secret values redacted in logs/errors
+4. **Validation**: Repo format and access validated
+5. **Graceful degradation**: Each source fails independently
 
 ---
 
@@ -187,8 +192,8 @@ def execute(self, prompt: str, model: str = None) -> ExecutionResult:
 
 If issues discovered post-deployment:
 
-1. **Immediate**: Set `ORCHESTRATOR_DISABLE_TOOLS=1` env var to disable
-2. **Quick fix**: Pin to models known to work
+1. **Immediate**: Set secrets directly via env vars (bypass new system)
+2. **Quick fix**: Remove `secrets_repo` config to disable GitHub source
 3. **Full rollback**: Revert to previous version (git revert)
 
 ---
@@ -196,22 +201,22 @@ If issues discovered post-deployment:
 ## Monitoring & Observability
 
 Add logging for:
-- Each tool call (tool name, parameters, result size)
-- Total tool calls per execution
-- Execution time with vs without tools
-- Fallback triggers (why basic mode was used)
+- Which source each secret came from
+- SOPS/GitHub failures (not values, just status)
+- Cache hits vs fetches
+- Configuration diagnostics
 
 ---
 
 ## Conclusion
 
 The feature is **LOW to MEDIUM risk** overall:
+- Env var priority preserves existing behavior
+- Memory-only caching prevents persistence exposure
+- Graceful fallthrough on any source failure
 - Read-only operations limit blast radius
-- Path sandboxing prevents traversal
-- Graceful fallbacks preserve existing behavior
-- Soft limits future-proof without blocking valid use cases
 
 **Recommendation:** Proceed with implementation, with emphasis on:
-1. Path validation (R1)
-2. Good logging for cost visibility (R4)
-3. Comprehensive testing of both code paths (R5)
+1. Never logging secret values (R1)
+2. Clear error messages for configuration (R2)
+3. Preserving env var priority (R5)

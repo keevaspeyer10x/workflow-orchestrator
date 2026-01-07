@@ -293,9 +293,29 @@ The orchestrator automatically detects your environment and adjusts:
 
 ## Secrets Management
 
-### Using SOPS (Recommended for Teams)
+The orchestrator supports multiple secret sources, checked in priority order:
 
-The orchestrator supports SOPS-encrypted secrets:
+1. **Environment Variables** (highest priority)
+2. **SOPS-encrypted files** (for teams)
+3. **GitHub Private Repos** (for Claude Code Web)
+
+### Check Available Sources
+
+```bash
+orchestrator secrets sources
+```
+
+### Option 1: Environment Variables (Simplest)
+
+```bash
+# Set in your shell profile
+export ANTHROPIC_API_KEY="sk-ant-xxxxx"
+export OPENROUTER_API_KEY="sk-or-xxxxx"
+```
+
+### Option 2: SOPS (Recommended for Teams)
+
+SOPS provides encrypted secrets that can be safely committed to git:
 
 ```bash
 # Install SOPS and age
@@ -306,15 +326,34 @@ age-keygen -o ~/.sops-key.txt
 
 # Create encrypted secrets
 sops --encrypt --age $(cat ~/.sops-key.txt | grep "public key" | cut -d: -f2 | tr -d ' ') \
-    secrets.yaml > secrets.enc.yaml
+    secrets.yaml > .manus/secrets.enc.yaml
+
+# Set the key for decryption
+export SOPS_AGE_KEY="AGE-SECRET-KEY-..."
 ```
 
-### Using Environment Variables
+### Option 3: GitHub Private Repo (for Claude Code Web)
+
+When using Claude Code Web, you can store secrets in a private GitHub repo:
 
 ```bash
-# Set in your shell profile
-export ANTHROPIC_API_KEY="sk-ant-xxxxx"
-export OPENROUTER_API_KEY="sk-or-xxxxx"
+# Configure your secrets repo (one time)
+orchestrator config set secrets_repo YOUR_USERNAME/secrets
+
+# Create your secrets repo on GitHub (private)
+# Add files named exactly as the secret: OPENROUTER_API_KEY, OPENAI_API_KEY, etc.
+```
+
+In Claude Code Web, the orchestrator will automatically fetch secrets from your private repo.
+
+### Testing Secret Access
+
+```bash
+# Test if a secret is accessible
+orchestrator secrets test OPENROUTER_API_KEY
+
+# See which source provides a secret
+orchestrator secrets source OPENROUTER_API_KEY
 ```
 
 ---

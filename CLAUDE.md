@@ -76,6 +76,10 @@ orchestrator finish
 | `orchestrator resume` | Resume from checkpoint |
 | `orchestrator setup` | Enable automatic updates for this repo |
 | `orchestrator setup --remove` | Disable automatic updates |
+| `orchestrator config set KEY VALUE` | Set configuration value |
+| `orchestrator config get KEY` | Get configuration value |
+| `orchestrator secrets sources` | Show available secret sources |
+| `orchestrator secrets test NAME` | Test if a secret is accessible |
 
 ## Workflow Rules
 
@@ -137,6 +141,27 @@ Resume from a checkpoint:
 orchestrator checkpoints  # List available
 orchestrator resume --from cp_xxx
 ```
+
+## Secrets Management
+
+The orchestrator supports multiple secret sources (checked in priority order):
+
+1. **Environment Variables** (highest priority)
+2. **SOPS-encrypted files** (for teams)
+3. **GitHub Private Repos** (for Claude Code Web)
+
+```bash
+# Check available sources
+orchestrator secrets sources
+
+# Configure a private GitHub repo for secrets (for Claude Code Web)
+orchestrator config set secrets_repo YOUR_USERNAME/secrets
+
+# Test secret access
+orchestrator secrets test OPENROUTER_API_KEY
+```
+
+For Claude Code Web: Store secrets as files in a private GitHub repo (file names = secret names).
 
 ## Important Notes
 

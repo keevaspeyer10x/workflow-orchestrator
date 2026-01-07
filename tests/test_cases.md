@@ -1,294 +1,273 @@
-# Test Cases: OpenRouter Function Calling for Interactive Repo Context
+# Test Cases: Multi-Source Secrets Manager
 
 ## Unit Tests
 
-### Tool Definition Tests
+### SecretsManager Core Tests
 
-#### TC-TOOL-001: Read File Tool Schema
-**Component:** `src/providers/tools.py`
-**Description:** READ_FILE_TOOL has correct OpenAI function schema
-**Expected:** Schema has name, description, parameters with required "path"
+#### TC-SEC-001: Get Secret from Environment
+**Component:** `src/secrets.py`
+**Description:** Returns secret from environment variable
+**Setup:** Set `TEST_SECRET=value` in environment
+**Input:** `secrets.get_secret("TEST_SECRET")`
+**Expected:** Returns "value"
 **Priority:** High
 
-#### TC-TOOL-002: List Files Tool Schema
-**Component:** `src/providers/tools.py`
-**Description:** LIST_FILES_TOOL has correct schema
-**Expected:** Schema has "pattern" parameter for glob matching
+#### TC-SEC-002: Environment Priority Over SOPS
+**Component:** `src/secrets.py`
+**Description:** Env var takes precedence over SOPS
+**Setup:** Set env var AND have same secret in SOPS
+**Input:** `secrets.get_secret("DUAL_SECRET")`
+**Expected:** Returns env var value, not SOPS value
 **Priority:** High
 
-#### TC-TOOL-003: Search Code Tool Schema
-**Component:** `src/providers/tools.py`
-**Description:** SEARCH_CODE_TOOL has correct schema
-**Expected:** Schema has "pattern" (required) and "path" (optional) parameters
+#### TC-SEC-003: Environment Priority Over GitHub
+**Component:** `src/secrets.py`
+**Description:** Env var takes precedence over GitHub
+**Setup:** Set env var AND have same secret in GitHub repo
+**Input:** `secrets.get_secret("DUAL_SECRET")`
+**Expected:** Returns env var value
 **Priority:** High
 
-### Tool Execution Tests
-
-#### TC-EXEC-001: Read File - Basic
-**Component:** `src/providers/tools.py`
-**Description:** Read a normal file successfully
-**Setup:** Create temp file with known content
-**Input:** `execute_read_file("test.txt", working_dir)`
-**Expected:** Returns {"content": "<file content>", "size": <bytes>}
+#### TC-SEC-004: Secret Not Found Returns None
+**Component:** `src/secrets.py`
+**Description:** Returns None when secret not in any source
+**Input:** `secrets.get_secret("NONEXISTENT_SECRET")`
+**Expected:** Returns None
 **Priority:** High
 
-#### TC-EXEC-002: Read File - Path Traversal Blocked
-**Component:** `src/providers/tools.py`
-**Description:** Blocks attempts to read outside working_dir
-**Input:** `execute_read_file("../../etc/passwd", working_dir)`
-**Expected:** Returns {"error": "Path outside working directory"}
-**Priority:** High
-
-#### TC-EXEC-003: Read File - Nonexistent
-**Component:** `src/providers/tools.py`
-**Description:** Handles missing file gracefully
-**Input:** `execute_read_file("nonexistent.txt", working_dir)`
-**Expected:** Returns {"error": "File not found", "path": "nonexistent.txt"}
-**Priority:** High
-
-#### TC-EXEC-004: Read File - Large File Warning
-**Component:** `src/providers/tools.py`
-**Description:** Logs warning for files >2MB
-**Setup:** Create 3MB temp file
-**Input:** `execute_read_file("large.bin", working_dir)`
-**Expected:** Returns content, logs warning about large file
+#### TC-SEC-005: Caching Works
+**Component:** `src/secrets.py`
+**Description:** Second call uses cached value
+**Setup:** Mock SOPS to return value once
+**Input:** Call `get_secret` twice
+**Expected:** SOPS called only once, both return same value
 **Priority:** Medium
 
-#### TC-EXEC-005: Read File - Very Large File Truncated
-**Component:** `src/providers/tools.py`
-**Description:** Truncates files >50MB with message
-**Setup:** Create 60MB temp file (or mock)
-**Input:** `execute_read_file("huge.bin", working_dir)`
-**Expected:** Returns {"content": "(file too large...)", "truncated": true}
+#### TC-SEC-006: Cache Only In Memory
+**Component:** `src/secrets.py`
+**Description:** Cache not persisted to disk
+**Setup:** Get a secret, check filesystem
+**Expected:** No cache files created anywhere
+**Priority:** High
+
+### SOPS Integration Tests
+
+#### TC-SOPS-001: Get Secret from SOPS
+**Component:** `src/secrets.py`
+**Description:** Decrypts and returns secret from SOPS file
+**Setup:** Create encrypted SOPS file, set SOPS_AGE_KEY
+**Input:** `secrets.get_secret("OPENROUTER_API_KEY")`
+**Expected:** Returns decrypted value
+**Priority:** High
+
+#### TC-SOPS-002: SOPS Not Installed Falls Through
+**Component:** `src/secrets.py`
+**Description:** Gracefully skips SOPS when not installed
+**Setup:** Mock shutil.which("sops") to return None
+**Input:** `secrets.get_secret("SECRET")`
+**Expected:** Continues to GitHub source, no error
+**Priority:** High
+
+#### TC-SOPS-003: SOPS_AGE_KEY Not Set Falls Through
+**Component:** `src/secrets.py`
+**Description:** Skips SOPS when key not set
+**Setup:** Ensure SOPS_AGE_KEY not in env
+**Input:** `secrets.get_secret("SECRET")`
+**Expected:** Continues to GitHub source, no error
+**Priority:** High
+
+#### TC-SOPS-004: SOPS File Not Found Falls Through
+**Component:** `src/secrets.py`
+**Description:** Skips SOPS when file doesn't exist
+**Setup:** Configure nonexistent sops_file path
+**Input:** `secrets.get_secret("SECRET")`
+**Expected:** Continues to GitHub source, no error
 **Priority:** Medium
 
-#### TC-EXEC-006: Read File - Binary Detection
-**Component:** `src/providers/tools.py`
-**Description:** Handles binary files appropriately
-**Setup:** Create file with binary content
-**Input:** `execute_read_file("image.png", working_dir)`
-**Expected:** Returns {"error": "Binary file"} or base64 encoded
+#### TC-SOPS-005: SOPS Decryption Error Falls Through
+**Component:** `src/secrets.py`
+**Description:** Handles decryption errors gracefully
+**Setup:** Corrupt SOPS file or wrong key
+**Input:** `secrets.get_secret("SECRET")`
+**Expected:** Logs error, continues to GitHub source
 **Priority:** Medium
 
-#### TC-EXEC-007: List Files - Basic Glob
-**Component:** `src/providers/tools.py`
-**Description:** Lists files matching glob pattern
-**Setup:** Create files: a.py, b.py, c.txt
-**Input:** `execute_list_files("*.py", working_dir)`
-**Expected:** Returns {"files": ["a.py", "b.py"]}
+### GitHub Repo Integration Tests
+
+#### TC-GH-001: Get Secret from GitHub Repo
+**Component:** `src/secrets.py`
+**Description:** Fetches secret from private GitHub repo
+**Setup:** Configure secrets_repo, mock gh api response
+**Input:** `secrets.get_secret("OPENROUTER_API_KEY")`
+**Expected:** Returns file content from repo
 **Priority:** High
 
-#### TC-EXEC-008: List Files - Recursive Glob
-**Component:** `src/providers/tools.py`
-**Description:** Supports ** for recursive matching
-**Setup:** Create nested directory with files
-**Input:** `execute_list_files("**/*.py", working_dir)`
-**Expected:** Returns all .py files in all subdirectories
+#### TC-GH-002: GitHub Repo Not Configured Falls Through
+**Component:** `src/secrets.py`
+**Description:** Skips GitHub when not configured
+**Setup:** No secrets_repo in config
+**Input:** `secrets.get_secret("SECRET")`
+**Expected:** Returns None (no more sources)
 **Priority:** High
 
-#### TC-EXEC-009: List Files - No Matches
-**Component:** `src/providers/tools.py`
-**Description:** Returns empty list when no matches
-**Input:** `execute_list_files("*.xyz", working_dir)`
-**Expected:** Returns {"files": []}
+#### TC-GH-003: GitHub Secret Not Found Falls Through
+**Component:** `src/secrets.py`
+**Description:** Handles 404 from GitHub gracefully
+**Setup:** Configure repo, mock 404 response
+**Input:** `secrets.get_secret("NONEXISTENT")`
+**Expected:** Returns None
+**Priority:** High
+
+#### TC-GH-004: GitHub Auth Error Falls Through
+**Component:** `src/secrets.py`
+**Description:** Handles 401/403 gracefully
+**Setup:** Mock auth error from gh api
+**Input:** `secrets.get_secret("SECRET")`
+**Expected:** Logs warning, returns None
 **Priority:** Medium
 
-#### TC-EXEC-010: Search Code - Basic Pattern
-**Component:** `src/providers/tools.py`
-**Description:** Finds lines matching regex pattern
-**Setup:** Create file with "def foo():" and "def bar():"
-**Input:** `execute_search_code("def \\w+", working_dir)`
-**Expected:** Returns matches with file paths and line numbers
-**Priority:** High
-
-#### TC-EXEC-011: Search Code - Path Filter
-**Component:** `src/providers/tools.py`
-**Description:** Limits search to specific path
-**Setup:** Create test.py and other.py with same content
-**Input:** `execute_search_code("pattern", working_dir, path="test.py")`
-**Expected:** Only returns matches from test.py
-**Priority:** High
-
-#### TC-EXEC-012: Search Code - No Matches
-**Component:** `src/providers/tools.py`
-**Description:** Returns empty when no matches
-**Input:** `execute_search_code("nonexistent_xyz_123", working_dir)`
-**Expected:** Returns {"matches": []}
+#### TC-GH-005: GitHub Rate Limit Handled
+**Component:** `src/secrets.py`
+**Description:** Handles 429 rate limit
+**Setup:** Mock 429 response
+**Input:** `secrets.get_secret("SECRET")`
+**Expected:** Logs warning, returns None
 **Priority:** Medium
 
-### Model Detection Tests
-
-#### TC-MODEL-001: GPT-4 Supports Function Calling
-**Component:** `src/providers/openrouter.py`
-**Description:** Correctly identifies GPT-4+ as function-calling capable
-**Input:** `_supports_function_calling("openai/gpt-4")`
-**Expected:** Returns True
-**Priority:** High
-
-#### TC-MODEL-002: Claude Supports Function Calling
-**Component:** `src/providers/openrouter.py`
-**Description:** Correctly identifies Claude 3+ as function-calling capable
-**Input:** `_supports_function_calling("anthropic/claude-3-opus")`
-**Expected:** Returns True
-**Priority:** High
-
-#### TC-MODEL-003: Gemini Supports Function Calling
-**Component:** `src/providers/openrouter.py`
-**Description:** Correctly identifies Gemini Pro as function-calling capable
-**Input:** `_supports_function_calling("google/gemini-pro")`
-**Expected:** Returns True
-**Priority:** High
-
-#### TC-MODEL-004: Unknown Model Defaults Safe
-**Component:** `src/providers/openrouter.py`
-**Description:** Unknown models fall back gracefully
-**Input:** `_supports_function_calling("some/unknown-model")`
-**Expected:** Returns False (conservative default)
+#### TC-GH-006: Invalid Repo Format Rejected
+**Component:** `src/secrets.py`
+**Description:** Validates repo format (owner/name)
+**Setup:** Configure secrets_repo="invalid"
+**Input:** `secrets.get_secret("SECRET")`
+**Expected:** Logs warning, skips GitHub source
 **Priority:** Medium
 
-### Execute With Tools Tests
+### CLI Config Command Tests
 
-#### TC-EWT-001: Basic Tool Loop
-**Component:** `src/providers/openrouter.py`
-**Description:** Executes tools and returns final response
-**Setup:** Mock API to return tool call then final response
-**Input:** `execute_with_tools("Read file.txt and summarize", model)`
-**Expected:** Tool executed, final response returned
+#### TC-CLI-001: Config Set Command
+**Component:** `src/cli.py`
+**Description:** Sets config value in user config
+**Input:** `orchestrator config set secrets_repo owner/repo`
+**Expected:** Value saved to ~/.config/orchestrator/config.yaml
 **Priority:** High
 
-#### TC-EWT-002: Multiple Tool Calls
-**Component:** `src/providers/openrouter.py`
-**Description:** Handles multiple sequential tool calls
-**Setup:** Mock API to return 3 tool calls then final response
-**Input:** `execute_with_tools("complex task", model)`
-**Expected:** All 3 tools executed, final response returned
+#### TC-CLI-002: Config Get Command
+**Component:** `src/cli.py`
+**Description:** Gets config value
+**Setup:** Set secrets_repo in config
+**Input:** `orchestrator config get secrets_repo`
+**Expected:** Prints "owner/repo"
 **Priority:** High
 
-#### TC-EWT-003: Tool Call Warning at 50
-**Component:** `src/providers/openrouter.py`
-**Description:** Logs warning after 50 tool calls
-**Setup:** Mock API to return 51 tool calls
-**Input:** `execute_with_tools("intensive task", model)`
-**Expected:** Warning logged, execution continues
+#### TC-CLI-003: Config List Command
+**Component:** `src/cli.py`
+**Description:** Lists all config values
+**Input:** `orchestrator config list`
+**Expected:** Shows all configured values
 **Priority:** Medium
 
-#### TC-EWT-004: Hard Limit at 200 Calls
-**Component:** `src/providers/openrouter.py`
-**Description:** Stops execution at 200 tool calls
-**Setup:** Mock API to return infinite tool calls
-**Input:** `execute_with_tools("runaway task", model)`
-**Expected:** Returns error after 200 calls
-**Priority:** High
-
-#### TC-EWT-005: Tool Error Handling
-**Component:** `src/providers/openrouter.py`
-**Description:** Handles tool execution errors gracefully
-**Setup:** Mock tool to raise exception
-**Input:** `execute_with_tools("task with error", model)`
-**Expected:** Error returned to model, execution continues
-**Priority:** High
-
-### Auto-Detection Tests
-
-#### TC-AUTO-001: Execute Uses Tools When Supported
-**Component:** `src/providers/openrouter.py`
-**Description:** execute() auto-detects and uses tools
-**Setup:** Mock GPT-4 model
-**Input:** `execute("task", "openai/gpt-4")`
-**Expected:** Internally calls execute_with_tools()
-**Priority:** High
-
-#### TC-AUTO-002: Execute Falls Back When Not Supported
-**Component:** `src/providers/openrouter.py`
-**Description:** execute() falls back for non-tool models
-**Setup:** Mock basic model
-**Input:** `execute("task", "basic/model")`
-**Expected:** Uses basic execution path
-**Priority:** High
-
-#### TC-AUTO-003: Execute Falls Back on Tool Error
-**Component:** `src/providers/openrouter.py`
-**Description:** Falls back if tool setup fails
-**Setup:** Mock tool initialization to fail
-**Input:** `execute("task", "openai/gpt-4")`
-**Expected:** Graceful fallback to basic execution
+#### TC-CLI-004: Config File Created on First Set
+**Component:** `src/cli.py`
+**Description:** Creates config dir and file if needed
+**Setup:** Remove ~/.config/orchestrator/
+**Input:** `orchestrator config set secrets_repo owner/repo`
+**Expected:** Directory and file created
 **Priority:** Medium
+
+### CLI Secrets Command Tests
+
+#### TC-CLI-005: Secrets Test Command - Found
+**Component:** `src/cli.py`
+**Description:** Tests if secret is accessible
+**Setup:** Set TEST_SECRET in env
+**Input:** `orchestrator secrets test TEST_SECRET`
+**Expected:** Prints success message
+**Priority:** High
+
+#### TC-CLI-006: Secrets Test Command - Not Found
+**Component:** `src/cli.py`
+**Description:** Reports when secret not found
+**Input:** `orchestrator secrets test NONEXISTENT`
+**Expected:** Prints not found message
+**Priority:** High
+
+#### TC-CLI-007: Secrets Source Command
+**Component:** `src/cli.py`
+**Description:** Shows which source provides secret
+**Setup:** Set TEST_SECRET in env
+**Input:** `orchestrator secrets source TEST_SECRET`
+**Expected:** Prints "env"
+**Priority:** Medium
+
+#### TC-CLI-008: Secrets Sources Command
+**Component:** `src/cli.py`
+**Description:** Lists available sources and their status
+**Input:** `orchestrator secrets sources`
+**Expected:** Shows env (always), SOPS (if installed), GitHub (if configured)
+**Priority:** Medium
+
+### Security Tests
+
+#### TC-SECURITY-001: Secret Values Never Logged
+**Component:** `src/secrets.py`
+**Description:** No secret values appear in logs
+**Setup:** Enable debug logging, fetch secret
+**Expected:** Only secret names logged, never values
+**Priority:** High
+
+#### TC-SECURITY-002: Secret Values Redacted in Errors
+**Component:** `src/secrets.py`
+**Description:** Errors don't expose secret values
+**Setup:** Trigger error with secret in path
+**Expected:** [REDACTED] in error message
+**Priority:** High
+
+#### TC-SECURITY-003: SOPS_AGE_KEY Not Cached
+**Component:** `src/secrets.py`
+**Description:** AGE key only read from env, not cached
+**Expected:** No AGE key stored in SecretsManager
+**Priority:** High
 
 ## Integration Tests
 
-### TC-INT-001: Real API - Read File
-**Description:** End-to-end test with real OpenRouter API
-**Setup:** Set OPENROUTER_API_KEY, create test file
-**Input:** Execute task that requires reading a file
-**Expected:** Model reads file via tool, provides correct response
+### TC-INT-001: Full Priority Chain
+**Description:** Verify env → SOPS → GitHub priority
+**Setup:** Same secret in all three sources
+**Expected:** Returns env value
 **Priority:** High
-**Note:** Mark as `@pytest.mark.integration`
 
-### TC-INT-002: Real API - Search and Read
-**Description:** Model searches then reads files
-**Setup:** Create codebase with known patterns
-**Input:** "Find all functions that return int and explain them"
-**Expected:** Model uses search_code, then read_file, provides summary
+### TC-INT-002: Provider Uses SecretsManager
+**Description:** OpenRouterProvider gets API key from SecretsManager
+**Setup:** Configure secrets_repo with OPENROUTER_API_KEY
+**Expected:** Provider works with fetched key
+**Priority:** High
+
+### TC-INT-003: Review System Uses SecretsManager
+**Description:** Review API executor gets key from SecretsManager
+**Setup:** Configure secrets
+**Expected:** Reviews work with fetched keys
 **Priority:** Medium
-**Note:** Mark as `@pytest.mark.integration`
-
-### TC-INT-003: Fallback Path Works
-**Description:** Basic model works without tools
-**Setup:** Use model known to not support tools
-**Input:** Execute simple task
-**Expected:** Completes using context injection fallback
-**Priority:** High
 
 ## Backwards Compatibility Tests
 
-### TC-BC-001: Existing Execute Signature Unchanged
-**Component:** `src/providers/openrouter.py`
-**Description:** execute(prompt, model) still works
-**Input:** `provider.execute("task", "model")`
-**Expected:** No signature change errors
+### TC-BC-001: Existing Env Var Usage Unchanged
+**Description:** Direct OPENROUTER_API_KEY env var still works
+**Setup:** Set OPENROUTER_API_KEY directly
+**Input:** Use OpenRouterProvider
+**Expected:** Works exactly as before
 **Priority:** High
 
-### TC-BC-002: ExecutionResult Format Unchanged
-**Component:** `src/providers/base.py`
-**Description:** ExecutionResult has same fields
-**Input:** Check result from execute()
-**Expected:** Has success, output, error, model_used, etc.
+### TC-BC-002: Existing SOPS Scripts Work
+**Description:** .manus/decrypt-secrets.sh still works
+**Setup:** Existing SOPS infrastructure
+**Input:** Run existing decrypt script
+**Expected:** Script works unchanged
 **Priority:** High
-
-### TC-BC-003: Provider Interface Unchanged
-**Component:** `src/providers/base.py`
-**Description:** AgentProvider interface not broken
-**Input:** Check ManualProvider still works
-**Expected:** No changes required to other providers
-**Priority:** High
-
-## Error Handling Tests
-
-### TC-ERR-001: API Timeout
-**Component:** `src/providers/openrouter.py`
-**Description:** Handles API timeout during tool loop
-**Setup:** Mock API to timeout
-**Expected:** Returns error, no crash
-**Priority:** Medium
-
-### TC-ERR-002: Invalid Tool Call Format
-**Component:** `src/providers/openrouter.py`
-**Description:** Handles malformed tool call from API
-**Setup:** Mock API to return invalid tool call structure
-**Expected:** Logs error, continues or falls back gracefully
-**Priority:** Medium
-
-### TC-ERR-003: Rate Limiting
-**Component:** `src/providers/openrouter.py`
-**Description:** Handles 429 during tool loop
-**Setup:** Mock API to return 429
-**Expected:** Retries with backoff or returns error
-**Priority:** Medium
 
 ## Coverage Requirements
 
-- Minimum 90% coverage for `src/providers/tools.py`
-- Minimum 85% coverage for new code in `src/providers/openrouter.py`
-- All path traversal cases must be tested
-- All error paths must have tests
+- Minimum 90% coverage for `src/secrets.py`
+- All source fallthrough paths tested
+- All error paths have tests
+- No secret values in test output
 - Integration tests marked with `@pytest.mark.integration`
