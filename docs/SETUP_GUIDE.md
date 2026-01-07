@@ -178,6 +178,14 @@ This creates a hook that:
 - Works in both Claude Code CLI and Claude Code Web
 - Always gets the latest version from GitHub
 
+**Copy secrets too:** If you have encrypted secrets set up in another repo, use:
+
+```bash
+orchestrator setup --copy-secrets
+```
+
+This will automatically copy your `.manus/secrets.enc` file to the new repo.
+
 **Your files are safe:** Auto-updates only update the orchestrator code. Your repo-specific files (`workflow.yaml`, workflow state, logs) are never modified.
 
 To disable: `orchestrator setup --remove`
