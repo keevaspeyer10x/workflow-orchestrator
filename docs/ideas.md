@@ -18,6 +18,8 @@ learnings need to have recommendations which are then implemented.
 
 Do we need items like a North Start or the Manus Custom Instructions
 
+Add a final stage - document - eg. not sure what it looks like, but update PRD, spec document, README files, set-up instructions etc. 
+
 
 Don't forget
 - In my installation instructions recommend running with no checking

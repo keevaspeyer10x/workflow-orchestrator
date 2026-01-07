@@ -237,29 +237,84 @@ class WorkflowEngine:
     # ========================================================================
     # Workflow Lifecycle
     # ========================================================================
-    
-    def start_workflow(self, yaml_path: str, task_description: str, project: Optional[str] = None, constraints: Optional[list[str]] = None) -> WorkflowState:
+
+    def archive_existing_docs(self, task_slug: str) -> list[str]:
+        """
+        Archive existing workflow documents before starting a new workflow.
+
+        Moves docs/plan.md, docs/risk_analysis.md, and tests/test_cases.md
+        to docs/archive/ with dated filenames.
+
+        Args:
+            task_slug: Slugified task description for filename
+
+        Returns:
+            List of archived file paths
+        """
+        from .utils import slugify
+
+        docs_to_archive = [
+            ("docs/plan.md", "plan"),
+            ("docs/risk_analysis.md", "risk"),
+            ("tests/test_cases.md", "test_cases"),
+        ]
+        archive_dir = self.working_dir / "docs" / "archive"
+
+        archived = []
+        date_str = datetime.now().strftime("%Y-%m-%d")
+
+        for doc_path, suffix in docs_to_archive:
+            src = self.working_dir / doc_path
+            if src.exists():
+                # Ensure archive directory exists
+                archive_dir.mkdir(parents=True, exist_ok=True)
+
+                # Generate unique filename
+                dst = archive_dir / f"{date_str}_{task_slug}_{suffix}.md"
+                counter = 1
+                while dst.exists():
+                    dst = archive_dir / f"{date_str}_{task_slug}_{suffix}_{counter}.md"
+                    counter += 1
+
+                # Move file to archive
+                src.rename(dst)
+                archived.append(str(dst))
+                logger.info(f"Archived {doc_path} to {dst}")
+
+        return archived
+
+    def start_workflow(self, yaml_path: str, task_description: str, project: Optional[str] = None, constraints: Optional[list[str]] = None, no_archive: bool = False) -> WorkflowState:
         """Start a new workflow instance.
-        
+
         Args:
             yaml_path: Path to the workflow YAML definition
             task_description: Description of the task
             project: Optional project name
             constraints: Optional list of task-specific constraints (Feature 4)
+            no_archive: If True, skip archiving existing workflow documents (WF-004)
         """
         # Load the workflow definition
         yaml_path_resolved = Path(yaml_path).resolve()
         self.load_workflow_def(str(yaml_path_resolved))
-        
+
         # Validate workflow has at least one phase
         if not self.workflow_def.phases:
             raise ValueError("Workflow definition must have at least one phase")
-        
+
         # Check if there's already an active workflow
         existing = self.load_state()
         if existing and existing.status == WorkflowStatus.ACTIVE:
             raise ValueError(f"Active workflow already exists: {existing.workflow_id}. Complete or abandon it first.")
-        
+
+        # Archive existing workflow documents (WF-004)
+        archived_files = []
+        if not no_archive:
+            from .utils import slugify
+            task_slug = slugify(task_description, max_length=30)
+            archived_files = self.archive_existing_docs(task_slug)
+            if archived_files:
+                logger.info(f"Archived {len(archived_files)} workflow document(s)")
+
         # Create new state
         workflow_id = f"wf_{uuid.uuid4().hex[:8]}"
         first_phase = self.workflow_def.phases[0]
