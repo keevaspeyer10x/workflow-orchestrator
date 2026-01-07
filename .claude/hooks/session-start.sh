@@ -43,6 +43,12 @@ if [ -f "$SECRETS_FILE" ]; then
                 fi
             done <<< "$SECRETS_YAML"
             echo "Secrets loaded successfully"
+
+            # Auto-login to Codex CLI if OpenAI key is available
+            if command -v codex &> /dev/null && [ -n "$OPENAI_API_KEY" ]; then
+                echo "$OPENAI_API_KEY" | codex login --with-api-key 2>/dev/null && \
+                    echo "Codex CLI logged in" || true
+            fi
         fi
     else
         echo "Note: Encrypted secrets found but SECRETS_PASSWORD not set"
