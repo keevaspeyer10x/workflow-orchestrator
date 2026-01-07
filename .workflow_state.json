@@ -1,26 +1,26 @@
 {
-  "workflow_id": "wf_6c1adfb1",
+  "workflow_id": "wf_3c236a6b",
   "workflow_type": "General Development Workflow",
   "workflow_version": "2.1",
-  "task_description": "Integrate Aider as invisible review provider for Gemini with full repo context",
+  "task_description": "Implement CORE-010 (Enhanced Skip Visibility) and CORE-011 (Workflow Completion Summary & Next Steps)",
   "project": null,
-  "status": "active",
-  "current_phase_id": "EXECUTE",
+  "status": "completed",
+  "current_phase_id": "LEARN",
   "phases": {
     "PLAN": {
       "id": "PLAN",
       "status": "completed",
-      "started_at": "2026-01-07T03:31:52.884847Z",
-      "completed_at": "2026-01-07T03:38:10.168475Z",
+      "started_at": "2026-01-07T04:06:39.986135Z",
+      "completed_at": "2026-01-07T04:11:25.618066Z",
       "items": {
         "check_roadmap": {
           "id": "check_roadmap",
           "status": "completed",
           "started_at": null,
-          "completed_at": "2026-01-07T03:32:32.139868Z",
+          "completed_at": "2026-01-07T04:07:06.328063Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "Reviewed ROADMAP.md - CORE-016 Multi-Model Review Routing already completed. This task adds Aider as additional review provider alongside existing OpenRouter implementation.",
+          "notes": "Reviewed ROADMAP.md - CORE-010 (Enhanced Skip Visibility) and CORE-011 (Workflow Completion Summary) are both High priority, Low complexity. Implementation notes are detailed with code examples for engine methods and CLI updates.",
           "verification_result": null,
           "retry_count": 0
         },
@@ -29,8 +29,8 @@
           "status": "skipped",
           "started_at": null,
           "completed_at": null,
-          "skipped_at": "2026-01-07T03:32:41.654053Z",
-          "skip_reason": "Requirements clear from discussion: Add Aider as invisible review provider for Gemini with full repo context. No open questions.",
+          "skipped_at": "2026-01-07T04:07:15.804940Z",
+          "skip_reason": "ROADMAP.md provides detailed implementation specs with code examples for both features. No ambiguity in requirements.",
           "notes": null,
           "verification_result": null,
           "retry_count": 0
@@ -39,13 +39,13 @@
           "id": "initial_plan",
           "status": "completed",
           "started_at": null,
-          "completed_at": "2026-01-07T03:33:58.460164Z",
+          "completed_at": "2026-01-07T04:08:24.226414Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "Created implementation plan in docs/plan.md covering: AiderExecutor class, router integration, setup checks, and user experience. Key approach: Use aider --message for non-interactive reviews with full repo context.",
+          "notes": "Created docs/plan.md with implementation steps for engine methods, CLI updates, and test cases",
           "verification_result": {
             "type": "file_exists",
-            "timestamp": "2026-01-07T03:33:58.459140+00:00",
+            "timestamp": "2026-01-07T04:08:24.225148+00:00",
             "path": "/home/user/workflow-orchestrator/docs/plan.md",
             "exists": true
           },
@@ -55,29 +55,29 @@
           "id": "risk_analysis",
           "status": "completed",
           "started_at": null,
-          "completed_at": "2026-01-07T03:34:37.488373Z",
+          "completed_at": "2026-01-07T04:08:59.284054Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "Created risk analysis in docs/risk_analysis.md. Overall risk: LOW. Key mitigations: graceful fallback to OpenRouter API, timeout handling, --no-auto-commits and --no-git flags for safety.",
+          "notes": "Created docs/risk_analysis.md - Overall risk level: LOW. Changes are additive to CLI output with no breaking changes.",
           "verification_result": {
             "type": "file_exists",
-            "timestamp": "2026-01-07T03:34:37.487566+00:00",
+            "timestamp": "2026-01-07T04:08:59.283202+00:00",
             "path": "/home/user/workflow-orchestrator/docs/risk_analysis.md",
             "exists": true
           },
-          "retry_count": 0
+          "retry_count": 1
         },
         "define_test_cases": {
           "id": "define_test_cases",
           "status": "completed",
           "started_at": null,
-          "completed_at": "2026-01-07T03:35:12.009254Z",
+          "completed_at": "2026-01-07T04:09:44.005368Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "Created 10 test cases in tests/test_cases.md covering: AiderExecutor (success, timeout, not found, parsing), ReviewSetup (aider detection), ReviewRouter (routing, fallback, status), and end-to-end integration.",
+          "notes": "Created tests/test_cases.md with 21 test cases covering engine methods, CLI commands, and helper functions",
           "verification_result": {
             "type": "file_exists",
-            "timestamp": "2026-01-07T03:35:12.008321+00:00",
+            "timestamp": "2026-01-07T04:09:44.004179+00:00",
             "path": "/home/user/workflow-orchestrator/tests/test_cases.md",
             "exists": true
           },
@@ -87,13 +87,13 @@
           "id": "user_approval",
           "status": "completed",
           "started_at": null,
-          "completed_at": "2026-01-07T03:38:09.577729Z",
+          "completed_at": "2026-01-07T04:11:14.742200Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": null,
+          "notes": "User approved plan for CORE-010 and CORE-011 implementation",
           "verification_result": {
             "approved": true,
-            "approved_at": "2026-01-07T03:38:09.577742+00:00",
+            "approved_at": "2026-01-07T04:11:14.742212+00:00",
             "type": "manual_gate"
           },
           "retry_count": 0
@@ -102,18 +102,18 @@
     },
     "EXECUTE": {
       "id": "EXECUTE",
-      "status": "active",
-      "started_at": "2026-01-07T03:38:10.168908Z",
-      "completed_at": null,
+      "status": "completed",
+      "started_at": "2026-01-07T04:11:25.618689Z",
+      "completed_at": "2026-01-07T04:16:24.552907Z",
       "items": {
         "handoff_decision": {
           "id": "handoff_decision",
           "status": "completed",
           "started_at": null,
-          "completed_at": "2026-01-07T03:38:29.745664Z",
+          "completed_at": "2026-01-07T04:11:35.698554Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "Already executing in Claude Code - no handoff needed. Proceeding with direct implementation.",
+          "notes": "Implementing directly - already operating as Claude Code agent in this session",
           "verification_result": null,
           "retry_count": 0
         },
@@ -121,83 +121,99 @@
           "id": "write_tests",
           "status": "completed",
           "started_at": null,
-          "completed_at": "2026-01-07T03:39:21.927939Z",
+          "completed_at": "2026-01-07T04:13:27.734004Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "Created tests/test_review_aider.py with 9 tests covering AiderExecutor, ReviewSetup, and ReviewRouter. Tests fail as expected (RED phase) - aider_executor module doesn't exist yet.",
+          "notes": "Added 22 tests to tests/test_roadmap_features.py covering engine methods (get_skipped_items, get_all_skipped_items, get_item_definition, get_workflow_summary) and CLI helper (format_duration). Tests fail as expected - methods not implemented yet.",
           "verification_result": null,
           "retry_count": 0
         },
         "implement_code": {
           "id": "implement_code",
-          "status": "pending",
+          "status": "completed",
           "started_at": null,
-          "completed_at": null,
+          "completed_at": "2026-01-07T04:15:46.823466Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": null,
+          "notes": "Implemented 4 engine methods (get_skipped_items, get_all_skipped_items, get_item_definition, get_workflow_summary), format_duration helper, and updated cmd_skip, cmd_advance, cmd_finish for enhanced visibility",
           "verification_result": null,
           "retry_count": 0
         },
         "all_tests_pass": {
           "id": "all_tests_pass",
-          "status": "pending",
+          "status": "completed",
           "started_at": null,
-          "completed_at": null,
+          "completed_at": "2026-01-07T04:16:17.732277Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": null,
-          "verification_result": null,
+          "notes": "All 250 tests pass including 21 new tests for CORE-010 and CORE-011 features",
+          "verification_result": {
+            "type": "command",
+            "timestamp": "2026-01-07T04:16:12.132063+00:00",
+            "command": "python -m pytest tests/ -v --tb=short",
+            "command_args": [
+              "python",
+              "-m",
+              "pytest",
+              "tests/",
+              "-v",
+              "--tb=short"
+            ],
+            "original_command": "{{test_command}}",
+            "exit_code": 0,
+            "stdout": "============================= test session starts ==============================\nplatform linux -- Python 3.11.14, pytest-9.0.2, pluggy-1.6.0 -- /usr/local/bin/python\ncachedir: .pytest_cache\nrootdir: /home/user/workflow-orchestrator\nconfigfile: pyproject.toml\ncollecting ... collected 265 items\n\ntests/test_global_install.py::TestConfigDiscovery::test_find_local_workflow PASSED [  0%]\ntests/test_global_install.py::TestConfigDiscovery::test_fallback_to_bundled PASSED [  0%]\ntests/test_global_install.py::TestConfigDiscovery::test_get_bundled_workflow_path PASSED [  1%]\ntests/test_global_install.py::TestConfigDiscovery::test_get_default_workflow_content PASSED [  1%]\ntests/test_global_install.py::TestConfigDiscovery::test_is_using_bundled_workflow_true PASSED [  1%]\ntests/test_global_install.py::TestConfigDiscovery::test_is_using_bundled_workflow_false PASSED [  2%]\ntests/test_global_install.py::TestConfigDiscovery::test_find_workflow_path_default_cwd PASSED [  2%]\ntests/test_global_install",
+            "stderr": ""
+          },
           "retry_count": 0
         }
       }
     },
     "REVIEW": {
       "id": "REVIEW",
-      "status": "pending",
-      "started_at": null,
-      "completed_at": null,
+      "status": "completed",
+      "started_at": "2026-01-07T04:16:24.553248Z",
+      "completed_at": "2026-01-07T04:17:25.247513Z",
       "items": {
         "security_review": {
           "id": "security_review",
-          "status": "pending",
+          "status": "completed",
           "started_at": null,
-          "completed_at": null,
+          "completed_at": "2026-01-07T04:16:45.974607Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": null,
+          "notes": "Security review passed: No new user input handling - changes only add getter methods and output formatting. No file system operations beyond existing state access. No network operations. All user-provided data (skip reason, task description) already validated by existing CORE-008 validation.",
           "verification_result": null,
           "retry_count": 0
         },
         "architecture_review": {
           "id": "architecture_review",
-          "status": "pending",
+          "status": "completed",
           "started_at": null,
-          "completed_at": null,
+          "completed_at": "2026-01-07T04:16:55.127359Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": null,
+          "notes": "Architecture review passed: Methods added to WorkflowEngine follow existing patterns. New methods are pure getters with no side effects. format_duration helper is standalone function in cli.py consistent with other CLI helpers. Type hints added. Separation of concerns maintained - engine handles data, CLI handles presentation.",
           "verification_result": null,
           "retry_count": 0
         },
         "quality_review": {
           "id": "quality_review",
-          "status": "pending",
+          "status": "completed",
           "started_at": null,
-          "completed_at": null,
+          "completed_at": "2026-01-07T04:17:04.335242Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": null,
+          "notes": "Code quality review passed: Comprehensive docstrings on all new methods. Consistent formatting with existing code. 21 new tests with good coverage. Edge cases handled (None state, missing reasons, unknown phases). Clean separation of engine methods (CORE-010, CORE-011 sections).",
           "verification_result": null,
           "retry_count": 0
         },
         "refactoring_assessment": {
           "id": "refactoring_assessment",
-          "status": "pending",
+          "status": "skipped",
           "started_at": null,
           "completed_at": null,
-          "skipped_at": null,
-          "skip_reason": null,
+          "skipped_at": "2026-01-07T04:17:13.901923Z",
+          "skip_reason": "Implementation is clean and follows existing patterns. No refactoring needed - code is minimal and focused.",
           "notes": null,
           "verification_result": null,
           "retry_count": 0
@@ -206,137 +222,171 @@
     },
     "VERIFY": {
       "id": "VERIFY",
-      "status": "pending",
-      "started_at": null,
-      "completed_at": null,
+      "status": "completed",
+      "started_at": "2026-01-07T04:17:25.247904Z",
+      "completed_at": "2026-01-07T04:18:13.323050Z",
       "items": {
         "full_test_suite": {
           "id": "full_test_suite",
-          "status": "pending",
+          "status": "completed",
           "started_at": null,
-          "completed_at": null,
+          "completed_at": "2026-01-07T04:17:40.294281Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": null,
-          "verification_result": null,
+          "notes": "All 250 tests pass including 21 new tests for CORE-010/CORE-011. No regressions.",
+          "verification_result": {
+            "type": "command",
+            "timestamp": "2026-01-07T04:17:34.607783+00:00",
+            "command": "python -m pytest tests/ -v --tb=short",
+            "command_args": [
+              "python",
+              "-m",
+              "pytest",
+              "tests/",
+              "-v",
+              "--tb=short"
+            ],
+            "original_command": "{{test_command}}",
+            "exit_code": 0,
+            "stdout": "============================= test session starts ==============================\nplatform linux -- Python 3.11.14, pytest-9.0.2, pluggy-1.6.0 -- /usr/local/bin/python\ncachedir: .pytest_cache\nrootdir: /home/user/workflow-orchestrator\nconfigfile: pyproject.toml\ncollecting ... collected 265 items\n\ntests/test_global_install.py::TestConfigDiscovery::test_find_local_workflow PASSED [  0%]\ntests/test_global_install.py::TestConfigDiscovery::test_fallback_to_bundled PASSED [  0%]\ntests/test_global_install.py::TestConfigDiscovery::test_get_bundled_workflow_path PASSED [  1%]\ntests/test_global_install.py::TestConfigDiscovery::test_get_default_workflow_content PASSED [  1%]\ntests/test_global_install.py::TestConfigDiscovery::test_is_using_bundled_workflow_true PASSED [  1%]\ntests/test_global_install.py::TestConfigDiscovery::test_is_using_bundled_workflow_false PASSED [  2%]\ntests/test_global_install.py::TestConfigDiscovery::test_find_workflow_path_default_cwd PASSED [  2%]\ntests/test_global_install",
+            "stderr": ""
+          },
           "retry_count": 0
         },
         "visual_regression_test": {
           "id": "visual_regression_test",
-          "status": "pending",
+          "status": "skipped",
           "started_at": null,
           "completed_at": null,
-          "skipped_at": null,
-          "skip_reason": null,
+          "skipped_at": "2026-01-07T04:17:50.615641Z",
+          "skip_reason": "Not applicable - CLI tool with no visual UI components to test",
           "notes": null,
           "verification_result": null,
           "retry_count": 0
         },
         "manual_smoke_test": {
           "id": "manual_smoke_test",
-          "status": "pending",
+          "status": "completed",
           "started_at": null,
-          "completed_at": null,
+          "completed_at": "2026-01-07T04:18:05.671209Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": null,
-          "verification_result": null,
+          "notes": "Smoke test passed: Enhanced skip output verified in this workflow (shows separator, reason, implications). Advance command shows skipped items from completed phase. finish command will show completion summary.",
+          "verification_result": {
+            "approved": true,
+            "approved_at": "2026-01-07T04:18:05.671225+00:00",
+            "type": "manual_gate"
+          },
           "retry_count": 0
         }
       }
     },
     "LEARN": {
       "id": "LEARN",
-      "status": "pending",
-      "started_at": null,
+      "status": "active",
+      "started_at": "2026-01-07T04:18:13.323517Z",
       "completed_at": null,
       "items": {
         "root_cause_analysis": {
           "id": "root_cause_analysis",
-          "status": "pending",
+          "status": "completed",
           "started_at": null,
-          "completed_at": null,
+          "completed_at": "2026-01-07T04:18:40.323447Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": null,
+          "notes": "N/A - Feature implementation (CORE-010, CORE-011), not a bug fix. No root cause to analyze.",
           "verification_result": null,
           "retry_count": 0
         },
         "document_learnings": {
           "id": "document_learnings",
-          "status": "pending",
+          "status": "completed",
           "started_at": null,
-          "completed_at": null,
+          "completed_at": "2026-01-07T04:18:51.310619Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": null,
-          "verification_result": null,
+          "notes": "Learnings: 1) ROADMAP.md specs with code examples enable smooth implementation. 2) Test-first (RED-GREEN) caught edge cases early. 3) Engine getter methods should be pure with no side effects. 4) CLI output changes are low-risk when additive.",
+          "verification_result": {
+            "type": "file_exists",
+            "timestamp": "2026-01-07T04:18:51.309922+00:00",
+            "path": "/home/user/workflow-orchestrator/LEARNINGS.md",
+            "exists": true
+          },
           "retry_count": 0
         },
         "propose_actions": {
           "id": "propose_actions",
-          "status": "pending",
+          "status": "completed",
           "started_at": null,
-          "completed_at": null,
+          "completed_at": "2026-01-07T04:19:01.113844Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": null,
+          "notes": "Proposed actions: APPLY NOW: 1) Update ROADMAP.md to mark CORE-010 and CORE-011 as Completed with implementation details. No other changes needed - implementation is complete and tested.",
           "verification_result": null,
           "retry_count": 0
         },
         "approve_actions": {
           "id": "approve_actions",
-          "status": "pending",
+          "status": "completed",
           "started_at": null,
-          "completed_at": null,
+          "completed_at": "2026-01-07T04:19:59.265882Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": null,
-          "verification_result": null,
+          "notes": "User approved updating ROADMAP.md to mark CORE-010 and CORE-011 as completed",
+          "verification_result": {
+            "approved": true,
+            "approved_at": "2026-01-07T04:19:59.265897+00:00",
+            "type": "manual_gate"
+          },
           "retry_count": 0
         },
         "apply_approved_actions": {
           "id": "apply_approved_actions",
-          "status": "pending",
+          "status": "completed",
           "started_at": null,
-          "completed_at": null,
+          "completed_at": "2026-01-07T04:20:40.665527Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": null,
+          "notes": "Updated ROADMAP.md to mark CORE-010 and CORE-011 as Completed with implementation details",
           "verification_result": null,
           "retry_count": 0
         },
         "update_knowledge_base": {
           "id": "update_knowledge_base",
-          "status": "pending",
+          "status": "skipped",
           "started_at": null,
           "completed_at": null,
-          "skipped_at": null,
-          "skip_reason": null,
+          "skipped_at": "2026-01-07T04:20:49.731645Z",
+          "skip_reason": "ROADMAP.md update serves as the knowledge base update for this feature",
           "notes": null,
           "verification_result": null,
           "retry_count": 0
         },
         "commit_and_sync": {
           "id": "commit_and_sync",
-          "status": "pending",
+          "status": "completed",
           "started_at": null,
-          "completed_at": null,
+          "completed_at": "2026-01-07T04:21:25.352748Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": null,
-          "verification_result": null,
+          "notes": "Committed and pushed: feat commit for implementation + docs commit for ROADMAP.md update",
+          "verification_result": {
+            "approved": true,
+            "approved_at": "2026-01-07T04:21:25.352763+00:00",
+            "type": "manual_gate"
+          },
           "retry_count": 0
         }
       }
     }
   },
-  "created_at": "2026-01-07T03:31:52.885273Z",
-  "updated_at": "2026-01-07T03:39:21.927956Z",
-  "completed_at": null,
+  "created_at": "2026-01-07T04:06:39.986498Z",
+  "updated_at": "2026-01-07T04:21:34.494503Z",
+  "completed_at": "2026-01-07T04:21:34.494487Z",
   "metadata": {
     "workflow_yaml_path": "/home/user/workflow-orchestrator/workflow.yaml",
-    "workflow_yaml_checksum": "547ebb5f6ebf9451"
+    "workflow_yaml_checksum": "547ebb5f6ebf9451",
+    "completion_notes": "Successfully implemented CORE-010 and CORE-011"
   },
   "workflow_definition": {
     "name": "General Development Workflow",
@@ -903,8 +953,7 @@
     }
   },
   "constraints": [
-    "Aider must be invisible to user - just another model option",
-    "Add aider as review provider alongside openrouter",
-    "Install aider-chat as dependency"
+    "Follow implementation notes in ROADMAP.md",
+    "Add tests for all new functionality"
   ]
 }

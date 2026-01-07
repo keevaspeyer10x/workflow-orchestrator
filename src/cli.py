@@ -9,7 +9,7 @@ import argparse
 import sys
 import json
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from src.engine import WorkflowEngine
 from src.analytics import WorkflowAnalytics
@@ -47,6 +47,40 @@ from src.secrets import (
 )
 
 VERSION = "2.0.0"
+
+
+# ============================================================================
+# Helper Functions (CORE-010, CORE-011)
+# ============================================================================
+
+def format_duration(delta: timedelta) -> str:
+    """
+    Format a timedelta as a human-readable duration string.
+
+    Args:
+        delta: The timedelta to format
+
+    Returns:
+        Formatted string like "2h 15m", "45m", "1d 3h 30m", or "< 1m"
+    """
+    total_seconds = int(delta.total_seconds())
+
+    if total_seconds < 60:
+        return "< 1m"
+
+    days = total_seconds // 86400
+    hours = (total_seconds % 86400) // 3600
+    minutes = (total_seconds % 3600) // 60
+
+    parts = []
+    if days:
+        parts.append(f"{days}d")
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes:
+        parts.append(f"{minutes}m")
+
+    return " ".join(parts) if parts else "< 1m"
 
 
 def get_engine(args) -> WorkflowEngine:
@@ -199,16 +233,36 @@ def cmd_complete(args):
 def cmd_skip(args):
     """Skip an item with a reason."""
     engine = get_engine(args)
-    
+
     if not engine.state:
         print("Error: No active workflow")
         sys.exit(1)
-    
+
     try:
+        # Get item definition for context before skipping
+        item_def = engine.get_item_definition(args.item)
+
         success, message = engine.skip_item(args.item, args.reason)
-        
+
         if success:
-            print(f"✓ {message}")
+            # CORE-010: Enhanced skip output
+            print("=" * 60)
+            print(f"⊘ SKIPPING: {args.item}")
+            print("=" * 60)
+            print(f"Reason: {args.reason}")
+            print()
+
+            # Show item description if available
+            if item_def and item_def.description:
+                print("What this item does:")
+                print(f"  {item_def.description}")
+                print()
+
+            print("Implications:")
+            item_name = item_def.name if item_def else args.item
+            print(f"  • {item_name} will not be performed")
+            print("=" * 60)
+
             if not args.quiet:
                 print("\n" + engine.get_recitation_text())
         else:
@@ -252,14 +306,17 @@ def cmd_approve_item(args):
 def cmd_advance(args):
     """Advance to the next phase."""
     engine = get_engine(args)
-    
+
     if not engine.state:
         print("Error: No active workflow")
         sys.exit(1)
-    
+
+    # Capture previous phase ID before advancing (for CORE-010 skip visibility)
+    previous_phase_id = engine.state.current_phase_id
+
     # First check if we can advance
     can_advance, blockers, skipped = engine.can_advance_phase()
-    
+
     if not can_advance and not args.force:
         print("✗ Cannot advance to next phase")
         print("\nBlockers:")
@@ -271,11 +328,19 @@ def cmd_advance(args):
                 print(f"  - {s}")
         print("\nUse --force to override (not recommended)")
         sys.exit(1)
-    
+
     success, message = engine.advance_phase(force=args.force)
-    
+
     if success:
         print(f"✓ {message}")
+
+        # CORE-010: Show skipped items from completed phase
+        skipped_items = engine.get_skipped_items(previous_phase_id)
+        if skipped_items:
+            print(f"\nPhase {previous_phase_id} completed with {len(skipped_items)} skipped item(s):")
+            for item_id, reason in skipped_items:
+                print(f"  ⊘ {item_id} - \"{reason}\"")
+
         if not args.quiet:
             print("\n" + engine.get_recitation_text())
     else:
@@ -322,9 +387,79 @@ def cmd_finish(args):
         engine.abandon_workflow(args.reason)
         print("✓ Workflow abandoned")
     else:
+        # CORE-011: Capture summary data before completing
+        summary = engine.get_workflow_summary()
+        all_skipped = engine.get_all_skipped_items()
+        task_description = engine.state.task_description
+        started_at = engine.state.created_at
+
         engine.complete_workflow(notes=notes)
-        print("✓ Workflow completed")
-        
+        completed_at = engine.state.completed_at
+
+        # CORE-011: Print comprehensive completion summary
+        print("=" * 60)
+        print("✓ WORKFLOW COMPLETED")
+        print("=" * 60)
+        print(f"Task: {task_description}")
+
+        # Show duration if times are available
+        if started_at and completed_at:
+            duration = completed_at - started_at
+            print(f"Duration: {format_duration(duration)}")
+        print()
+
+        # Phase summary table
+        if summary:
+            print("PHASE SUMMARY")
+            print("-" * 60)
+            total_completed = 0
+            total_skipped = 0
+            total_items = 0
+            for phase_id, phase_data in summary.items():
+                completed = phase_data['completed']
+                skipped = phase_data['skipped']
+                total = phase_data['total']
+                total_completed += completed
+                total_skipped += skipped
+                total_items += total
+                print(f"  {phase_id:12} {total} items ({completed} completed, {skipped} skipped)")
+            print("-" * 60)
+            print(f"  {'Total':12} {total_items} items ({total_completed} completed, {total_skipped} skipped)")
+            print()
+
+        # Skipped items summary
+        if all_skipped:
+            print("SKIPPED ITEMS (review for justification)")
+            print("-" * 60)
+            for phase_id, items in all_skipped.items():
+                for item_id, reason in items:
+                    # Truncate long reasons
+                    short_reason = reason[:50] + "..." if len(reason) > 50 else reason
+                    print(f"  • {item_id}: \"{short_reason}\"")
+            print()
+
+        # Next steps prompt
+        print("=" * 60)
+        print("⚠️  WORKFLOW COMPLETE - WHAT'S NEXT?")
+        print("=" * 60)
+        print()
+        print("The workflow is finished, but you may still need to:")
+        print()
+        print("  □ Create a PR:")
+        # Generate suggested PR title from task description
+        pr_title = task_description[:60] + "..." if len(task_description) > 60 else task_description
+        print(f"    gh pr create --title \"{pr_title}\"")
+        print()
+        print("  □ Merge to main (if approved)")
+        print()
+        print("  □ Continue discussion with user about:")
+        print("    • Any follow-up tasks?")
+        print("    • Questions about the implementation?")
+        print("    • Ready to close this session?")
+        print()
+        print("Reply to confirm next steps or start a new workflow.")
+        print("=" * 60)
+
         # Trigger learning if available
         if not args.skip_learn:
             print("\nGenerating learning report...")

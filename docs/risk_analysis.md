@@ -1,86 +1,72 @@
-# Risk Analysis: Aider Review Provider Integration
+# Risk Analysis: CORE-010 & CORE-011
 
-## Executive Summary
+## Summary
 
-This feature adds Aider as a review provider to enable Gemini reviews with full repo context. Overall risk is **LOW** due to read-only operation, existing patterns, and graceful fallback.
+**Overall Risk Level: LOW**
 
----
+These features are additive enhancements to CLI output. No breaking changes to existing functionality or data structures.
 
 ## Risk Matrix
 
-| Risk | Likelihood | Impact | Severity | Mitigation |
-|------|------------|--------|----------|------------|
-| Aider not installed | Medium | Low | Low | Graceful fallback to OpenRouter API |
-| Aider command fails | Low | Low | Low | Error handling, return ReviewResult with error |
-| OpenRouter key missing | Low | Medium | Low | Check in setup, clear error message |
-| Aider output parsing fails | Medium | Low | Low | Return raw output if parsing fails |
-| Slow review (repo map build) | Medium | Low | Low | Timeout handling, progress indication |
-| Dependency bloat | Low | Low | Low | aider-chat is well-maintained, pinned version |
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| Breaking existing CLI output parsing | Low | Medium | Changes are additive; existing success/error indicators (✓, ✗) unchanged |
+| Performance degradation | Low | Low | Summary is O(n) where n = total items; typical workflows have <50 items |
+| Duration calculation edge cases | Medium | Low | Handle None start/end times gracefully; show "N/A" if unavailable |
+| Confusing output for new users | Low | Low | Clear visual separators and headers improve readability |
 
----
+## Detailed Analysis
 
-## Detailed Risk Analysis
+### 1. CLI Output Changes
 
-### R1: Aider Not Installed
-**Risk:** Aider is not installed when user runs `orchestrator review`
-**Likelihood:** Medium (new dependency)
-**Impact:** Low (fallback available)
-**Mitigation:**
-- Check for `aider` command in ReviewSetup
-- Fall back to OpenRouter API if unavailable
-- Session-start hook installs aider automatically
+**Risk**: Scripts or users parsing CLI output may break
 
-### R2: Aider Command Failure
-**Risk:** Aider subprocess fails or hangs
-**Likelihood:** Low
-**Impact:** Low
-**Mitigation:**
-- Timeout handling (5 minute default)
-- Capture stderr for debugging
-- Return ReviewResult with error message
+**Analysis**:
+- `cmd_skip` currently outputs: `"✓ {message}"`
+- New output adds lines BEFORE the success message
+- Success indicator remains unchanged
+- Low likelihood of breaking existing usage
 
-### R3: Output Parsing Failure
-**Risk:** Aider output format changes or is unexpected
-**Likelihood:** Medium (external dependency)
-**Impact:** Low
-**Mitigation:**
-- Graceful parsing with fallback to raw output
-- Log warnings for debugging
-- ReviewResult still contains raw_output field
+**Mitigation**: Keep existing success/error format; add new content as additional context
 
-### R4: Performance Overhead
-**Risk:** Aider's repo map takes time to build
-**Likelihood:** Medium (large repos)
-**Impact:** Low (one-time per review)
-**Mitigation:**
-- Aider caches repo map
-- Progress indication in output
-- User already expects reviews to take time
+### 2. Engine Method Additions
 
----
+**Risk**: New methods could affect existing functionality
+
+**Analysis**:
+- All new methods are pure getters (read-only)
+- No modification to state or side effects
+- Return empty/None values if data unavailable
+- Zero risk to existing functionality
+
+### 3. Duration Calculation
+
+**Risk**: Edge cases in datetime handling
+
+**Analysis**:
+- `started_at` or `completed_at` may be None
+- Timezone handling could vary
+- Need graceful fallback
+
+**Mitigation**:
+- Check for None before calculation
+- Use UTC consistently (already the case in schema)
+- Show "Duration: N/A" if times unavailable
 
 ## Security Considerations
 
-| Concern | Assessment | Mitigation |
-|---------|------------|------------|
-| API key exposure | Low | Uses existing OPENROUTER_API_KEY, passed via env |
-| Code sent to LLM | Accepted | Same as existing review providers |
-| Aider auto-commits | None | `--no-auto-commits` flag |
-| Aider git operations | None | `--no-git` flag |
-
----
+- No new user input handling beyond existing validation
+- No file system operations beyond existing state access
+- No network operations
+- No privilege escalation risks
 
 ## Rollback Plan
 
-1. Remove `aider` from ReviewMethod enum
-2. Remove AiderExecutor import
-3. Router falls back to existing methods
-4. No data migration needed (stateless)
+If issues arise:
+1. Changes are isolated to CLI output only
+2. Revert commits that modify `cmd_skip`, `cmd_advance`, `cmd_finish`
+3. Engine methods are additive and can remain (unused)
 
----
+## Conclusion
 
-## Approval
-
-- [ ] Risks acceptable for implementation
-- [ ] Mitigations adequate
-- [ ] Rollback plan reviewed
+This is a low-risk change. The features add visibility without modifying core workflow logic or data structures.
