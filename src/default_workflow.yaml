@@ -270,7 +270,45 @@ phases:
           description: "User to confirm manual smoke test passed."
 
   # ===========================================================================
-  # PHASE 5: LEARN
+  # PHASE 5: DOCUMENT (WF-009)
+  # ===========================================================================
+  - id: "DOCUMENT"
+    name: "Documentation Update"
+    description: "Update documentation to reflect changes. Optional phase - can be skipped for small changes with no user-facing impact."
+    items:
+      - id: "update_readme"
+        name: "Update README if needed"
+        description: "Review and update README.md for any new features, changed behavior, or updated setup instructions."
+        required: false
+        skippable: true
+        skip_conditions: ["no_user_facing_changes", "internal_refactor_only"]
+
+      - id: "update_setup_guide"
+        name: "Update setup/installation instructions"
+        description: "Ensure setup guides and installation instructions reflect any new dependencies or configuration requirements."
+        required: false
+        skippable: true
+        skip_conditions: ["no_setup_changes", "no_new_dependencies"]
+
+      - id: "update_api_docs"
+        name: "Update API documentation"
+        description: "Document any new CLI commands, options, or API changes. Update help text and examples."
+        required: false
+        skippable: true
+        skip_conditions: ["no_api_changes", "no_cli_changes"]
+
+      - id: "changelog_entry"
+        name: "Add changelog entry"
+        description: "Add an entry to CHANGELOG.md describing what changed. Required for all non-trivial changes."
+        required: true
+        skippable: true
+        skip_conditions: ["trivial_change", "documentation_only"]
+        verification:
+          type: "file_exists"
+          path: "CHANGELOG.md"
+
+  # ===========================================================================
+  # PHASE 6: LEARN
   # ===========================================================================
   - id: "LEARN"
     name: "Learning & Documentation"

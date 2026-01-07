@@ -160,6 +160,7 @@ class ItemState(BaseModel):
     notes: Optional[str] = None
     verification_result: Optional[dict] = None
     retry_count: int = 0
+    files_modified: Optional[list[str]] = None  # WF-006: Track files modified during item completion
 
 
 class PhaseState(BaseModel):

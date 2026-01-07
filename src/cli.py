@@ -303,6 +303,110 @@ def cmd_approve_item(args):
         sys.exit(1)
 
 
+# ============================================================================
+# WF-005: Phase Summary Functions
+# ============================================================================
+
+def generate_phase_summary(engine) -> dict:
+    """
+    Generate summary of current phase for approval.
+
+    Returns:
+        Dictionary with completed items, skipped items, and git diff stat
+    """
+    if not engine.state:
+        return {"completed": [], "skipped": [], "git_diff_stat": ""}
+
+    phase_id = engine.state.current_phase_id
+    phase = engine.state.phases.get(phase_id)
+
+    # Get completed items with notes
+    completed = []
+    if phase:
+        for item_id, item in phase.items.items():
+            if item.status.value == "completed":
+                completed.append({
+                    "id": item_id,
+                    "notes": item.notes or "No notes provided"
+                })
+
+    # Get skipped items
+    skipped = engine.get_skipped_items(phase_id)
+
+    # Get git diff stat
+    git_diff_stat = _get_git_diff_stat(engine.working_dir)
+
+    return {
+        "completed": completed,
+        "skipped": skipped,
+        "git_diff_stat": git_diff_stat,
+    }
+
+
+def _get_git_diff_stat(working_dir) -> str:
+    """Get git diff stat for display."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--stat", "HEAD~5"],
+            cwd=working_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+        return ""
+    except Exception:
+        return ""
+
+
+def format_phase_summary(summary: dict, from_phase: str, to_phase: str) -> str:
+    """Format phase summary for display."""
+    lines = [
+        "=" * 60,
+        f"PHASE SUMMARY: {from_phase} -> {to_phase}",
+        "=" * 60,
+        "",
+    ]
+
+    # Completed items
+    completed = summary.get("completed", [])
+    if completed:
+        lines.append(f"Completed Items ({len(completed)}):")
+        for item in completed:
+            notes = item["notes"]
+            if len(notes) > 60:
+                notes = notes[:57] + "..."
+            lines.append(f"  ✓ {item['id']} - \"{notes}\"")
+        lines.append("")
+    else:
+        lines.append("Completed Items: None")
+        lines.append("")
+
+    # Skipped items
+    skipped = summary.get("skipped", [])
+    if skipped:
+        lines.append(f"Skipped Items ({len(skipped)}):")
+        for item_id, reason in skipped:
+            if len(reason) > 50:
+                reason = reason[:47] + "..."
+            lines.append(f"  ⊘ {item_id} - \"{reason}\"")
+        lines.append("")
+
+    # Git diff stat
+    git_stat = summary.get("git_diff_stat", "")
+    if git_stat:
+        lines.append("Files Changed:")
+        for line in git_stat.split("\n")[-5:]:  # Last 5 lines
+            lines.append(f"  {line}")
+        lines.append("")
+
+    lines.append("=" * 60)
+
+    return "\n".join(lines)
+
+
 def cmd_advance(args):
     """Advance to the next phase."""
     engine = get_engine(args)
@@ -329,6 +433,36 @@ def cmd_advance(args):
         print("\nUse --force to override (not recommended)")
         sys.exit(1)
 
+    # WF-005: Show phase summary before advancing (unless --yes flag)
+    next_phase_id = _get_next_phase_id(engine)
+    if not getattr(args, 'yes', False) and next_phase_id:
+        summary = generate_phase_summary(engine)
+        print(format_phase_summary(summary, previous_phase_id, next_phase_id))
+        print()
+
+    # WF-008: Run AI critique if enabled (unless --no-critique flag)
+    if not getattr(args, 'no_critique', False) and next_phase_id:
+        try:
+            from src.critique import PhaseCritique, format_critique_result
+
+            critique = PhaseCritique(engine.working_dir)
+            result = critique.run_if_enabled(engine, previous_phase_id, next_phase_id)
+
+            if result:
+                print(format_critique_result(result, previous_phase_id, next_phase_id))
+                print()
+
+                # If critical issues, prompt user
+                if result.should_block and not getattr(args, 'yes', False):
+                    response = input("Critical issues found. Continue anyway? [y/N]: ")
+                    if response.lower() not in ['y', 'yes']:
+                        print("Advance cancelled. Address issues before proceeding.")
+                        sys.exit(1)
+        except ImportError:
+            pass  # Critique module not available
+        except Exception as e:
+            print(f"Warning: Critique failed: {e}. Continuing without critique.")
+
     success, message = engine.advance_phase(force=args.force)
 
     if success:
@@ -346,6 +480,24 @@ def cmd_advance(args):
     else:
         print(f"✗ {message}")
         sys.exit(1)
+
+
+def _get_next_phase_id(engine) -> str:
+    """Get the next phase ID from the workflow definition."""
+    if not engine.workflow_def or not engine.state:
+        return ""
+
+    phase_ids = [p.id for p in engine.workflow_def.phases]
+    current_idx = -1
+
+    for i, phase_id in enumerate(phase_ids):
+        if phase_id == engine.state.current_phase_id:
+            current_idx = i
+            break
+
+    if current_idx >= 0 and current_idx < len(phase_ids) - 1:
+        return phase_ids[current_idx + 1]
+    return ""
 
 
 def cmd_approve(args):
@@ -1689,6 +1841,8 @@ Examples:
     advance_parser = subparsers.add_parser('advance', help='Advance to the next phase')
     advance_parser.add_argument('--force', '-f', action='store_true', help='Force advance even with blockers')
     advance_parser.add_argument('--quiet', '-q', action='store_true', help='Minimal output')
+    advance_parser.add_argument('--yes', '-y', action='store_true', help='Skip summary/critique prompts (WF-005, WF-008)')
+    advance_parser.add_argument('--no-critique', action='store_true', help='Skip AI critique at phase gate (WF-008)')
     advance_parser.set_defaults(func=cmd_advance)
     
     # Approve command (for phase gates)
