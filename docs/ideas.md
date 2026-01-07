@@ -37,6 +37,7 @@ Provde a summary on screen before asking for approval
 
 I'd also always like to see a summary of the learnings and the feedback from the other AI models - at least how many issues they identified.
 
+Are we checking if Loearnings implies new things for the ROADMAP?
 
 Don't forget
 - In my installation instructions recommend running with no checking
