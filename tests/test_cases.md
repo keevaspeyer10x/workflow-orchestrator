@@ -1,87 +1,171 @@
-# Test Cases: CORE-010 & CORE-011
+# Test Cases: CORE-006, SEC-004, CORE-017, CORE-018
 
-## Engine Tests (tests/test_engine.py)
+## CORE-006: Automatic Connector Detection
 
-### get_skipped_items()
+### Unit Tests
 
-| ID | Test Case | Input | Expected Output |
-|----|-----------|-------|-----------------|
-| E1 | No skipped items | Phase with all completed items | Empty list `[]` |
-| E2 | One skipped item | Phase with one skipped item, reason="Not applicable" | `[("item_id", "Not applicable")]` |
-| E3 | Multiple skipped items | Phase with 2 skipped items | List with both items and reasons |
-| E4 | Missing skip reason | Skipped item with None reason | `[("item_id", "No reason provided")]` |
-| E5 | Invalid phase ID | Non-existent phase_id | Empty list `[]` |
-| E6 | No active workflow | state=None | Empty list `[]` |
+1. **test_detect_manus_connector_with_env_var**
+   - Set MANUS_API_URL env var
+   - Call `detect_manus_connector()`
+   - Assert returns True
 
-### get_all_skipped_items()
+2. **test_detect_manus_connector_without_env**
+   - Clear MANUS_* env vars
+   - Call `detect_manus_connector()`
+   - Assert returns False
 
-| ID | Test Case | Input | Expected Output |
-|----|-----------|-------|-----------------|
-| E7 | No skips anywhere | Workflow with no skipped items | Empty dict `{}` |
-| E8 | Skips in one phase | Skip in PLAN only | `{"PLAN": [("item", "reason")]}` |
-| E9 | Skips in multiple phases | Skips in PLAN and VERIFY | Dict with both phases |
-| E10 | No active workflow | state=None | Empty dict `{}` |
+3. **test_get_available_providers_all_available**
+   - Mock: claude CLI exists, OpenRouter key set
+   - Call `get_available_providers()`
+   - Assert returns ['claude_code', 'openrouter', 'manual']
 
-### get_item_definition()
+4. **test_get_available_providers_only_manual**
+   - Mock: no claude CLI, no API key
+   - Call `get_available_providers()`
+   - Assert returns ['manual']
 
-| ID | Test Case | Input | Expected Output |
-|----|-----------|-------|-----------------|
-| E11 | Item exists | Valid item_id | ChecklistItemDef object |
-| E12 | Item not found | Unknown item_id | None |
-| E13 | No workflow def | workflow_def=None | None |
+5. **test_prompt_user_for_provider_returns_selection**
+   - Mock user input selecting 'openrouter'
+   - Call `prompt_user_for_provider(['openrouter', 'manual'])`
+   - Assert returns 'openrouter'
 
-### get_workflow_summary()
+### Integration Tests
 
-| ID | Test Case | Input | Expected Output |
-|----|-----------|-------|-----------------|
-| E14 | Mixed statuses | Phase with 2 completed, 1 skipped | `{"completed": 2, "skipped": 1, "total": 3}` |
-| E15 | All completed | Phase with all completed | `{"completed": 3, "skipped": 0, "total": 3}` |
-| E16 | No active workflow | state=None | Empty dict `{}` |
+6. **test_handoff_interactive_shows_options**
+   - Run `orchestrator handoff --interactive`
+   - Assert output shows available provider options
 
-## CLI Tests (tests/test_cli.py)
+---
 
-### cmd_skip() Enhanced Output
+## SEC-004: Cross-Repo Secrets Copy
 
-| ID | Test Case | Verification |
-|----|-----------|--------------|
-| C1 | Skip shows separator | Output contains "=" * 60 |
-| C2 | Skip shows item ID | Output contains "SKIPPING: {item_id}" |
-| C3 | Skip shows reason | Output contains "Reason: {reason}" |
-| C4 | Skip shows description | Output contains item description if available |
+### Unit Tests
 
-### cmd_advance() Shows Skipped Items
+1. **test_secrets_copy_success**
+   - Create source dir with .secrets.enc
+   - Call `secrets copy /source /dest`
+   - Assert file copied to dest
 
-| ID | Test Case | Verification |
-|----|-----------|--------------|
-| C5 | Shows skipped count | Output contains "completed with N skipped item(s)" |
-| C6 | Lists skipped items | Output contains each skipped item_id and reason |
-| C7 | No skips, no extra output | Output does not mention skipped if none exist |
+2. **test_secrets_copy_creates_dest_dir**
+   - Source exists, dest dir doesn't exist
+   - Call `secrets copy`
+   - Assert dest dir created and file copied
 
-### cmd_finish() Completion Summary
+3. **test_secrets_copy_source_not_found**
+   - Source dir has no secrets file
+   - Call `secrets copy`
+   - Assert error message and exit code 1
 
-| ID | Test Case | Verification |
-|----|-----------|--------------|
-| C8 | Shows task description | Output contains task from state |
-| C9 | Shows duration | Output contains formatted duration |
-| C10 | Shows phase summary | Output contains completed/skipped counts per phase |
-| C11 | Shows skipped items list | Output contains all skipped items with reasons |
-| C12 | Shows next steps prompt | Output contains PR suggestion and follow-up prompts |
-| C13 | Handles missing times | Duration shows "N/A" if times unavailable |
+4. **test_secrets_copy_dest_exists_no_force**
+   - Both source and dest have secrets file
+   - Call `secrets copy` without --force
+   - Assert prompts for confirmation or fails
 
-## Helper Function Tests
+5. **test_secrets_copy_dest_exists_with_force**
+   - Both files exist
+   - Call `secrets copy --force`
+   - Assert file overwritten
 
-### format_duration()
+### CLI Tests
 
-| ID | Test Case | Input | Expected Output |
-|----|-----------|-------|-----------------|
-| H1 | Hours and minutes | timedelta(hours=2, minutes=15) | "2h 15m" |
-| H2 | Minutes only | timedelta(minutes=45) | "45m" |
-| H3 | Less than a minute | timedelta(seconds=30) | "< 1m" |
-| H4 | Zero duration | timedelta(0) | "< 1m" |
+6. **test_secrets_copy_from_flag**
+   - Run `orchestrator secrets copy --from /other/repo`
+   - Assert copies from specified source
 
-## Integration Tests
+7. **test_secrets_copy_to_flag**
+   - Run `orchestrator secrets copy --to /other/repo`
+   - Assert copies to specified destination
 
-| ID | Test Case | Verification |
-|----|-----------|--------------|
-| I1 | Full workflow with skips | Skip items, advance, finish - verify all output |
-| I2 | Workflow with no skips | Complete all items, finish - verify no skip mentions |
+---
+
+## CORE-017: Auto-Update Review Models
+
+### Unit Tests
+
+1. **test_model_registry_create**
+   - Call `ModelRegistry()`
+   - Assert creates .model_registry.json if not exists
+
+2. **test_is_registry_stale_fresh**
+   - Set last_updated to today
+   - Call `is_registry_stale()`
+   - Assert returns False
+
+3. **test_is_registry_stale_old**
+   - Set last_updated to 31 days ago
+   - Call `is_registry_stale()`
+   - Assert returns True
+
+4. **test_get_latest_models_api_success**
+   - Mock OpenRouter API response with model list
+   - Call `get_latest_models()`
+   - Assert returns parsed model list
+
+5. **test_get_latest_models_api_failure**
+   - Mock API timeout
+   - Call `get_latest_models()`
+   - Assert returns None or cached values
+
+6. **test_update_registry_saves_timestamp**
+   - Call `update_registry()`
+   - Assert last_updated is now
+
+### CLI Tests
+
+7. **test_update_models_command**
+   - Run `orchestrator update-models`
+   - Assert queries API and updates registry
+
+8. **test_update_models_no_auto_update_flag**
+   - Run `orchestrator update-models --no-auto-update`
+   - Assert doesn't auto-update in background
+
+---
+
+## CORE-018: Dynamic Function Calling Detection
+
+### Unit Tests
+
+1. **test_get_model_capabilities_from_api**
+   - Mock API response with capabilities
+   - Call `get_model_capabilities('openai/gpt-4')`
+   - Assert returns correct capabilities dict
+
+2. **test_get_model_capabilities_cached**
+   - Pre-populate cache
+   - Call `get_model_capabilities()`
+   - Assert returns cached value without API call
+
+3. **test_supports_function_calling_true**
+   - Model with function calling support
+   - Call `supports_function_calling('openai/gpt-4')`
+   - Assert returns True
+
+4. **test_supports_function_calling_false**
+   - Model without support
+   - Call `supports_function_calling('some/basic-model')`
+   - Assert returns False
+
+5. **test_supports_function_calling_fallback_to_static**
+   - API unavailable, model in static list
+   - Call `supports_function_calling('openai/gpt-4')`
+   - Assert returns True (from static list)
+
+### Integration Tests
+
+6. **test_openrouter_uses_dynamic_detection**
+   - Mock registry with capabilities
+   - Create OpenRouterProvider
+   - Assert `_supports_function_calling()` uses registry
+
+---
+
+## Test File Organization
+
+```
+tests/
+  test_model_registry.py     # CORE-017, CORE-018 unit tests
+  test_provider_detection.py # CORE-006 unit tests
+  test_secrets_copy.py       # SEC-004 unit tests
+  test_cli_new_commands.py   # CLI integration tests
+```

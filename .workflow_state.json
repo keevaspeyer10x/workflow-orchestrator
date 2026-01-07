@@ -1,26 +1,26 @@
 {
-  "workflow_id": "wf_3c236a6b",
+  "workflow_id": "wf_c7f12380",
   "workflow_type": "General Development Workflow",
   "workflow_version": "2.1",
-  "task_description": "Implement CORE-010 (Enhanced Skip Visibility) and CORE-011 (Workflow Completion Summary & Next Steps)",
+  "task_description": "Implement roadmap items: CORE-006, SEC-004, CORE-017, CORE-018",
   "project": null,
-  "status": "completed",
-  "current_phase_id": "LEARN",
+  "status": "active",
+  "current_phase_id": "PLAN",
   "phases": {
     "PLAN": {
       "id": "PLAN",
-      "status": "completed",
-      "started_at": "2026-01-07T04:06:39.986135Z",
-      "completed_at": "2026-01-07T04:11:25.618066Z",
+      "status": "active",
+      "started_at": "2026-01-07T04:27:48.406480Z",
+      "completed_at": null,
       "items": {
         "check_roadmap": {
           "id": "check_roadmap",
           "status": "completed",
           "started_at": null,
-          "completed_at": "2026-01-07T04:07:06.328063Z",
+          "completed_at": "2026-01-07T04:28:08.335125Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "Reviewed ROADMAP.md - CORE-010 (Enhanced Skip Visibility) and CORE-011 (Workflow Completion Summary) are both High priority, Low complexity. Implementation notes are detailed with code examples for engine methods and CLI updates.",
+          "notes": "Reviewed ROADMAP.md - selected CORE-006 (Automatic Connector Detection), SEC-004 (Secrets Copy), CORE-017 (Auto-Update Models), CORE-018 (Dynamic Function Calling Detection)",
           "verification_result": null,
           "retry_count": 0
         },
@@ -29,8 +29,8 @@
           "status": "skipped",
           "started_at": null,
           "completed_at": null,
-          "skipped_at": "2026-01-07T04:07:15.804940Z",
-          "skip_reason": "ROADMAP.md provides detailed implementation specs with code examples for both features. No ambiguity in requirements.",
+          "skipped_at": "2026-01-07T04:28:17.826750Z",
+          "skip_reason": "All four roadmap items (CORE-006, SEC-004, CORE-017, CORE-018) are well-specified in ROADMAP.md with implementation notes and tasks",
           "notes": null,
           "verification_result": null,
           "retry_count": 0
@@ -39,13 +39,13 @@
           "id": "initial_plan",
           "status": "completed",
           "started_at": null,
-          "completed_at": "2026-01-07T04:08:24.226414Z",
+          "completed_at": "2026-01-07T04:28:58.168775Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "Created docs/plan.md with implementation steps for engine methods, CLI updates, and test cases",
+          "notes": "Created docs/plan.md with implementation details for all four items. Order: CORE-017+018 (model registry), CORE-006 (providers), SEC-004 (secrets copy)",
           "verification_result": {
             "type": "file_exists",
-            "timestamp": "2026-01-07T04:08:24.225148+00:00",
+            "timestamp": "2026-01-07T04:28:58.167979+00:00",
             "path": "/home/user/workflow-orchestrator/docs/plan.md",
             "exists": true
           },
@@ -55,29 +55,29 @@
           "id": "risk_analysis",
           "status": "completed",
           "started_at": null,
-          "completed_at": "2026-01-07T04:08:59.284054Z",
+          "completed_at": "2026-01-07T04:29:25.492372Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "Created docs/risk_analysis.md - Overall risk level: LOW. Changes are additive to CLI output with no breaking changes.",
+          "notes": "Created docs/risk_analysis.md. Overall risk: LOW. Main concerns: API availability (mitigated by caching), backward compatibility (mitigated by tests)",
           "verification_result": {
             "type": "file_exists",
-            "timestamp": "2026-01-07T04:08:59.283202+00:00",
+            "timestamp": "2026-01-07T04:29:25.491370+00:00",
             "path": "/home/user/workflow-orchestrator/docs/risk_analysis.md",
             "exists": true
           },
-          "retry_count": 1
+          "retry_count": 0
         },
         "define_test_cases": {
           "id": "define_test_cases",
           "status": "completed",
           "started_at": null,
-          "completed_at": "2026-01-07T04:09:44.005368Z",
+          "completed_at": "2026-01-07T04:30:02.612951Z",
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "Created tests/test_cases.md with 21 test cases covering engine methods, CLI commands, and helper functions",
+          "notes": "Created tests/test_cases.md with 24 test cases covering all four features (unit tests and integration tests)",
           "verification_result": {
             "type": "file_exists",
-            "timestamp": "2026-01-07T04:09:44.004179+00:00",
+            "timestamp": "2026-01-07T04:30:02.612106+00:00",
             "path": "/home/user/workflow-orchestrator/tests/test_cases.md",
             "exists": true
           },
@@ -85,135 +85,115 @@
         },
         "user_approval": {
           "id": "user_approval",
-          "status": "completed",
+          "status": "pending",
           "started_at": null,
-          "completed_at": "2026-01-07T04:11:14.742200Z",
+          "completed_at": null,
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "User approved plan for CORE-010 and CORE-011 implementation",
-          "verification_result": {
-            "approved": true,
-            "approved_at": "2026-01-07T04:11:14.742212+00:00",
-            "type": "manual_gate"
-          },
+          "notes": null,
+          "verification_result": null,
           "retry_count": 0
         }
       }
     },
     "EXECUTE": {
       "id": "EXECUTE",
-      "status": "completed",
-      "started_at": "2026-01-07T04:11:25.618689Z",
-      "completed_at": "2026-01-07T04:16:24.552907Z",
+      "status": "pending",
+      "started_at": null,
+      "completed_at": null,
       "items": {
         "handoff_decision": {
           "id": "handoff_decision",
-          "status": "completed",
+          "status": "pending",
           "started_at": null,
-          "completed_at": "2026-01-07T04:11:35.698554Z",
+          "completed_at": null,
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "Implementing directly - already operating as Claude Code agent in this session",
+          "notes": null,
           "verification_result": null,
           "retry_count": 0
         },
         "write_tests": {
           "id": "write_tests",
-          "status": "completed",
+          "status": "pending",
           "started_at": null,
-          "completed_at": "2026-01-07T04:13:27.734004Z",
+          "completed_at": null,
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "Added 22 tests to tests/test_roadmap_features.py covering engine methods (get_skipped_items, get_all_skipped_items, get_item_definition, get_workflow_summary) and CLI helper (format_duration). Tests fail as expected - methods not implemented yet.",
+          "notes": null,
           "verification_result": null,
           "retry_count": 0
         },
         "implement_code": {
           "id": "implement_code",
-          "status": "completed",
+          "status": "pending",
           "started_at": null,
-          "completed_at": "2026-01-07T04:15:46.823466Z",
+          "completed_at": null,
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "Implemented 4 engine methods (get_skipped_items, get_all_skipped_items, get_item_definition, get_workflow_summary), format_duration helper, and updated cmd_skip, cmd_advance, cmd_finish for enhanced visibility",
+          "notes": null,
           "verification_result": null,
           "retry_count": 0
         },
         "all_tests_pass": {
           "id": "all_tests_pass",
-          "status": "completed",
+          "status": "pending",
           "started_at": null,
-          "completed_at": "2026-01-07T04:16:17.732277Z",
+          "completed_at": null,
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "All 250 tests pass including 21 new tests for CORE-010 and CORE-011 features",
-          "verification_result": {
-            "type": "command",
-            "timestamp": "2026-01-07T04:16:12.132063+00:00",
-            "command": "python -m pytest tests/ -v --tb=short",
-            "command_args": [
-              "python",
-              "-m",
-              "pytest",
-              "tests/",
-              "-v",
-              "--tb=short"
-            ],
-            "original_command": "{{test_command}}",
-            "exit_code": 0,
-            "stdout": "============================= test session starts ==============================\nplatform linux -- Python 3.11.14, pytest-9.0.2, pluggy-1.6.0 -- /usr/local/bin/python\ncachedir: .pytest_cache\nrootdir: /home/user/workflow-orchestrator\nconfigfile: pyproject.toml\ncollecting ... collected 265 items\n\ntests/test_global_install.py::TestConfigDiscovery::test_find_local_workflow PASSED [  0%]\ntests/test_global_install.py::TestConfigDiscovery::test_fallback_to_bundled PASSED [  0%]\ntests/test_global_install.py::TestConfigDiscovery::test_get_bundled_workflow_path PASSED [  1%]\ntests/test_global_install.py::TestConfigDiscovery::test_get_default_workflow_content PASSED [  1%]\ntests/test_global_install.py::TestConfigDiscovery::test_is_using_bundled_workflow_true PASSED [  1%]\ntests/test_global_install.py::TestConfigDiscovery::test_is_using_bundled_workflow_false PASSED [  2%]\ntests/test_global_install.py::TestConfigDiscovery::test_find_workflow_path_default_cwd PASSED [  2%]\ntests/test_global_install",
-            "stderr": ""
-          },
+          "notes": null,
+          "verification_result": null,
           "retry_count": 0
         }
       }
     },
     "REVIEW": {
       "id": "REVIEW",
-      "status": "completed",
-      "started_at": "2026-01-07T04:16:24.553248Z",
-      "completed_at": "2026-01-07T04:17:25.247513Z",
+      "status": "pending",
+      "started_at": null,
+      "completed_at": null,
       "items": {
         "security_review": {
           "id": "security_review",
-          "status": "completed",
+          "status": "pending",
           "started_at": null,
-          "completed_at": "2026-01-07T04:16:45.974607Z",
+          "completed_at": null,
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "Security review passed: No new user input handling - changes only add getter methods and output formatting. No file system operations beyond existing state access. No network operations. All user-provided data (skip reason, task description) already validated by existing CORE-008 validation.",
+          "notes": null,
           "verification_result": null,
           "retry_count": 0
         },
         "architecture_review": {
           "id": "architecture_review",
-          "status": "completed",
+          "status": "pending",
           "started_at": null,
-          "completed_at": "2026-01-07T04:16:55.127359Z",
+          "completed_at": null,
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "Architecture review passed: Methods added to WorkflowEngine follow existing patterns. New methods are pure getters with no side effects. format_duration helper is standalone function in cli.py consistent with other CLI helpers. Type hints added. Separation of concerns maintained - engine handles data, CLI handles presentation.",
+          "notes": null,
           "verification_result": null,
           "retry_count": 0
         },
         "quality_review": {
           "id": "quality_review",
-          "status": "completed",
+          "status": "pending",
           "started_at": null,
-          "completed_at": "2026-01-07T04:17:04.335242Z",
+          "completed_at": null,
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "Code quality review passed: Comprehensive docstrings on all new methods. Consistent formatting with existing code. 21 new tests with good coverage. Edge cases handled (None state, missing reasons, unknown phases). Clean separation of engine methods (CORE-010, CORE-011 sections).",
+          "notes": null,
           "verification_result": null,
           "retry_count": 0
         },
         "refactoring_assessment": {
           "id": "refactoring_assessment",
-          "status": "skipped",
+          "status": "pending",
           "started_at": null,
           "completed_at": null,
-          "skipped_at": "2026-01-07T04:17:13.901923Z",
-          "skip_reason": "Implementation is clean and follows existing patterns. No refactoring needed - code is minimal and focused.",
+          "skipped_at": null,
+          "skip_reason": null,
           "notes": null,
           "verification_result": null,
           "retry_count": 0
@@ -222,171 +202,137 @@
     },
     "VERIFY": {
       "id": "VERIFY",
-      "status": "completed",
-      "started_at": "2026-01-07T04:17:25.247904Z",
-      "completed_at": "2026-01-07T04:18:13.323050Z",
+      "status": "pending",
+      "started_at": null,
+      "completed_at": null,
       "items": {
         "full_test_suite": {
           "id": "full_test_suite",
-          "status": "completed",
+          "status": "pending",
           "started_at": null,
-          "completed_at": "2026-01-07T04:17:40.294281Z",
+          "completed_at": null,
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "All 250 tests pass including 21 new tests for CORE-010/CORE-011. No regressions.",
-          "verification_result": {
-            "type": "command",
-            "timestamp": "2026-01-07T04:17:34.607783+00:00",
-            "command": "python -m pytest tests/ -v --tb=short",
-            "command_args": [
-              "python",
-              "-m",
-              "pytest",
-              "tests/",
-              "-v",
-              "--tb=short"
-            ],
-            "original_command": "{{test_command}}",
-            "exit_code": 0,
-            "stdout": "============================= test session starts ==============================\nplatform linux -- Python 3.11.14, pytest-9.0.2, pluggy-1.6.0 -- /usr/local/bin/python\ncachedir: .pytest_cache\nrootdir: /home/user/workflow-orchestrator\nconfigfile: pyproject.toml\ncollecting ... collected 265 items\n\ntests/test_global_install.py::TestConfigDiscovery::test_find_local_workflow PASSED [  0%]\ntests/test_global_install.py::TestConfigDiscovery::test_fallback_to_bundled PASSED [  0%]\ntests/test_global_install.py::TestConfigDiscovery::test_get_bundled_workflow_path PASSED [  1%]\ntests/test_global_install.py::TestConfigDiscovery::test_get_default_workflow_content PASSED [  1%]\ntests/test_global_install.py::TestConfigDiscovery::test_is_using_bundled_workflow_true PASSED [  1%]\ntests/test_global_install.py::TestConfigDiscovery::test_is_using_bundled_workflow_false PASSED [  2%]\ntests/test_global_install.py::TestConfigDiscovery::test_find_workflow_path_default_cwd PASSED [  2%]\ntests/test_global_install",
-            "stderr": ""
-          },
+          "notes": null,
+          "verification_result": null,
           "retry_count": 0
         },
         "visual_regression_test": {
           "id": "visual_regression_test",
-          "status": "skipped",
+          "status": "pending",
           "started_at": null,
           "completed_at": null,
-          "skipped_at": "2026-01-07T04:17:50.615641Z",
-          "skip_reason": "Not applicable - CLI tool with no visual UI components to test",
+          "skipped_at": null,
+          "skip_reason": null,
           "notes": null,
           "verification_result": null,
           "retry_count": 0
         },
         "manual_smoke_test": {
           "id": "manual_smoke_test",
-          "status": "completed",
+          "status": "pending",
           "started_at": null,
-          "completed_at": "2026-01-07T04:18:05.671209Z",
+          "completed_at": null,
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "Smoke test passed: Enhanced skip output verified in this workflow (shows separator, reason, implications). Advance command shows skipped items from completed phase. finish command will show completion summary.",
-          "verification_result": {
-            "approved": true,
-            "approved_at": "2026-01-07T04:18:05.671225+00:00",
-            "type": "manual_gate"
-          },
+          "notes": null,
+          "verification_result": null,
           "retry_count": 0
         }
       }
     },
     "LEARN": {
       "id": "LEARN",
-      "status": "active",
-      "started_at": "2026-01-07T04:18:13.323517Z",
+      "status": "pending",
+      "started_at": null,
       "completed_at": null,
       "items": {
         "root_cause_analysis": {
           "id": "root_cause_analysis",
-          "status": "completed",
+          "status": "pending",
           "started_at": null,
-          "completed_at": "2026-01-07T04:18:40.323447Z",
+          "completed_at": null,
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "N/A - Feature implementation (CORE-010, CORE-011), not a bug fix. No root cause to analyze.",
+          "notes": null,
           "verification_result": null,
           "retry_count": 0
         },
         "document_learnings": {
           "id": "document_learnings",
-          "status": "completed",
+          "status": "pending",
           "started_at": null,
-          "completed_at": "2026-01-07T04:18:51.310619Z",
+          "completed_at": null,
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "Learnings: 1) ROADMAP.md specs with code examples enable smooth implementation. 2) Test-first (RED-GREEN) caught edge cases early. 3) Engine getter methods should be pure with no side effects. 4) CLI output changes are low-risk when additive.",
-          "verification_result": {
-            "type": "file_exists",
-            "timestamp": "2026-01-07T04:18:51.309922+00:00",
-            "path": "/home/user/workflow-orchestrator/LEARNINGS.md",
-            "exists": true
-          },
+          "notes": null,
+          "verification_result": null,
           "retry_count": 0
         },
         "propose_actions": {
           "id": "propose_actions",
-          "status": "completed",
+          "status": "pending",
           "started_at": null,
-          "completed_at": "2026-01-07T04:19:01.113844Z",
+          "completed_at": null,
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "Proposed actions: APPLY NOW: 1) Update ROADMAP.md to mark CORE-010 and CORE-011 as Completed with implementation details. No other changes needed - implementation is complete and tested.",
+          "notes": null,
           "verification_result": null,
           "retry_count": 0
         },
         "approve_actions": {
           "id": "approve_actions",
-          "status": "completed",
+          "status": "pending",
           "started_at": null,
-          "completed_at": "2026-01-07T04:19:59.265882Z",
+          "completed_at": null,
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "User approved updating ROADMAP.md to mark CORE-010 and CORE-011 as completed",
-          "verification_result": {
-            "approved": true,
-            "approved_at": "2026-01-07T04:19:59.265897+00:00",
-            "type": "manual_gate"
-          },
+          "notes": null,
+          "verification_result": null,
           "retry_count": 0
         },
         "apply_approved_actions": {
           "id": "apply_approved_actions",
-          "status": "completed",
+          "status": "pending",
           "started_at": null,
-          "completed_at": "2026-01-07T04:20:40.665527Z",
+          "completed_at": null,
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "Updated ROADMAP.md to mark CORE-010 and CORE-011 as Completed with implementation details",
+          "notes": null,
           "verification_result": null,
           "retry_count": 0
         },
         "update_knowledge_base": {
           "id": "update_knowledge_base",
-          "status": "skipped",
+          "status": "pending",
           "started_at": null,
           "completed_at": null,
-          "skipped_at": "2026-01-07T04:20:49.731645Z",
-          "skip_reason": "ROADMAP.md update serves as the knowledge base update for this feature",
+          "skipped_at": null,
+          "skip_reason": null,
           "notes": null,
           "verification_result": null,
           "retry_count": 0
         },
         "commit_and_sync": {
           "id": "commit_and_sync",
-          "status": "completed",
+          "status": "pending",
           "started_at": null,
-          "completed_at": "2026-01-07T04:21:25.352748Z",
+          "completed_at": null,
           "skipped_at": null,
           "skip_reason": null,
-          "notes": "Committed and pushed: feat commit for implementation + docs commit for ROADMAP.md update",
-          "verification_result": {
-            "approved": true,
-            "approved_at": "2026-01-07T04:21:25.352763+00:00",
-            "type": "manual_gate"
-          },
+          "notes": null,
+          "verification_result": null,
           "retry_count": 0
         }
       }
     }
   },
-  "created_at": "2026-01-07T04:06:39.986498Z",
-  "updated_at": "2026-01-07T04:21:34.494503Z",
-  "completed_at": "2026-01-07T04:21:34.494487Z",
+  "created_at": "2026-01-07T04:27:48.406825Z",
+  "updated_at": "2026-01-07T04:30:02.612961Z",
+  "completed_at": null,
   "metadata": {
     "workflow_yaml_path": "/home/user/workflow-orchestrator/workflow.yaml",
-    "workflow_yaml_checksum": "547ebb5f6ebf9451",
-    "completion_notes": "Successfully implemented CORE-010 and CORE-011"
+    "workflow_yaml_checksum": "547ebb5f6ebf9451"
   },
   "workflow_definition": {
     "name": "General Development Workflow",
@@ -952,8 +898,5 @@
       }
     }
   },
-  "constraints": [
-    "Follow implementation notes in ROADMAP.md",
-    "Add tests for all new functionality"
-  ]
+  "constraints": []
 }

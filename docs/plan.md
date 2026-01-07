@@ -1,100 +1,145 @@
-# Implementation Plan: CORE-010 & CORE-011
+# Implementation Plan: CORE-006, SEC-004, CORE-017, CORE-018
 
 ## Overview
 
-Implement two related features that improve visibility and accountability at workflow skip/completion:
+Implementing four roadmap items to improve provider management, secrets handling, and model configuration:
 
-1. **CORE-010: Enhanced Skip Visibility** - Make skipped items more visible to force deliberate consideration
-2. **CORE-011: Workflow Completion Summary & Next Steps** - Show comprehensive summary and prompt for next steps
+1. **CORE-006**: Automatic Connector Detection with User Fallback
+2. **SEC-004**: Cross-Repo Secrets Copy Command
+3. **CORE-017**: Auto-Update Review Models
+4. **CORE-018**: Dynamic Function Calling Detection
 
-## Implementation Steps
+---
 
-### Phase 1: Engine Methods (src/engine.py)
+## CORE-006: Automatic Connector Detection with User Fallback
 
-Add three new methods to `WorkflowEngine`:
+### Goal
+Automatically detect available agent connectors and ask user before defaulting to manual implementation when preferred provider is unavailable.
 
-1. **`get_skipped_items(phase_id: str) -> list[tuple[str, str]]`**
-   - Returns list of (item_id, skip_reason) for skipped items in a phase
-   - Used by cmd_advance to show skipped items from completed phase
+### Implementation
 
-2. **`get_all_skipped_items() -> dict[str, list[tuple[str, str]]]`**
-   - Returns all skipped items grouped by phase
-   - Used by cmd_finish for full summary
+**Files to modify:**
+- `src/environment.py` - Add Manus connector detection
+- `src/providers/__init__.py` - Add `get_available_providers()` and interactive selection
+- `src/cli.py` - Add `--interactive` flag to handoff command
 
-3. **`get_item_definition(item_id: str) -> Optional[ChecklistItemDef]`**
-   - Gets the workflow definition for an item by ID
-   - Used by cmd_skip to show item description/implications
+**Changes:**
 
-4. **`get_workflow_summary() -> dict`**
-   - Returns summary of items per phase (completed, skipped, total)
-   - Used by cmd_finish for completion summary
+1. **environment.py**:
+   - Add `detect_manus_connector()` function that checks for direct Manus API access
+   - Add `get_available_connectors()` to return list of all detectable connectors
 
-### Phase 2: CLI Updates (src/cli.py)
+2. **providers/__init__.py**:
+   - Add `get_available_providers()` function returning list of available providers
+   - Add `prompt_user_for_provider()` interactive function for CLI selection
+   - Update `_auto_detect_provider()` to use interactive selection when preferred unavailable
 
-1. **Update `cmd_skip()`**:
-   - Add enhanced output showing item being skipped with visual separator
-   - Show item description (from definition) if available
-   - Display "Implications" section
+3. **cli.py**:
+   - Add `--interactive` flag to `handoff` command
+   - Show available options when provider unavailable and `--interactive` set
 
-2. **Update `cmd_advance()`**:
-   - After successful advance, show skipped items from the completed phase
-   - Format: `Phase X completed with N skipped item(s):`
+---
 
-3. **Update `cmd_finish()`**:
-   - Add `print_completion_summary()` function:
-     - Task description
-     - Duration (if start/end times available)
-     - Phase summary table (completed/skipped/total per phase)
-     - Skipped items list
-   - Add `print_next_steps_prompt()` function:
-     - Suggest creating PR
-     - Suggest continuing discussion
-     - Prompt for next actions
+## SEC-004: Cross-Repo Secrets Copy Command
 
-### Phase 3: Helper Functions
+### Goal
+Add `orchestrator secrets copy` command to easily copy encrypted secrets between repositories.
 
-1. **`format_duration(timedelta) -> str`**
-   - Format duration as "Xh Ym" or "Xm Ys"
+### Implementation
 
-2. **`get_pr_title(state) -> str`**
-   - Generate suggested PR title from task description
+**Files to modify:**
+- `src/cli.py` - Add `copy` action to secrets subcommand
+- `src/secrets.py` - Add helper function for copying
 
-## Files to Modify
+**Changes:**
 
-| File | Changes |
-|------|---------|
-| `src/engine.py` | Add 4 methods: `get_skipped_items`, `get_all_skipped_items`, `get_item_definition`, `get_workflow_summary` |
-| `src/cli.py` | Update `cmd_skip`, `cmd_advance`, `cmd_finish`; add helper functions |
-| `tests/test_engine.py` | Add tests for new engine methods |
-| `tests/test_cli.py` | Add tests for CLI output changes |
+1. **cli.py**:
+   - Extend `cmd_secrets()` to handle `copy` action
+   - Support `--from` and `--to` flags for source/destination directories
+   - Validate source file exists before copying
+   - Create destination directory if needed
 
-## Test Cases
+2. **secrets.py**:
+   - Add `copy_secrets_file()` helper function
 
-### Engine Tests
-- `test_get_skipped_items_returns_empty_for_no_skips`
-- `test_get_skipped_items_returns_skipped_with_reasons`
-- `test_get_all_skipped_items_groups_by_phase`
-- `test_get_item_definition_finds_item`
-- `test_get_item_definition_returns_none_for_unknown`
-- `test_get_workflow_summary_counts_correctly`
+---
 
-### CLI Tests
-- `test_cmd_skip_shows_enhanced_output`
-- `test_cmd_advance_shows_skipped_items`
-- `test_cmd_finish_shows_completion_summary`
-- `test_cmd_finish_shows_next_steps_prompt`
-- `test_format_duration`
+## CORE-017: Auto-Update Review Models
 
-## Risk Assessment
+### Goal
+Automatically detect and use latest available AI models for reviews, with auto-update if stale.
 
-| Risk | Likelihood | Impact | Mitigation |
-|------|------------|--------|------------|
-| Breaking existing CLI output parsing | Low | Medium | Changes are additive, existing success/error indicators unchanged |
-| Performance with many skipped items | Low | Low | Summary is O(n) where n = items, typical workflows have <50 items |
-| Duration calculation edge cases | Medium | Low | Handle None start/end times gracefully |
+### Implementation
 
-## Dependencies
+**Files to modify:**
+- `src/cli.py` - Add `update-models` command
+- `src/providers/openrouter.py` - Add model update logic
+- New: `src/model_registry.py` - Model registry with staleness checking
 
-- No external dependencies
-- Uses existing `ItemStatus.SKIPPED` enum
-- Uses existing `skip_reason` field on `ItemState`
+**Changes:**
+
+1. **model_registry.py** (new file):
+   - Store last update timestamp in `.model_registry.json`
+   - `get_latest_models()` - Query OpenRouter API for available models
+   - `is_registry_stale()` - Check if > 30 days since last update
+   - `update_registry()` - Fetch and store latest model info
+   - `get_recommended_model()` - Get latest recommended model by category
+
+2. **cli.py**:
+   - Add `update-models` command
+   - Add `--check-models` flag to review command
+   - Add `--no-auto-update` flag to disable auto-updates
+
+3. **openrouter.py**:
+   - Update `FUNCTION_CALLING_MODELS` from registry
+   - Add staleness warning when using outdated models
+
+---
+
+## CORE-018: Dynamic Function Calling Detection
+
+### Goal
+Detect model function calling support from OpenRouter API instead of static list.
+
+### Implementation
+
+**Files to modify:**
+- `src/model_registry.py` - Add capability detection (builds on CORE-017)
+- `src/providers/openrouter.py` - Use dynamic detection
+
+**Changes:**
+
+1. **model_registry.py**:
+   - `get_model_capabilities()` - Query OpenRouter for model capabilities
+   - Cache capabilities in `.model_registry.json`
+   - `supports_function_calling()` - Check if model supports tools
+
+2. **openrouter.py**:
+   - Update `_supports_function_calling()` to use registry
+   - Fall back to static list if registry unavailable/stale
+
+---
+
+## Implementation Order
+
+1. **CORE-017 + CORE-018** (together, since they share the model registry)
+   - Create `model_registry.py`
+   - Add CLI commands
+   - Update openrouter.py
+
+2. **CORE-006** (provider detection)
+   - Update environment.py
+   - Update providers/__init__.py
+   - Update CLI
+
+3. **SEC-004** (secrets copy)
+   - Update secrets.py
+   - Update CLI
+
+---
+
+## Testing Strategy
+
+- Unit tests for new functions
+- Integration tests for CLI commands
+- Mock OpenRouter API responses for model registry tests
