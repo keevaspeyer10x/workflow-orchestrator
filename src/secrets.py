@@ -702,19 +702,22 @@ def decrypt_secrets(input_path: Path, password: str) -> Optional[Dict[str, str]]
         return None
 
 
-def init_secrets_interactive(working_dir: Path) -> bool:
+def init_secrets_interactive(working_dir: Path, password: str = None, from_env: bool = False) -> bool:
     """
-    Initialize secrets interactively.
+    Initialize secrets interactively or from environment.
 
     Prompts user for API keys and password, creates encrypted secrets file.
 
     Args:
         working_dir: Directory to create secrets in
+        password: Pre-set password (skips password prompt if provided)
+        from_env: If True, read API keys from environment instead of prompting
 
     Returns:
         True if successful
     """
     import getpass
+    import os
 
     print("\n=== Secrets Setup ===\n")
     print("This will create an encrypted secrets file for your API keys.")
@@ -729,28 +732,48 @@ def init_secrets_interactive(working_dir: Path) -> bool:
         ("OPENAI_API_KEY", "OpenAI API key (optional)"),
     ]
 
-    for key_name, description in api_keys:
-        value = getpass.getpass(f"{description}: ").strip()
-        if value:
-            secrets[key_name] = value
+    if from_env:
+        # Read from environment variables
+        print("Reading API keys from environment variables...\n")
+        for key_name, description in api_keys:
+            value = os.environ.get(key_name, "").strip()
+            if value:
+                secrets[key_name] = value
+                print(f"  ✓ Found {key_name}")
+            else:
+                print(f"  - {key_name} not set")
+    else:
+        # Interactive input
+        for key_name, description in api_keys:
+            value = getpass.getpass(f"{description}: ").strip()
+            if value:
+                secrets[key_name] = value
 
     if not secrets:
         print("\nNo secrets provided. Aborting.")
+        if from_env:
+            print("Set API keys as environment variables before running with --from-env")
         return False
 
     # Get password
-    print("\nNow set your encryption password.")
-    print("You'll enter this as SECRETS_PASSWORD when starting Claude Code Web sessions.\n")
+    if password is None:
+        print("\nNow set your encryption password.")
+        print("You'll enter this as SECRETS_PASSWORD when starting Claude Code Web sessions.\n")
 
-    password = getpass.getpass("Encryption password (min 8 chars): ").strip()
-    if len(password) < 8:
-        print("Error: Password must be at least 8 characters.")
-        return False
+        password = getpass.getpass("Encryption password (min 8 chars): ").strip()
+        if len(password) < 8:
+            print("Error: Password must be at least 8 characters.")
+            return False
 
-    password2 = getpass.getpass("Confirm password: ").strip()
-    if password != password2:
-        print("Error: Passwords don't match.")
-        return False
+        password2 = getpass.getpass("Confirm password: ").strip()
+        if password != password2:
+            print("Error: Passwords don't match.")
+            return False
+    else:
+        if len(password) < 8:
+            print("Error: Password must be at least 8 characters.")
+            return False
+        print(f"Using provided password (length: {len(password)} chars)")
 
     # Encrypt and save
     output_path = working_dir / SIMPLE_SECRETS_FILE

@@ -1238,8 +1238,10 @@ def cmd_secrets(args):
     action = args.action
 
     if action == "init":
-        # Interactive secrets setup
-        init_secrets_interactive(working_dir)
+        # Secrets setup (interactive or from environment)
+        password = getattr(args, 'password', None)
+        from_env = getattr(args, 'from_env', False)
+        init_secrets_interactive(working_dir, password=password, from_env=from_env)
         return
 
     secrets = get_secrets_manager(working_dir=working_dir)
@@ -1520,8 +1522,10 @@ Examples:
 
     # Secrets command
     secrets_parser = subparsers.add_parser('secrets', help='Manage and test secret access')
-    secrets_parser.add_argument('action', choices=['test', 'source', 'sources'], help='Secrets action')
+    secrets_parser.add_argument('action', choices=['init', 'test', 'source', 'sources'], help='Secrets action')
     secrets_parser.add_argument('name', nargs='?', help='Secret name (for test/source)')
+    secrets_parser.add_argument('--password', help='Encryption password for init (otherwise prompted)')
+    secrets_parser.add_argument('--from-env', action='store_true', help='Read API keys from environment instead of prompting')
     secrets_parser.set_defaults(func=cmd_secrets)
 
     args = parser.parse_args()
