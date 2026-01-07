@@ -40,7 +40,9 @@ from src.secrets import (
     get_user_config,
     get_user_config_value,
     set_user_config_value,
+    init_secrets_interactive,
     CONFIG_FILE,
+    SIMPLE_SECRETS_FILE,
 )
 
 VERSION = "2.0.0"
@@ -1235,6 +1237,11 @@ def cmd_secrets(args):
     working_dir = Path(args.dir or '.')
     action = args.action
 
+    if action == "init":
+        # Interactive secrets setup
+        init_secrets_interactive(working_dir)
+        return
+
     secrets = get_secrets_manager(working_dir=working_dir)
 
     if action == "test":
@@ -1267,7 +1274,13 @@ def cmd_secrets(args):
         for name, info in sources.items():
             status = "✓" if info["available"] else "✗"
             print(f"  {status} {name}: {info['description']}")
-            if name == "sops":
+            if name == "simple":
+                if not info.get("file_exists"):
+                    print(f"      - File not found: {info.get('file_path')}")
+                    print("      - Run: orchestrator secrets init")
+                if not info.get("password_set"):
+                    print("      - SECRETS_PASSWORD not set")
+            elif name == "sops":
                 if not info.get("installed"):
                     print("      - SOPS not installed")
                 if not info.get("key_set"):
@@ -1285,7 +1298,7 @@ def cmd_secrets(args):
 
     else:
         print(f"Unknown action: {action}")
-        print("Available actions: test, source, sources")
+        print("Available actions: init, test, source, sources")
         sys.exit(1)
 
 

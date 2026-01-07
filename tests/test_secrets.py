@@ -240,11 +240,12 @@ class TestSecretsManagerSources:
             assert sources["sops"]["available"] is False
 
     def test_list_sources_github_status(self):
-        """GitHub source reports correct status."""
-        secrets = SecretsManager(config={})
-        sources = secrets.list_sources()
-        assert sources["github"]["configured"] is False
-        assert sources["github"]["available"] is False
+        """GitHub source reports correct status when not configured."""
+        with patch.object(SecretsManager, '_load_user_config', return_value={}):
+            secrets = SecretsManager(config={})
+            sources = secrets.list_sources()
+            assert sources["github"]["configured"] is False
+            assert sources["github"]["available"] is False
 
 
 class TestSecretsManagerGetSource:

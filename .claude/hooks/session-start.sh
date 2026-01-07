@@ -1,7 +1,7 @@
 #!/bin/bash
 # Workflow Orchestrator Session Start Hook
 # - Auto-installs/updates the orchestrator
-# - Loads SOPS AGE key from encrypted storage
+# - Loads secrets from password-encrypted file
 
 set -e
 
@@ -15,39 +15,56 @@ echo "=== Workflow Orchestrator Session Start ==="
 echo "Checking workflow orchestrator..."
 pip install -q --upgrade git+https://github.com/keevaspeyer10x/workflow-orchestrator.git 2>/dev/null || true
 
-# 2. Load SOPS AGE key if available
-KEY_FILE=".manus/keys/age.key.enc"
+# 2. Load secrets from simple encrypted file (preferred method)
+SECRETS_FILE=".manus/secrets.enc"
 
-if [ -f "$KEY_FILE" ]; then
-    if [ -n "$SOPS_KEY_PASSWORD" ]; then
-        echo "Decrypting SOPS AGE key..."
-        AGE_KEY=$(openssl enc -aes-256-cbc -pbkdf2 -d -in "$KEY_FILE" -pass "pass:$SOPS_KEY_PASSWORD" 2>/dev/null) || {
-            echo "Warning: Failed to decrypt SOPS key (wrong password?)"
-            AGE_KEY=""
+if [ -f "$SECRETS_FILE" ]; then
+    if [ -n "$SECRETS_PASSWORD" ]; then
+        echo "Decrypting secrets..."
+        SECRETS_YAML=$(openssl enc -aes-256-cbc -pbkdf2 -d -in "$SECRETS_FILE" -pass "pass:$SECRETS_PASSWORD" 2>/dev/null) || {
+            echo "Warning: Failed to decrypt secrets (wrong password?)"
+            SECRETS_YAML=""
         }
 
-        if [ -n "$AGE_KEY" ]; then
-            # Export to CLAUDE_ENV_FILE so it's available in subsequent commands
-            if [ -n "$CLAUDE_ENV_FILE" ]; then
-                echo "export SOPS_AGE_KEY='$AGE_KEY'" >> "$CLAUDE_ENV_FILE"
-                echo "SOPS AGE key loaded successfully"
-            else
-                # Fallback: just export for this session
-                export SOPS_AGE_KEY="$AGE_KEY"
-                echo "SOPS AGE key loaded (direct export)"
-            fi
+        if [ -n "$SECRETS_YAML" ]; then
+            # Parse YAML and export each key
+            # Simple parsing for KEY: value format
+            while IFS=': ' read -r key value; do
+                # Skip empty lines and comments
+                [[ -z "$key" || "$key" =~ ^# ]] && continue
+                # Remove quotes if present
+                value="${value%\"}"
+                value="${value#\"}"
+                value="${value%\'}"
+                value="${value#\'}"
+                if [ -n "$key" ] && [ -n "$value" ]; then
+                    if [ -n "$CLAUDE_ENV_FILE" ]; then
+                        echo "export $key='$value'" >> "$CLAUDE_ENV_FILE"
+                    fi
+                fi
+            done <<< "$SECRETS_YAML"
+            echo "Secrets loaded successfully"
         fi
     else
-        echo "Note: Encrypted SOPS key found but SOPS_KEY_PASSWORD not set"
-        echo "      Set SOPS_KEY_PASSWORD env var to enable automatic decryption"
+        echo "Note: Encrypted secrets found but SECRETS_PASSWORD not set"
+        echo "      Set SECRETS_PASSWORD env var to enable automatic decryption"
     fi
-elif [ -n "$SOPS_AGE_KEY" ]; then
-    echo "SOPS AGE key already set in environment"
 else
-    echo "Note: No SOPS key configured (optional - needed for encrypted secrets)"
+    echo "Note: No secrets file found at $SECRETS_FILE"
+    echo "      Run 'orchestrator secrets init' to set up secrets"
 fi
 
-# 3. Check for local unencrypted key (for desktop use)
+# 3. Legacy: Load SOPS AGE key if available (for backwards compatibility)
+KEY_FILE=".manus/keys/age.key.enc"
+if [ -f "$KEY_FILE" ] && [ -n "$SOPS_KEY_PASSWORD" ] && [ -z "$SOPS_AGE_KEY" ]; then
+    AGE_KEY=$(openssl enc -aes-256-cbc -pbkdf2 -d -in "$KEY_FILE" -pass "pass:$SOPS_KEY_PASSWORD" 2>/dev/null) || true
+    if [ -n "$AGE_KEY" ] && [ -n "$CLAUDE_ENV_FILE" ]; then
+        echo "export SOPS_AGE_KEY='$AGE_KEY'" >> "$CLAUDE_ENV_FILE"
+        echo "SOPS AGE key loaded (legacy)"
+    fi
+fi
+
+# 4. Check for local unencrypted key (for desktop use)
 LOCAL_KEY=".manus/keys/age.key"
 if [ -f "$LOCAL_KEY" ] && [ -z "$SOPS_AGE_KEY" ]; then
     if [ -n "$CLAUDE_ENV_FILE" ]; then

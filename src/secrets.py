@@ -3,8 +3,9 @@ Multi-source secrets management.
 
 Provides unified access to secrets from multiple sources:
 1. Environment variables (highest priority)
-2. SOPS-encrypted files
-3. GitHub private repos (for Claude Code Web)
+2. Password-encrypted files (simple, works everywhere)
+3. SOPS-encrypted files (for teams with existing SOPS setup)
+4. GitHub private repos (for Claude Code Web with gh CLI)
 
 This complements existing SOPS infrastructure - it doesn't replace it.
 """
@@ -16,8 +17,9 @@ import base64
 import shutil
 import logging
 import subprocess
+import hashlib
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 try:
     import yaml
@@ -31,6 +33,14 @@ logger = logging.getLogger(__name__)
 CONFIG_DIR = Path.home() / ".config" / "orchestrator"
 CONFIG_FILE = CONFIG_DIR / "config.yaml"
 
+# Simple encrypted secrets file (password-based)
+SIMPLE_SECRETS_FILE = ".manus/secrets.enc"
+
+
+def derive_key_from_password(password: str, salt: bytes = b"orchestrator") -> bytes:
+    """Derive a consistent key from a password using PBKDF2."""
+    return hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000, dklen=32)
+
 
 class SecretsManager:
     """
@@ -38,8 +48,9 @@ class SecretsManager:
 
     Sources are checked in order:
     1. Environment variables (always checked first)
-    2. SOPS-encrypted files (if SOPS installed and SOPS_AGE_KEY set)
-    3. GitHub private repo (if secrets_repo configured)
+    2. Simple password-encrypted file (SECRETS_PASSWORD env var)
+    3. SOPS-encrypted files (if SOPS installed and SOPS_AGE_KEY set)
+    4. GitHub private repo (if secrets_repo configured)
 
     Secrets are cached in memory only - never persisted to disk.
     """
@@ -55,13 +66,15 @@ class SecretsManager:
 
         Args:
             config: Configuration dict (may include secrets_repo)
-            working_dir: Working directory for SOPS file lookup
+            working_dir: Working directory for secrets file lookup
             sops_file: Path to SOPS-encrypted file (relative to working_dir)
         """
         self._config = config or {}
         self._working_dir = Path(working_dir) if working_dir else Path.cwd()
         self._sops_file = sops_file or ".manus/secrets.enc.yaml"
+        self._simple_secrets_file = SIMPLE_SECRETS_FILE
         self._cache: Dict[str, str] = {}
+        self._simple_secrets_cache: Optional[Dict[str, str]] = None
 
         # Load user config if exists
         self._user_config = self._load_user_config()
@@ -92,8 +105,9 @@ class SecretsManager:
 
         Priority:
         1. Environment variable
-        2. SOPS-encrypted file
-        3. GitHub private repo
+        2. Simple password-encrypted file
+        3. SOPS-encrypted file
+        4. GitHub private repo
 
         Args:
             name: Secret name (e.g., "OPENROUTER_API_KEY")
@@ -111,13 +125,19 @@ class SecretsManager:
             logger.debug(f"Found {name} in environment")
             return value
 
-        # 2. SOPS-encrypted file
+        # 2. Simple password-encrypted file
+        if value := self._try_simple_encrypted(name):
+            self._cache[name] = value
+            logger.debug(f"Found {name} in simple encrypted file")
+            return value
+
+        # 3. SOPS-encrypted file
         if value := self._try_sops(name):
             self._cache[name] = value
             logger.debug(f"Found {name} in SOPS")
             return value
 
-        # 3. GitHub private repo
+        # 4. GitHub private repo
         if value := self._try_github_repo(name):
             self._cache[name] = value
             logger.debug(f"Found {name} in GitHub repo")
@@ -134,11 +154,15 @@ class SecretsManager:
             name: Secret name
 
         Returns:
-            Source name ("env", "sops", "github") or None if not found
+            Source name ("env", "simple", "sops", "github") or None if not found
         """
         # Check env first
         if os.environ.get(name):
             return "env"
+
+        # Check simple encrypted
+        if self._try_simple_encrypted(name):
+            return "simple"
 
         # Check SOPS
         if self._try_sops(name):
@@ -163,6 +187,18 @@ class SecretsManager:
         sources["env"] = {
             "available": True,
             "description": "Environment variables"
+        }
+
+        # Simple encrypted file availability
+        simple_file_exists = (self._working_dir / self._simple_secrets_file).exists()
+        simple_password_set = bool(os.environ.get("SECRETS_PASSWORD"))
+
+        sources["simple"] = {
+            "available": simple_file_exists and simple_password_set,
+            "file_exists": simple_file_exists,
+            "password_set": simple_password_set,
+            "file_path": str(self._simple_secrets_file),
+            "description": "Password-encrypted file (simple)"
         }
 
         # SOPS availability
@@ -192,6 +228,70 @@ class SecretsManager:
         }
 
         return sources
+
+    def _try_simple_encrypted(self, name: str) -> Optional[str]:
+        """
+        Try to get a secret from simple password-encrypted file.
+
+        Uses openssl aes-256-cbc encryption with password from SECRETS_PASSWORD env var.
+
+        Args:
+            name: Secret name
+
+        Returns:
+            Secret value if found, None otherwise
+        """
+        # Check if password is set
+        password = os.environ.get("SECRETS_PASSWORD")
+        if not password:
+            logger.debug("SECRETS_PASSWORD not set, skipping simple encrypted source")
+            return None
+
+        # Check if file exists
+        secrets_path = self._working_dir / self._simple_secrets_file
+        if not secrets_path.exists():
+            logger.debug(f"Simple secrets file not found: {secrets_path}")
+            return None
+
+        # Use cached decryption if available
+        if self._simple_secrets_cache is not None:
+            return self._simple_secrets_cache.get(name)
+
+        try:
+            # Decrypt using openssl
+            result = subprocess.run(
+                ["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-d",
+                 "-in", str(secrets_path), "-pass", f"pass:{password}"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+            if result.returncode != 0:
+                logger.debug(f"Simple decryption failed (wrong password?): {result.stderr}")
+                return None
+
+            # Parse the YAML content
+            if yaml is None:
+                logger.debug("PyYAML not available for parsing")
+                return None
+
+            data = yaml.safe_load(result.stdout)
+            if not isinstance(data, dict):
+                logger.debug("Simple secrets file doesn't contain a dict")
+                return None
+
+            # Cache all secrets
+            self._simple_secrets_cache = {k: str(v) for k, v in data.items() if v is not None}
+
+            return self._simple_secrets_cache.get(name)
+
+        except subprocess.TimeoutExpired:
+            logger.warning("Simple decryption timed out")
+            return None
+        except Exception as e:
+            logger.debug(f"Simple decryption error: {e}")
+            return None
 
     def _try_sops(self, name: str) -> Optional[str]:
         """
@@ -517,3 +617,150 @@ def get_secret(name: str) -> Optional[str]:
         Secret value if found
     """
     return get_secrets_manager().get_secret(name)
+
+
+def encrypt_secrets(secrets: Dict[str, str], password: str, output_path: Path) -> bool:
+    """
+    Encrypt secrets to a file using password-based encryption.
+
+    Args:
+        secrets: Dict of secret names to values
+        password: Encryption password
+        output_path: Path to write encrypted file
+
+    Returns:
+        True if successful
+    """
+    if yaml is None:
+        raise RuntimeError("PyYAML required for secrets encryption")
+
+    # Create YAML content
+    yaml_content = yaml.safe_dump(secrets, default_flow_style=False)
+
+    # Ensure output directory exists
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        # Encrypt using openssl
+        result = subprocess.run(
+            ["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-salt",
+             "-out", str(output_path), "-pass", f"pass:{password}"],
+            input=yaml_content,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        if result.returncode != 0:
+            logger.error(f"Encryption failed: {result.stderr}")
+            return False
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Encryption error: {e}")
+        return False
+
+
+def decrypt_secrets(input_path: Path, password: str) -> Optional[Dict[str, str]]:
+    """
+    Decrypt secrets from a password-encrypted file.
+
+    Args:
+        input_path: Path to encrypted file
+        password: Decryption password
+
+    Returns:
+        Dict of secrets if successful, None otherwise
+    """
+    if yaml is None:
+        raise RuntimeError("PyYAML required for secrets decryption")
+
+    if not input_path.exists():
+        return None
+
+    try:
+        result = subprocess.run(
+            ["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-d",
+             "-in", str(input_path), "-pass", f"pass:{password}"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        if result.returncode != 0:
+            return None
+
+        data = yaml.safe_load(result.stdout)
+        if not isinstance(data, dict):
+            return None
+
+        return {k: str(v) for k, v in data.items() if v is not None}
+
+    except Exception:
+        return None
+
+
+def init_secrets_interactive(working_dir: Path) -> bool:
+    """
+    Initialize secrets interactively.
+
+    Prompts user for API keys and password, creates encrypted secrets file.
+
+    Args:
+        working_dir: Directory to create secrets in
+
+    Returns:
+        True if successful
+    """
+    import getpass
+
+    print("\n=== Secrets Setup ===\n")
+    print("This will create an encrypted secrets file for your API keys.")
+    print("You'll set a password that you'll use in future sessions.\n")
+
+    secrets = {}
+
+    # Common API keys
+    api_keys = [
+        ("OPENROUTER_API_KEY", "OpenRouter API key (for multi-model reviews)"),
+        ("ANTHROPIC_API_KEY", "Anthropic API key (optional)"),
+        ("OPENAI_API_KEY", "OpenAI API key (optional)"),
+    ]
+
+    for key_name, description in api_keys:
+        value = getpass.getpass(f"{description}: ").strip()
+        if value:
+            secrets[key_name] = value
+
+    if not secrets:
+        print("\nNo secrets provided. Aborting.")
+        return False
+
+    # Get password
+    print("\nNow set your encryption password.")
+    print("You'll enter this as SECRETS_PASSWORD when starting Claude Code Web sessions.\n")
+
+    password = getpass.getpass("Encryption password (min 8 chars): ").strip()
+    if len(password) < 8:
+        print("Error: Password must be at least 8 characters.")
+        return False
+
+    password2 = getpass.getpass("Confirm password: ").strip()
+    if password != password2:
+        print("Error: Passwords don't match.")
+        return False
+
+    # Encrypt and save
+    output_path = working_dir / SIMPLE_SECRETS_FILE
+
+    if encrypt_secrets(secrets, password, output_path):
+        print(f"\n✓ Secrets encrypted to {output_path}")
+        print("\nNext steps:")
+        print("  1. Commit the encrypted file: git add .manus/secrets.enc && git commit")
+        print("  2. In Claude Code Web, set SECRETS_PASSWORD when starting a task")
+        print("  3. Your API keys will be automatically available!")
+        return True
+    else:
+        print("\nError: Failed to encrypt secrets.")
+        return False

@@ -296,8 +296,9 @@ The orchestrator automatically detects your environment and adjusts:
 The orchestrator supports multiple secret sources, checked in priority order:
 
 1. **Environment Variables** (highest priority)
-2. **SOPS-encrypted files** (for teams)
-3. **GitHub Private Repos** (for Claude Code Web with `gh` CLI)
+2. **Password-encrypted file** (recommended for Claude Code Web)
+3. **SOPS-encrypted files** (for teams with existing SOPS setup)
+4. **GitHub Private Repos** (requires `gh` CLI authentication)
 
 ### Check Available Sources
 
@@ -305,7 +306,41 @@ The orchestrator supports multiple secret sources, checked in priority order:
 orchestrator secrets sources
 ```
 
-### Option 1: Environment Variables (Simplest)
+### Option 1: Password-Encrypted File (Recommended)
+
+The simplest approach for Claude Code Web. One password unlocks all your API keys.
+
+**One-time setup (run once in any repo):**
+
+```bash
+orchestrator secrets init
+```
+
+This will:
+1. Prompt you for your API keys (OpenRouter, Anthropic, OpenAI, etc.)
+2. Ask you to set an encryption password
+3. Create `.manus/secrets.enc` (safe to commit!)
+
+**Commit the encrypted file:**
+
+```bash
+git add .manus/secrets.enc
+git commit -m "Add encrypted secrets"
+git push
+```
+
+**Using in Claude Code Web:**
+
+When starting a new task, set one environment variable:
+- `SECRETS_PASSWORD` = your chosen password
+
+That's it! The SessionStart hook automatically decrypts and loads all your API keys.
+
+**Cross-repo usage:** Copy `.manus/secrets.enc` to any repo. Same password works everywhere.
+
+### Option 2: Environment Variables
+
+For desktop use or when you don't need persistence:
 
 ```bash
 # Set in your shell profile
@@ -313,41 +348,9 @@ export ANTHROPIC_API_KEY="sk-ant-xxxxx"
 export OPENROUTER_API_KEY="sk-or-xxxxx"
 ```
 
-### Option 2: SOPS with Auto-Loading (Recommended for Claude Code Web)
+### Option 3: SOPS (for Teams)
 
-For Claude Code Web sessions, you can store your SOPS AGE key encrypted in the repo.
-This requires only a short password per session instead of pasting the full key.
-
-**One-time setup:**
-
-```bash
-# Run the encryption script
-./scripts/encrypt-sops-key.sh
-
-# Enter your AGE secret key when prompted
-# Choose a memorable password
-
-# Commit the encrypted key (safe to commit!)
-git add .manus/keys/age.key.enc
-git commit -m "Add encrypted SOPS key"
-git push
-```
-
-**Using in Claude Code Web:**
-
-1. When starting a new task, set the environment variable:
-   - `SOPS_KEY_PASSWORD` = your chosen password
-
-2. The SessionStart hook will automatically:
-   - Decrypt your AGE key
-   - Set `SOPS_AGE_KEY` for the session
-   - Enable SOPS secret access
-
-**For desktop use:** Store the unencrypted key at `.manus/keys/age.key` (gitignored).
-
-### Option 3: SOPS Manual Setup (for Teams)
-
-SOPS provides encrypted secrets that can be safely committed to git:
+For teams with existing SOPS infrastructure:
 
 ```bash
 # Install SOPS and age
@@ -363,20 +366,6 @@ sops --encrypt --age $(cat ~/.sops-key.txt | grep "public key" | cut -d: -f2 | t
 # Set the key for decryption
 export SOPS_AGE_KEY="AGE-SECRET-KEY-..."
 ```
-
-### Option 4: GitHub Private Repo
-
-When using Claude Code CLI (desktop) with `gh` authenticated:
-
-```bash
-# Configure your secrets repo (one time)
-orchestrator config set secrets_repo YOUR_USERNAME/secrets
-
-# Create your secrets repo on GitHub (private)
-# Add files named exactly as the secret: OPENROUTER_API_KEY, OPENAI_API_KEY, etc.
-```
-
-Note: This requires `gh auth login` and works best on desktop where you can authenticate the GitHub CLI.
 
 ### Testing Secret Access
 
