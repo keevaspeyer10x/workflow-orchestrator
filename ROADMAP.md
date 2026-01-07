@@ -652,9 +652,9 @@ class EncryptedCheckpointBackend(CheckpointBackend):
 ## Security Improvements
 
 ### SEC-001: HTTPS Enforcement
-**Status:** Planned  
-**Complexity:** Low  
-**Source:** Security Review (Score: 7/10)  
+**Status:** Planned
+**Complexity:** Low
+**Source:** Security Review (Score: 7/10)
 **Description:** Validate that `visual_verification_url` uses HTTPS to prevent API key transmission over insecure connections.
 
 **Implementation:**
@@ -662,6 +662,130 @@ class EncryptedCheckpointBackend(CheckpointBackend):
 if not service_url.startswith('https://'):
     raise VisualVerificationError("Service URL must use HTTPS")
 ```
+
+---
+
+### SEC-004: Cross-Repo Secrets Copy Command
+**Status:** Planned
+**Complexity:** Low
+**Priority:** High
+**Source:** Secrets Management Code Review
+**Description:** Add `orchestrator secrets copy` command to easily copy encrypted secrets to other repos.
+
+**Problem Solved:**
+Currently users must manually copy `.manus/secrets.enc` between repos. This is error-prone and not discoverable.
+
+**Desired Behavior:**
+```bash
+# Copy secrets to another repo
+orchestrator secrets copy /path/to/other/repo
+
+# Copy from another repo to current
+orchestrator secrets copy --from /path/to/source/repo
+```
+
+**Implementation Notes:**
+```python
+def cmd_secrets_copy(args):
+    """Copy encrypted secrets between repos."""
+    source = Path(args.from_dir or '.') / '.manus/secrets.enc'
+    dest = Path(args.to_dir or '.') / '.manus/secrets.enc'
+
+    if not source.exists():
+        print(f"Error: No secrets file at {source}")
+        return False
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(source, dest)
+    print(f"✓ Copied secrets to {dest}")
+```
+
+**Tasks:**
+- [ ] Add `secrets copy` subcommand to CLI
+- [ ] Support `--from` and `--to` flags
+- [ ] Validate source file exists
+- [ ] Create destination directory if needed
+- [ ] Add to documentation
+
+---
+
+### SEC-005: Per-User Encrypted Secrets
+**Status:** Planned
+**Complexity:** Medium
+**Priority:** Medium
+**Source:** Secrets Management Code Review
+**Description:** Support per-user encrypted secrets files for true multi-user scenarios.
+
+**Problem Solved:**
+Current single `.manus/secrets.enc` means all users share the same password and see the same secrets. Teams need user-specific API keys.
+
+**Desired Behavior:**
+```bash
+# Initialize secrets for current user
+orchestrator secrets init --user
+
+# Creates .manus/secrets.enc.USERNAME (e.g., .manus/secrets.enc.alice)
+
+# Each user sets their own SECRETS_PASSWORD
+# Files are gitignored by default
+```
+
+**Implementation Notes:**
+```python
+SIMPLE_SECRETS_FILE_TEMPLATE = ".manus/secrets.enc.{username}"
+
+def get_secrets_file(user_specific: bool = False) -> Path:
+    if user_specific:
+        username = os.environ.get('USER', 'default')
+        return Path(SIMPLE_SECRETS_FILE_TEMPLATE.format(username=username))
+    return Path(SIMPLE_SECRETS_FILE)
+
+# SecretsManager checks both:
+# 1. User-specific file first
+# 2. Shared file as fallback
+```
+
+**Tasks:**
+- [ ] Add `--user` flag to `secrets init`
+- [ ] Update SecretsManager to check user-specific file first
+- [ ] Add `.manus/secrets.enc.*` to default .gitignore
+- [ ] Update SessionStart hook to handle user-specific files
+- [ ] Document multi-user setup
+
+---
+
+### SEC-006: OAuth-Based Secrets (Future)
+**Status:** Planned
+**Complexity:** High
+**Priority:** Low
+**Source:** Secrets Management Code Review
+**Description:** OAuth-based secrets storage for fully invisible UX (no password per session).
+
+**Problem Solved:**
+Users must enter `SECRETS_PASSWORD` each Claude Code Web session. True "invisible" secrets would require no per-session input.
+
+**Desired Behavior:**
+1. User authenticates once via OAuth (GitHub, Google, etc.)
+2. Secrets stored server-side, keyed to user identity
+3. Claude Code Web sessions auto-retrieve via OAuth token
+4. No password required per session
+
+**Architecture Notes:**
+- Requires server-side component (secrets vault)
+- OAuth provider integration for identity
+- Token exchange for secrets retrieval
+- Beyond current CLI-only architecture
+
+**Consideration:**
+This is a significant architectural change. May be better suited for a separate "Orchestrator Cloud" service rather than CLI enhancement.
+
+**Tasks:**
+- [ ] Design secrets vault API
+- [ ] Implement OAuth integration (GitHub first)
+- [ ] Create server-side storage
+- [ ] Add `orchestrator auth login` command
+- [ ] Update SecretsManager to use OAuth source
+- [ ] Document OAuth setup
 
 ---
 
