@@ -56,7 +56,9 @@ class AiderExecutor:
 | `src/review/setup.py` | MODIFY - Add aider check |
 | `src/review/__init__.py` | MODIFY - Export AiderExecutor |
 | `requirements.txt` | MODIFY - Add aider-chat |
-| `.claude/hooks/session-start.sh` | MODIFY - Install aider |
+| `install.sh` | MODIFY - Add pip install aider-chat |
+| `.claude/hooks/session-start.sh` | MODIFY - Auto-install aider if missing |
+| `docs/SETUP_GUIDE.md` | MODIFY - Document Aider as review provider |
 | `tests/test_review_aider.py` | CREATE - Tests |
 
 ## User Experience
