@@ -22,11 +22,7 @@ Add a final stage - document - eg. not sure what it looks like, but update PRD, 
 
 Might need to chunk the work at some stages - if complex enough
 
-Design at the start, Document at the end.
-
-Should we have an AI critique the plan - or every step?
-
-Need a link to the relevant files in the comments after each section before approve. Review Things.
+Design at the start, 
 
 Do we make a formal test phase?
 
@@ -47,3 +43,12 @@ Don't forget
 - Tidy up the repo - archive unnecessary file
 
 Proactively add CI/CD tests on PR or merge - Code reviews, other things to think about? Should we putting CI/CD practices into place as part of this whole process. Should we be reviewing the workflow from a Expert CI/CD perspective?
+
+
+# Done
+
+Document at the end.
+
+Should we have an AI critique the plan - or every step?
+
+Need a link to the relevant files in the comments after each section before approve. Review Things.
