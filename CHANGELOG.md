@@ -2,6 +2,18 @@
 
 All notable changes to the workflow-orchestrator.
 
+## [2.2.1] - 2026-01-08
+
+### Added
+- **Auto-Run Third-Party Reviews (WF-010)**: Automatically runs third-party model reviews when completing REVIEW phase items
+  - `security_review` → runs security review via Codex
+  - `quality_review` → runs quality review via Codex
+  - `architecture_review` → runs holistic review via Gemini
+  - Blocks completion if review fails or finds blocking issues
+  - Captures review results in completion notes
+  - `--skip-auto-review` flag available (not recommended)
+  - Guides users to `skip --reason` if review infrastructure unavailable
+
 ## [2.2.0] - 2026-01-07
 
 ### Added

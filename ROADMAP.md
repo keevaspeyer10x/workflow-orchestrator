@@ -1236,6 +1236,24 @@ This is a significant architectural change. May be better suited for a separate 
 
 ---
 
+### WF-010: Auto-Run Third-Party Reviews on Completion
+**Status:** ✅ Completed (2026-01-08)
+**Complexity:** Medium
+**Priority:** High
+**Description:** When completing REVIEW phase items (security_review, quality_review, architecture_review), automatically run the corresponding third-party model review and capture results in completion notes.
+
+**Implementation:**
+- Added `REVIEW_ITEM_MAPPING` constant mapping item IDs to review types
+- Added `run_auto_review()` helper function to execute reviews via ReviewRouter
+- Modified `cmd_complete()` to auto-run reviews for mapped items
+- Added `--skip-auto-review` flag (not recommended) for bypassing
+- Blocks completion if review fails or finds blocking issues
+- Guides user to use `skip --reason` with explanation if review unavailable
+
+**Files:** `src/cli.py`
+
+---
+
 ### WF-005: Summary Before Approval Gates
 **Status:** Planned
 **Complexity:** Low

@@ -56,6 +56,70 @@ VERSION = "2.0.0"
 
 
 # ============================================================================
+# Auto-Review Mapping (WF-010)
+# ============================================================================
+# Maps workflow item IDs to third-party review types
+# When completing these items, auto-run the corresponding review
+REVIEW_ITEM_MAPPING = {
+    "security_review": "security",
+    "quality_review": "quality",
+    "architecture_review": "holistic",  # Architecture maps to holistic review
+}
+
+
+def run_auto_review(review_type: str, working_dir: Path = None) -> tuple[bool, str, str]:
+    """
+    Run an automated third-party review.
+
+    Args:
+        review_type: The review type (security, quality, consistency, holistic)
+        working_dir: Working directory for the review
+
+    Returns:
+        Tuple of (success, notes, error_message)
+        - success: True if review passed
+        - notes: Completion notes describing the review result
+        - error_message: Error description if review couldn't run (CLIs not available, etc.)
+    """
+    working_dir = working_dir or Path('.')
+
+    try:
+        router = ReviewRouter(working_dir=working_dir)
+    except ValueError as e:
+        return False, "", f"Review infrastructure not available: {e}"
+
+    # Check if method is available
+    if router.method == ReviewMethod.UNAVAILABLE:
+        return False, "", "No review method available (install Codex/Gemini CLIs or configure OpenRouter API)"
+
+    try:
+        result = router.execute_review(review_type)
+
+        if result.error:
+            return False, "", f"Review error: {result.error}"
+
+        # Build completion notes from review result
+        model_info = f"[{router.method.value}] {result.model_used}"
+        duration = f"{result.duration_seconds:.1f}s" if result.duration_seconds else "N/A"
+
+        if result.findings:
+            finding_count = len(result.findings)
+            blocking_count = result.blocking_count
+            if blocking_count > 0:
+                notes = f"THIRD-PARTY REVIEW ({model_info}, {duration}): {finding_count} findings, {blocking_count} BLOCKING"
+                return False, notes, f"Review found {blocking_count} blocking issue(s)"
+            else:
+                notes = f"THIRD-PARTY REVIEW ({model_info}, {duration}): {finding_count} non-blocking findings. {result.summary or 'Passed'}"
+                return True, notes, ""
+        else:
+            notes = f"THIRD-PARTY REVIEW ({model_info}, {duration}): No issues found"
+            return True, notes, ""
+
+    except Exception as e:
+        return False, "", f"Review execution failed: {e}"
+
+
+# ============================================================================
 # Helper Functions (CORE-010, CORE-011)
 # ============================================================================
 
@@ -217,13 +281,57 @@ def cmd_complete(args):
         print(f"Error: {e}")
         sys.exit(1)
 
+    # WF-010: Auto-run third-party reviews for REVIEW phase items
+    item_id = args.item
+    if item_id in REVIEW_ITEM_MAPPING and not args.skip_auto_review:
+        review_type = REVIEW_ITEM_MAPPING[item_id]
+        print(f"Running third-party {review_type} review...")
+        print()
+
+        working_dir = Path(args.dir) if hasattr(args, 'dir') and args.dir else Path('.')
+        review_success, review_notes, review_error = run_auto_review(review_type, working_dir)
+
+        if review_error:
+            # Review couldn't run - block completion
+            print("=" * 60)
+            print(f"✗ CANNOT COMPLETE: Third-party review required")
+            print("=" * 60)
+            print(f"Error: {review_error}")
+            print()
+            print("Options:")
+            print(f"  1. Fix the issue and try again")
+            print(f"  2. Skip with explanation: orchestrator skip {item_id} --reason \"<why review unavailable>\"")
+            print()
+            print("Third-party reviews ensure code quality. Skipping requires justification.")
+            sys.exit(1)
+
+        if not review_success:
+            # Review found blocking issues
+            print("=" * 60)
+            print(f"✗ REVIEW FAILED: {review_error or 'Blocking issues found'}")
+            print("=" * 60)
+            print(f"Review notes: {review_notes}")
+            print()
+            print("Options:")
+            print(f"  1. Fix the issues and run: orchestrator complete {item_id}")
+            print(f"  2. Skip with explanation: orchestrator skip {item_id} --reason \"<why issues acceptable>\"")
+            sys.exit(1)
+
+        # Review passed - append review notes to user notes
+        print(f"✓ Third-party review passed")
+        print()
+        if notes:
+            notes = f"{notes}. {review_notes}"
+        else:
+            notes = review_notes
+
     try:
         success, message = engine.complete_item(
             args.item,
             notes=notes,
             skip_verification=args.skip_verify
         )
-        
+
         if success:
             print(f"✓ {message}")
             if not args.quiet:
@@ -1894,7 +2002,10 @@ Examples:
     complete_parser.add_argument('item', help='Item ID to complete')
     complete_parser.add_argument('--notes', '-n', help='Notes about the completion')
     complete_parser.add_argument('--skip-verify', action='store_true', help='Skip verification')
+    complete_parser.add_argument('--skip-auto-review', action='store_true',
+                                 help='Skip auto-running third-party review (not recommended)')
     complete_parser.add_argument('--quiet', '-q', action='store_true', help='Minimal output')
+    complete_parser.add_argument('--dir', '-d', help='Working directory')
     complete_parser.set_defaults(func=cmd_complete)
     
     # Skip command
