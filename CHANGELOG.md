@@ -2,6 +2,43 @@
 
 All notable changes to the workflow-orchestrator.
 
+## [2.2.0] - 2026-01-07
+
+### Added
+- **OpenRouter Streaming Support (CORE-012)**: Real-time response streaming
+  - `execute_streaming()` method yields chunks as they arrive
+  - `stream_to_console()` convenience method for interactive use
+  - Handles stream interruption gracefully
+
+- **Visual Verification Enhancements (VV-001 through VV-006)**:
+  - **VV-001**: Auto-load style guide - `style_guide_path` parameter auto-loads and includes style guide in all verifications
+  - **VV-002**: Workflow step integration - `run_all_visual_tests()` wires into workflow's `visual_regression_test` item
+  - **VV-003**: Visual test discovery - `discover_visual_tests()` scans `tests/visual/*.md` files with YAML frontmatter
+  - **VV-004**: Baseline management - `save_baseline()`, `get_baseline()`, `compare_with_baseline()` with hash-based comparison
+  - **VV-006**: Cost tracking - `UsageInfo` dataclass with token counts and estimated cost from service
+
+- **Model Selection Guidance (WF-003)**: `get_latest_model(category)` in model registry
+  - Categories: `codex`, `gemini`, `claude` and aliases (`security`, `quality`, `consistency`, `holistic`)
+  - Returns latest available model for review routing
+
+- **Changelog/Roadmap Automation**: New `update_changelog_roadmap` item in LEARN phase
+  - Prompts to move completed roadmap items to changelog
+  - Configurable `roadmap_file` and `changelog_file` settings in workflow.yaml
+
+- **CLI Enhancements**:
+  - `visual-verify-all` command for running all visual tests in a directory
+  - `--device` flag for device presets (e.g., `iphone-14`, `desktop`)
+  - `--show-cost` flag for cost/token display
+  - `--save-baseline` flag for baseline screenshot management
+
+### Changed
+- Visual verification client now returns `VerificationResult` dataclass instead of dict
+- Mobile viewport updated to iPhone 14 dimensions (390x844)
+- API key is now optional for visual verification (for unprotected services)
+
+### Integration
+- Updated `visual-verification-service` with cost tracking (`usage` field in response)
+
 ## [2.1.0] - 2026-01-06
 
 ### Added

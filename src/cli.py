@@ -23,9 +23,15 @@ from src.checkpoint import CheckpointManager, CheckpointData
 from src.visual_verification import (
     VisualVerificationClient,
     VisualVerificationError,
+    VerificationResult,
+    CostSummary,
     create_desktop_viewport,
     create_mobile_viewport,
-    format_verification_result
+    format_verification_result,
+    format_cost_summary,
+    discover_visual_tests,
+    run_all_visual_tests,
+    DEVICE_PRESETS,
 )
 from src.review import (
     ReviewRouter,
@@ -978,6 +984,74 @@ def cmd_visual_verify(args):
         sys.exit(1)
 
 
+def cmd_visual_verify_all(args):
+    """Run all visual tests in a directory (VV-003)."""
+    try:
+        client = VisualVerificationClient(
+            style_guide_path=args.style_guide if hasattr(args, 'style_guide') else None
+        )
+    except VisualVerificationError as e:
+        print(f"Error: {e}")
+        print("\nSet VISUAL_VERIFICATION_URL environment variable.")
+        sys.exit(1)
+
+    # Discover and run tests
+    print(f"Discovering visual tests in {args.tests_dir}...")
+    tests = discover_visual_tests(args.tests_dir)
+
+    if not tests:
+        print(f"No visual test files found in {args.tests_dir}")
+        print("\nCreate test files with YAML frontmatter:")
+        print("  ---")
+        print("  url: /dashboard")
+        print("  device: iphone-14")
+        print("  tags: [core]")
+        print("  ---")
+        print("  The dashboard should display...")
+        sys.exit(0)
+
+    print(f"Found {len(tests)} test(s)")
+
+    # Run tests
+    results = run_all_visual_tests(
+        client,
+        tests_dir=args.tests_dir,
+        app_url=args.app_url,
+        tags=args.tag,
+        save_baselines=args.save_baselines
+    )
+
+    # Display results
+    print("\n" + "=" * 60)
+    print("VISUAL TEST RESULTS")
+    print("=" * 60)
+
+    for item in results['results']:
+        if 'error' in item:
+            print(f"✗ {item['test']}: ERROR - {item['error']}")
+        else:
+            result = item['result']
+            status_icon = '✓' if result.status == 'pass' else '✗'
+            print(f"{status_icon} {item['test']}: {result.status}")
+            if result.status != 'pass' and result.issues:
+                for issue in result.issues[:3]:  # Show first 3 issues
+                    print(f"    - [{issue.get('severity', 'unknown')}] {issue.get('description', '')}")
+
+    # Summary
+    summary = results['summary']
+    print("\n" + "-" * 60)
+    print(f"Total: {summary['total']} | Passed: {summary['passed']} | Failed: {summary['failed']} | Errors: {summary['errors']}")
+
+    # Cost summary (VV-006)
+    if args.show_cost:
+        print(format_cost_summary(results['cost_summary']))
+
+    # Exit code
+    if summary['failed'] > 0 or summary['errors'] > 0:
+        sys.exit(1)
+    sys.exit(0)
+
+
 def cmd_visual_template(args):
     """Generate a visual test template for a feature."""
     template = f'''# Visual UAT Test: {args.feature_name}
@@ -1910,10 +1984,22 @@ Examples:
     visual_verify_parser = subparsers.add_parser('visual-verify', help='Run visual verification against a URL')
     visual_verify_parser.add_argument('--url', '-u', required=True, help='URL to verify')
     visual_verify_parser.add_argument('--spec', '-s', required=True, help='Path to specification file or inline spec')
+    visual_verify_parser.add_argument('--device', '-d', choices=list(DEVICE_PRESETS.keys()), help='Device preset (e.g., iphone-14, desktop)')
     visual_verify_parser.add_argument('--no-mobile', dest='mobile', action='store_false', default=True, help='Skip mobile viewport test')
     visual_verify_parser.add_argument('--style-guide', '-g', help='Path to style guide file')
+    visual_verify_parser.add_argument('--show-cost', action='store_true', help='Show cost/token usage (VV-006)')
+    visual_verify_parser.add_argument('--save-baseline', action='store_true', help='Save screenshots as baselines (VV-004)')
     visual_verify_parser.set_defaults(func=cmd_visual_verify)
-    
+
+    # Visual-verify-all command (VV-003)
+    visual_verify_all_parser = subparsers.add_parser('visual-verify-all', help='Run all visual tests in tests/visual/')
+    visual_verify_all_parser.add_argument('--tests-dir', '-t', default='tests/visual', help='Directory containing test files')
+    visual_verify_all_parser.add_argument('--app-url', '-a', help='Base URL to prepend to relative URLs')
+    visual_verify_all_parser.add_argument('--tag', action='append', help='Filter tests by tag (can repeat)')
+    visual_verify_all_parser.add_argument('--save-baselines', action='store_true', help='Save screenshots as baselines')
+    visual_verify_all_parser.add_argument('--show-cost', action='store_true', help='Show cost summary')
+    visual_verify_all_parser.set_defaults(func=cmd_visual_verify_all)
+
     # Visual-template command (NEW)
     visual_template_parser = subparsers.add_parser('visual-template', help='Generate a visual test template')
     visual_template_parser.add_argument('feature_name', help='Name of the feature to test')

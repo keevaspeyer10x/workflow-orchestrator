@@ -775,3 +775,114 @@ Implemented 5 workflow improvements to make the development process more autonom
 ---
 
 *Generated: 2026-01-07*
+
+---
+
+# Learnings: Visual Verification Enhancements & Streaming Support
+
+## Task Summary
+Implemented multiple roadmap items to enhance visual verification capabilities and add OpenRouter streaming support:
+- CORE-012: OpenRouter Streaming Support
+- VV-001-004: Visual Verification features (Auto-load Style Guide, Workflow Integration, Test Discovery, Baseline Management)
+- VV-006: Cost Tracking for Visual Tests
+- WF-003: Model Selection Guidance
+
+## Root Cause Analysis
+
+### Why These Features Were Needed
+1. **Streaming support** - Users wanted real-time feedback during long OpenRouter API calls
+2. **Style guide consistency** - Manual style guide inclusion was error-prone
+3. **Test organization** - Visual tests were scattered, no discovery mechanism
+4. **Cost visibility** - No way to track API costs for visual verification
+5. **Model selection** - Hardcoded model names became stale as new models released
+
+### Cross-Repo Coordination
+This implementation required changes to both `workflow-orchestrator` and `visual-verification-service` repos:
+- Service needed to track and return token usage
+- Client needed to consume and aggregate usage data
+- Holistic approach prevented coming back to fix inconsistencies
+
+## What Was Built
+
+### CORE-012: OpenRouter Streaming
+- `execute_streaming()` method in openrouter.py
+- Generator-based API yields chunks as they arrive
+- `stream_to_console()` convenience method for interactive use
+- SSE format parsing with `[DONE]` marker handling
+
+### VV-001: Auto-load Style Guide
+- `style_guide_path` parameter auto-loads and includes style guide
+- Style guide content prepended to specification in verify requests
+
+### VV-002: Workflow Step Integration
+- `run_all_visual_tests()` function for batch testing
+- Integrates with workflow's `visual_regression_test` item
+
+### VV-003: Visual Test Discovery
+- `discover_visual_tests()` scans `tests/visual/*.md`
+- YAML frontmatter parsing for test metadata (url, device, tags)
+- `VisualTestCase` dataclass for structured test data
+
+### VV-004: Baseline Screenshot Management
+- `save_baseline()`, `get_baseline()`, `compare_with_baseline()`
+- Client-side baselines using hash-based comparison
+- Local storage in `.visual_baselines/` directory
+
+### VV-006: Cost Tracking
+- `UsageInfo` dataclass with input_tokens, output_tokens, estimated_cost
+- `CostSummary` class for aggregating across multiple tests
+- Service-side token counting and cost estimation
+- `--show-cost` CLI flag
+
+### WF-003: Model Selection
+- `get_latest_model(category)` in model registry
+- Categories: codex, gemini, claude
+- Aliases: security/quality → codex, consistency/holistic → gemini
+- Priority-ordered fallback lists
+
+### Changelog Automation
+- Added `update_changelog_roadmap` item to LEARN phase
+- Configurable `roadmap_file` and `changelog_file` settings
+
+## Technical Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| Client-side baselines | Simpler than server storage, avoids cross-user conflicts |
+| Server-side cost tracking | Service has access to actual API response metadata |
+| Generator for streaming | Natural Python pattern for incremental data |
+| Dataclasses over dicts | Type safety, IDE autocomplete, self-documenting |
+| Category aliases | Makes model selection intuitive for review routing |
+
+## Test Coverage
+
+| Module | Tests | Notes |
+|--------|-------|-------|
+| test_visual_verification.py | 27 | Rewrote for VerificationResult dataclass |
+| Mobile viewport | Fixed | Updated 375x812 → 390x844 (iPhone 14) |
+
+## Key Files Modified
+
+| File | Changes |
+|------|---------|
+| `src/visual_verification.py` | Major rewrite with all VV features |
+| `src/providers/openrouter.py` | Added streaming support |
+| `src/model_registry.py` | Added get_latest_model() |
+| `src/default_workflow.yaml` | Added changelog automation item |
+| `src/cli.py` | Added visual-verify-all command |
+| `CHANGELOG.md` | Added v2.2.0 entry |
+| `ROADMAP.md` | Marked completed items |
+
+## Recommendations for Future
+
+### Short-term
+1. **Add tests for streaming** - Currently untested in CI
+2. **Add tests for baseline comparison** - Hash comparison edge cases
+
+### Medium-term
+1. **Server-side baselines** - For team collaboration on visual tests
+2. **Cost budgets** - Warn when tests exceed cost threshold
+
+---
+
+*Generated: 2026-01-07*

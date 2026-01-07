@@ -771,39 +771,18 @@ class CachedProvider:
 ---
 
 #### CORE-012: OpenRouter Streaming Support
-**Status:** Planned  
-**Complexity:** Medium  
-**Priority:** Low  
+**Status:** ✅ Completed (2026-01-07)
+**Complexity:** Medium
+**Priority:** Low
 **Description:** Add streaming support to OpenRouter provider for real-time output display.
 
-**Current State:**
-- OpenRouter provider waits for full response
-- No progress indication during long generations
+**Implementation:**
+- Added `execute_streaming()` method that yields chunks via generator
+- Added `stream_to_console()` convenience method
+- Handles SSE format (`data: {...}`) parsing
+- Graceful handling of stream interruption and `[DONE]` marker
 
-**Desired State:**
-- Optional streaming mode with `--stream` flag
-- Real-time token output to terminal
-- Progress indicator for non-streaming mode
-
-**Implementation Notes:**
-```python
-def execute_streaming(self, prompt: str) -> Generator[str, None, ExecutionResult]:
-    response = requests.post(
-        f"{self._base_url}/chat/completions",
-        json={...},
-        stream=True
-    )
-    for line in response.iter_lines():
-        if line.startswith(b'data: '):
-            chunk = json.loads(line[6:])
-            yield chunk['choices'][0]['delta'].get('content', '')
-```
-
-**Tasks:**
-- [ ] Add `execute_streaming()` method to OpenRouter provider
-- [ ] Add `--stream` flag to handoff command
-- [ ] Handle stream interruption gracefully
-- [ ] Add progress spinner for non-streaming mode
+**Files:** `src/providers/openrouter.py`
 
 ---
 
@@ -915,93 +894,66 @@ class EncryptedCheckpointBackend(CheckpointBackend):
 ### High Priority
 
 #### VV-001: Auto-load Style Guide in Visual Verification
-**Status:** Planned  
-**Complexity:** Low  
-**Description:** When `style_guide_path` is configured in workflow.yaml, automatically include the style guide content in all visual verification evaluations without requiring explicit calls to `verify_with_style_guide()`.
+**Status:** ✅ Completed (2026-01-07)
+**Complexity:** Low
+**Description:** When `style_guide_path` is configured, automatically include the style guide content in all visual verification evaluations.
 
-**Current Behavior:**
-- Must explicitly call `verify_with_style_guide()` method
-- Or manually pass style guide content to `verify()`
+**Implementation:**
+- `style_guide_path` parameter in `VisualVerificationClient.__init__()`
+- Auto-loads and caches style guide content
+- `auto_include_style_guide` flag (default True) controls inclusion
+- `include_style_guide` parameter on `verify()` for per-call override
 
-**Desired Behavior:**
-- If `style_guide_path` is set and file exists, automatically load and include in all `verify()` calls
-- Add `include_style_guide: true/false` parameter to override
-
-**Implementation Notes:**
-- Modify `VisualVerificationClient.__init__()` to load style guide if path provided
-- Update `verify()` to automatically append style guide content to specification
-- Add setting `auto_include_style_guide: true` (default) to workflow.yaml
+**Files:** `src/visual_verification.py`
 
 ---
 
 #### VV-002: Workflow Step Integration for Visual Tests
-**Status:** Planned  
-**Complexity:** Medium  
-**Description:** Wire the visual verification into the `visual_regression_test` workflow step so tests run automatically during the VERIFY phase.
+**Status:** ✅ Completed (2026-01-07)
+**Complexity:** Medium
+**Description:** Wire the visual verification into the `visual_regression_test` workflow step.
 
-**Current Behavior:**
-- CLI commands exist (`visual-verify`, `visual-template`)
-- `visual_regression_test` step exists but doesn't auto-run tests
+**Implementation:**
+- `run_all_visual_tests()` function discovers and runs all tests
+- `app_url` parameter for base URL resolution
+- Integrates with workflow item completion via CLI
 
-**Desired Behavior:**
-- During `visual_regression_test` step, automatically:
-  1. Find all test files in `tests/visual/` directory
-  2. Parse each test file for URL and specification
-  3. Run verification against configured `app_url` setting
-  4. Report results and fail workflow if any test fails
-
-**Implementation Notes:**
-- Add `app_url` setting to workflow.yaml (the deployed URL to test against)
-- Create `run_all_visual_tests()` function in visual_verification.py
-- Parse markdown test files for structured test data
-- Integrate with orchestrator's item completion logic
-
-**Dependencies:**
-- Requires deployed application URL to be known
-- Requires test files in `tests/visual/` directory
+**Files:** `src/visual_verification.py`, `src/cli.py`
 
 ---
 
 #### VV-003: Visual Test Discovery
-**Status:** Planned  
-**Complexity:** Low  
+**Status:** ✅ Completed (2026-01-07)
+**Complexity:** Low
 **Description:** Automatically discover and run all visual test files in the `tests/visual/` directory.
 
-**Current Behavior:**
-- Must specify each test file/URL manually via CLI
+**Implementation:**
+- `discover_visual_tests()` scans `tests/visual/*.md` files
+- `parse_visual_test_file()` parses YAML frontmatter + markdown body
+- Test file format: `url`, `device`, `tags`, `actions` in frontmatter
+- `visual-verify-all` CLI command with `--tag` filtering
+- `filter_tests_by_tag()` for selective test execution
 
-**Desired Behavior:**
-- `./orchestrator visual-verify-all` scans `tests/visual/*.md`
-- Each file contains URL, specification, and expected behavior
-- Runs all tests and reports aggregate results
-
-**Implementation Notes:**
-- Define test file format (YAML frontmatter + markdown body)
-- Add `visual-verify-all` CLI command
-- Support filtering by tag/feature
+**Files:** `src/visual_verification.py`, `src/cli.py`
 
 ---
 
 ### Medium Priority
 
 #### VV-004: Baseline Screenshot Management
-**Status:** Planned  
-**Complexity:** Medium  
+**Status:** ✅ Completed (2026-01-07)
+**Complexity:** Medium
 **Description:** Store baseline screenshots and compare against them for regression detection.
 
-**Current Behavior:**
-- Each verification is independent, no comparison to previous state
+**Implementation:**
+- `save_baseline()` stores screenshot with SHA256 hash
+- `get_baseline()` retrieves baseline image bytes
+- `compare_with_baseline()` uses hash comparison (fast path)
+- `list_baselines()` returns available baseline names
+- `--save-baseline` CLI flag
+- Client-side storage in `tests/visual/baselines/`
 
-**Desired Behavior:**
-- Option to save screenshots as baselines
-- Compare new screenshots against baselines
-- Flag visual differences for review
-
-**Implementation Notes:**
-- Store baselines in `tests/visual/baselines/` directory
-- Add `--save-baseline` flag to CLI
-- Consider image diff library for pixel comparison
-- AI evaluation for semantic comparison
+**Files:** `src/visual_verification.py`, `src/cli.py`
 
 ---
 
@@ -1021,14 +973,18 @@ class EncryptedCheckpointBackend(CheckpointBackend):
 ### Low Priority
 
 #### VV-006: Cost Tracking for Visual Tests
-**Status:** Planned  
-**Complexity:** Low  
+**Status:** ✅ Completed (2026-01-07)
+**Complexity:** Low
 **Description:** Track Claude API usage and costs for visual verification calls.
 
-**Implementation Notes:**
-- Log token usage from API responses
-- Aggregate per-test and per-run costs
-- Add `--show-cost` flag to CLI
+**Implementation:**
+- Added `UsageInfo` dataclass with `input_tokens`, `output_tokens`, `estimated_cost`
+- Added `CostSummary` class for aggregating costs across multiple tests
+- Added cost tracking to visual-verification-service (evaluator.ts)
+- Added `--show-cost` flag to CLI commands
+- Added `format_cost_summary()` for displaying aggregate costs
+
+**Files:** `src/visual_verification.py`, `src/cli.py`, `visual-verification-service/src/services/evaluator.ts`
 
 ---
 
@@ -1265,15 +1221,18 @@ This is a significant architectural change. May be better suited for a separate 
 ---
 
 ### WF-003: Model Selection Guidance
-**Status:** Planned
+**Status:** ✅ Completed (2026-01-07)
 **Complexity:** Low
 **Source:** Visual Verification Service task
 **Description:** Use "latest generation available" principle for model selection instead of hardcoding specific model names.
 
-**Implementation Notes:**
-- Add `model_preference: latest` setting
-- Maintain mapping of "latest" to current best model
-- Update mapping when new models released
+**Implementation:**
+- Added `get_latest_model(category)` function to model registry
+- Categories: `codex`, `gemini`, `claude` and aliases (`security`, `quality`, `consistency`, `holistic`)
+- Returns latest available model from priority list with fallbacks
+- Maps review types to model families (security/quality → codex, consistency/holistic → gemini)
+
+**Files:** `src/model_registry.py`
 
 ---
 
