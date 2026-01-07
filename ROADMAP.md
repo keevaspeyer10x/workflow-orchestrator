@@ -121,11 +121,19 @@ Follow PEP 8 style guide
 ---
 
 #### CORE-010: Enhanced Skip Visibility
-**Status:** Planned
+**Status:** ✅ Completed (2026-01-07)
 **Complexity:** Low
 **Priority:** High
 **Source:** Learnings from roadmap items implementation (2026-01-06)
 **Description:** Make skipped items more visible to force deliberate consideration and prevent lazy skipping.
+
+**Implementation:**
+- Added `get_skipped_items()`, `get_all_skipped_items()`, `get_item_definition()` methods to WorkflowEngine
+- Updated `cmd_skip()` to show enhanced output with item description and implications
+- Updated `cmd_advance()` to show skipped items from completed phase
+- 13 tests in `tests/test_roadmap_features.py`
+
+**Files:** `src/engine.py`, `src/cli.py`, `tests/test_roadmap_features.py`
 
 **Problem Solved:**
 When AI agents skip workflow items, the skip reason is stored but not prominently displayed. This allows:
@@ -308,11 +316,19 @@ This is particularly important for "vibe coding" workflows where AI operates wit
 ---
 
 #### CORE-011: Workflow Completion Summary & Next Steps
-**Status:** Planned
+**Status:** ✅ Completed (2026-01-07)
 **Complexity:** Low
 **Priority:** High
 **Source:** Learnings from roadmap items implementation (2026-01-06)
 **Description:** Show comprehensive completion summary and prompt for next steps when workflow finishes, preventing conversations from "tailing off" without proper closure.
+
+**Implementation:**
+- Added `get_workflow_summary()` method to WorkflowEngine
+- Added `format_duration()` helper function to CLI
+- Updated `cmd_finish()` to show phase summary table, skipped items list, and next steps prompt
+- 8 tests in `tests/test_roadmap_features.py`
+
+**Files:** `src/engine.py`, `src/cli.py`, `tests/test_roadmap_features.py`
 
 **Problem Solved:**
 When `orchestrator finish` runs, it just outputs "✓ Workflow completed" and stops. This allows:
