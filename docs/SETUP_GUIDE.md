@@ -297,7 +297,7 @@ The orchestrator supports multiple secret sources, checked in priority order:
 
 1. **Environment Variables** (highest priority)
 2. **SOPS-encrypted files** (for teams)
-3. **GitHub Private Repos** (for Claude Code Web)
+3. **GitHub Private Repos** (for Claude Code Web with `gh` CLI)
 
 ### Check Available Sources
 
@@ -313,7 +313,39 @@ export ANTHROPIC_API_KEY="sk-ant-xxxxx"
 export OPENROUTER_API_KEY="sk-or-xxxxx"
 ```
 
-### Option 2: SOPS (Recommended for Teams)
+### Option 2: SOPS with Auto-Loading (Recommended for Claude Code Web)
+
+For Claude Code Web sessions, you can store your SOPS AGE key encrypted in the repo.
+This requires only a short password per session instead of pasting the full key.
+
+**One-time setup:**
+
+```bash
+# Run the encryption script
+./scripts/encrypt-sops-key.sh
+
+# Enter your AGE secret key when prompted
+# Choose a memorable password
+
+# Commit the encrypted key (safe to commit!)
+git add .manus/keys/age.key.enc
+git commit -m "Add encrypted SOPS key"
+git push
+```
+
+**Using in Claude Code Web:**
+
+1. When starting a new task, set the environment variable:
+   - `SOPS_KEY_PASSWORD` = your chosen password
+
+2. The SessionStart hook will automatically:
+   - Decrypt your AGE key
+   - Set `SOPS_AGE_KEY` for the session
+   - Enable SOPS secret access
+
+**For desktop use:** Store the unencrypted key at `.manus/keys/age.key` (gitignored).
+
+### Option 3: SOPS Manual Setup (for Teams)
 
 SOPS provides encrypted secrets that can be safely committed to git:
 
@@ -332,9 +364,9 @@ sops --encrypt --age $(cat ~/.sops-key.txt | grep "public key" | cut -d: -f2 | t
 export SOPS_AGE_KEY="AGE-SECRET-KEY-..."
 ```
 
-### Option 3: GitHub Private Repo (for Claude Code Web)
+### Option 4: GitHub Private Repo
 
-When using Claude Code Web, you can store secrets in a private GitHub repo:
+When using Claude Code CLI (desktop) with `gh` authenticated:
 
 ```bash
 # Configure your secrets repo (one time)
@@ -344,7 +376,7 @@ orchestrator config set secrets_repo YOUR_USERNAME/secrets
 # Add files named exactly as the secret: OPENROUTER_API_KEY, OPENAI_API_KEY, etc.
 ```
 
-In Claude Code Web, the orchestrator will automatically fetch secrets from your private repo.
+Note: This requires `gh auth login` and works best on desktop where you can authenticate the GitHub CLI.
 
 ### Testing Secret Access
 

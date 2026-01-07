@@ -6,6 +6,7 @@
 # Plaintext secrets (encrypted versions are safe to commit)
 .manus/secrets.yaml
 .secrets.reference
+.manus/keys/age.key
 
 # Python
 __pycache__/
