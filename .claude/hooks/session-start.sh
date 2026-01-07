@@ -21,12 +21,13 @@ SECRETS_FILE=".manus/secrets.enc"
 if [ -f "$SECRETS_FILE" ]; then
     if [ -n "$SECRETS_PASSWORD" ]; then
         echo "Decrypting secrets..."
-        SECRETS_YAML=$(openssl enc -aes-256-cbc -pbkdf2 -d -in "$SECRETS_FILE" -pass "pass:$SECRETS_PASSWORD" 2>/dev/null) || {
+        # Pass password via stdin for security (not visible in process list)
+        SECRETS_YAML=$(echo "$SECRETS_PASSWORD" | openssl enc -aes-256-cbc -pbkdf2 -d -in "$SECRETS_FILE" -pass stdin 2>/dev/null) || {
             echo "Warning: Failed to decrypt secrets (wrong password?)"
             SECRETS_YAML=""
         }
 
-        if [ -n "$SECRETS_YAML" ]; then
+        if [ -n "$SECRETS_YAML" ] && [ -n "$CLAUDE_ENV_FILE" ]; then
             # Parse YAML and export each key
             # Simple parsing for KEY: value format
             while IFS=': ' read -r key value; do
@@ -38,9 +39,7 @@ if [ -f "$SECRETS_FILE" ]; then
                 value="${value%\'}"
                 value="${value#\'}"
                 if [ -n "$key" ] && [ -n "$value" ]; then
-                    if [ -n "$CLAUDE_ENV_FILE" ]; then
-                        echo "export $key='$value'" >> "$CLAUDE_ENV_FILE"
-                    fi
+                    echo "export $key='$value'" >> "$CLAUDE_ENV_FILE"
                 fi
             done <<< "$SECRETS_YAML"
             echo "Secrets loaded successfully"
@@ -57,7 +56,7 @@ fi
 # 3. Legacy: Load SOPS AGE key if available (for backwards compatibility)
 KEY_FILE=".manus/keys/age.key.enc"
 if [ -f "$KEY_FILE" ] && [ -n "$SOPS_KEY_PASSWORD" ] && [ -z "$SOPS_AGE_KEY" ]; then
-    AGE_KEY=$(openssl enc -aes-256-cbc -pbkdf2 -d -in "$KEY_FILE" -pass "pass:$SOPS_KEY_PASSWORD" 2>/dev/null) || true
+    AGE_KEY=$(echo "$SOPS_KEY_PASSWORD" | openssl enc -aes-256-cbc -pbkdf2 -d -in "$KEY_FILE" -pass stdin 2>/dev/null) || true
     if [ -n "$AGE_KEY" ] && [ -n "$CLAUDE_ENV_FILE" ]; then
         echo "export SOPS_AGE_KEY='$AGE_KEY'" >> "$CLAUDE_ENV_FILE"
         echo "SOPS AGE key loaded (legacy)"

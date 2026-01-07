@@ -11,15 +11,13 @@ This complements existing SOPS infrastructure - it doesn't replace it.
 """
 
 import os
-import re
 import json
 import base64
 import shutil
 import logging
 import subprocess
-import hashlib
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 
 try:
     import yaml
@@ -35,11 +33,6 @@ CONFIG_FILE = CONFIG_DIR / "config.yaml"
 
 # Simple encrypted secrets file (password-based)
 SIMPLE_SECRETS_FILE = ".manus/secrets.enc"
-
-
-def derive_key_from_password(password: str, salt: bytes = b"orchestrator") -> bytes:
-    """Derive a consistent key from a password using PBKDF2."""
-    return hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000, dklen=32)
 
 
 class SecretsManager:
@@ -258,10 +251,11 @@ class SecretsManager:
             return self._simple_secrets_cache.get(name)
 
         try:
-            # Decrypt using openssl
+            # Decrypt using openssl (password via stdin for security)
             result = subprocess.run(
                 ["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-d",
-                 "-in", str(secrets_path), "-pass", f"pass:{password}"],
+                 "-in", str(secrets_path), "-pass", "stdin"],
+                input=password,
                 capture_output=True,
                 text=True,
                 timeout=30
@@ -641,14 +635,19 @@ def encrypt_secrets(secrets: Dict[str, str], password: str, output_path: Path) -
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        # Encrypt using openssl
+        # Encrypt using openssl (password via stdin for security)
+        # We need to pass both password and content, so use env var for password
+        import os as _os
+        env = _os.environ.copy()
+        env["OPENSSL_PWD"] = password
         result = subprocess.run(
             ["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-salt",
-             "-out", str(output_path), "-pass", f"pass:{password}"],
+             "-out", str(output_path), "-pass", "env:OPENSSL_PWD"],
             input=yaml_content,
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=30,
+            env=env
         )
 
         if result.returncode != 0:
@@ -680,9 +679,11 @@ def decrypt_secrets(input_path: Path, password: str) -> Optional[Dict[str, str]]
         return None
 
     try:
+        # Decrypt using openssl (password via stdin for security)
         result = subprocess.run(
             ["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-d",
-             "-in", str(input_path), "-pass", f"pass:{password}"],
+             "-in", str(input_path), "-pass", "stdin"],
+            input=password,
             capture_output=True,
             text=True,
             timeout=30
