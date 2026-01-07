@@ -56,6 +56,9 @@ htmlcov/
 # .workflow_log.jsonl
 # .workflow_checkpoints/
 
+# Model registry cache (local per-project)
+.model_registry.json
+
 # OS
 .DS_Store
 Thumbs.db
