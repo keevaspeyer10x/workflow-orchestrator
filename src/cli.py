@@ -23,9 +23,15 @@ from src.checkpoint import CheckpointManager, CheckpointData
 from src.visual_verification import (
     VisualVerificationClient,
     VisualVerificationError,
+    VerificationResult,
+    CostSummary,
     create_desktop_viewport,
     create_mobile_viewport,
-    format_verification_result
+    format_verification_result,
+    format_cost_summary,
+    discover_visual_tests,
+    run_all_visual_tests,
+    DEVICE_PRESETS,
 )
 from src.review import (
     ReviewRouter,
@@ -47,6 +53,70 @@ from src.secrets import (
 )
 
 VERSION = "2.0.0"
+
+
+# ============================================================================
+# Auto-Review Mapping (WF-010)
+# ============================================================================
+# Maps workflow item IDs to third-party review types
+# When completing these items, auto-run the corresponding review
+REVIEW_ITEM_MAPPING = {
+    "security_review": "security",
+    "quality_review": "quality",
+    "architecture_review": "holistic",  # Architecture maps to holistic review
+}
+
+
+def run_auto_review(review_type: str, working_dir: Path = None) -> tuple[bool, str, str]:
+    """
+    Run an automated third-party review.
+
+    Args:
+        review_type: The review type (security, quality, consistency, holistic)
+        working_dir: Working directory for the review
+
+    Returns:
+        Tuple of (success, notes, error_message)
+        - success: True if review passed
+        - notes: Completion notes describing the review result
+        - error_message: Error description if review couldn't run (CLIs not available, etc.)
+    """
+    working_dir = working_dir or Path('.')
+
+    try:
+        router = ReviewRouter(working_dir=working_dir)
+    except ValueError as e:
+        return False, "", f"Review infrastructure not available: {e}"
+
+    # Check if method is available
+    if router.method == ReviewMethod.UNAVAILABLE:
+        return False, "", "No review method available (install Codex/Gemini CLIs or configure OpenRouter API)"
+
+    try:
+        result = router.execute_review(review_type)
+
+        if result.error:
+            return False, "", f"Review error: {result.error}"
+
+        # Build completion notes from review result
+        model_info = f"[{router.method.value}] {result.model_used}"
+        duration = f"{result.duration_seconds:.1f}s" if result.duration_seconds else "N/A"
+
+        if result.findings:
+            finding_count = len(result.findings)
+            blocking_count = result.blocking_count
+            if blocking_count > 0:
+                notes = f"THIRD-PARTY REVIEW ({model_info}, {duration}): {finding_count} findings, {blocking_count} BLOCKING"
+                return False, notes, f"Review found {blocking_count} blocking issue(s)"
+            else:
+                notes = f"THIRD-PARTY REVIEW ({model_info}, {duration}): {finding_count} non-blocking findings. {result.summary or 'Passed'}"
+                return True, notes, ""
+        else:
+            notes = f"THIRD-PARTY REVIEW ({model_info}, {duration}): No issues found"
+            return True, notes, ""
+
+    except Exception as e:
+        return False, "", f"Review execution failed: {e}"
 
 
 # ============================================================================
@@ -211,13 +281,57 @@ def cmd_complete(args):
         print(f"Error: {e}")
         sys.exit(1)
 
+    # WF-010: Auto-run third-party reviews for REVIEW phase items
+    item_id = args.item
+    if item_id in REVIEW_ITEM_MAPPING and not args.skip_auto_review:
+        review_type = REVIEW_ITEM_MAPPING[item_id]
+        print(f"Running third-party {review_type} review...")
+        print()
+
+        working_dir = Path(args.dir) if hasattr(args, 'dir') and args.dir else Path('.')
+        review_success, review_notes, review_error = run_auto_review(review_type, working_dir)
+
+        if review_error:
+            # Review couldn't run - block completion
+            print("=" * 60)
+            print(f"✗ CANNOT COMPLETE: Third-party review required")
+            print("=" * 60)
+            print(f"Error: {review_error}")
+            print()
+            print("Options:")
+            print(f"  1. Fix the issue and try again")
+            print(f"  2. Skip with explanation: orchestrator skip {item_id} --reason \"<why review unavailable>\"")
+            print()
+            print("Third-party reviews ensure code quality. Skipping requires justification.")
+            sys.exit(1)
+
+        if not review_success:
+            # Review found blocking issues
+            print("=" * 60)
+            print(f"✗ REVIEW FAILED: {review_error or 'Blocking issues found'}")
+            print("=" * 60)
+            print(f"Review notes: {review_notes}")
+            print()
+            print("Options:")
+            print(f"  1. Fix the issues and run: orchestrator complete {item_id}")
+            print(f"  2. Skip with explanation: orchestrator skip {item_id} --reason \"<why issues acceptable>\"")
+            sys.exit(1)
+
+        # Review passed - append review notes to user notes
+        print(f"✓ Third-party review passed")
+        print()
+        if notes:
+            notes = f"{notes}. {review_notes}"
+        else:
+            notes = review_notes
+
     try:
         success, message = engine.complete_item(
             args.item,
             notes=notes,
             skip_verification=args.skip_verify
         )
-        
+
         if success:
             print(f"✓ {message}")
             if not args.quiet:
@@ -976,6 +1090,74 @@ def cmd_visual_verify(args):
     else:
         print("✗ SOME VERIFICATIONS FAILED")
         sys.exit(1)
+
+
+def cmd_visual_verify_all(args):
+    """Run all visual tests in a directory (VV-003)."""
+    try:
+        client = VisualVerificationClient(
+            style_guide_path=args.style_guide if hasattr(args, 'style_guide') else None
+        )
+    except VisualVerificationError as e:
+        print(f"Error: {e}")
+        print("\nSet VISUAL_VERIFICATION_URL environment variable.")
+        sys.exit(1)
+
+    # Discover and run tests
+    print(f"Discovering visual tests in {args.tests_dir}...")
+    tests = discover_visual_tests(args.tests_dir)
+
+    if not tests:
+        print(f"No visual test files found in {args.tests_dir}")
+        print("\nCreate test files with YAML frontmatter:")
+        print("  ---")
+        print("  url: /dashboard")
+        print("  device: iphone-14")
+        print("  tags: [core]")
+        print("  ---")
+        print("  The dashboard should display...")
+        sys.exit(0)
+
+    print(f"Found {len(tests)} test(s)")
+
+    # Run tests
+    results = run_all_visual_tests(
+        client,
+        tests_dir=args.tests_dir,
+        app_url=args.app_url,
+        tags=args.tag,
+        save_baselines=args.save_baselines
+    )
+
+    # Display results
+    print("\n" + "=" * 60)
+    print("VISUAL TEST RESULTS")
+    print("=" * 60)
+
+    for item in results['results']:
+        if 'error' in item:
+            print(f"✗ {item['test']}: ERROR - {item['error']}")
+        else:
+            result = item['result']
+            status_icon = '✓' if result.status == 'pass' else '✗'
+            print(f"{status_icon} {item['test']}: {result.status}")
+            if result.status != 'pass' and result.issues:
+                for issue in result.issues[:3]:  # Show first 3 issues
+                    print(f"    - [{issue.get('severity', 'unknown')}] {issue.get('description', '')}")
+
+    # Summary
+    summary = results['summary']
+    print("\n" + "-" * 60)
+    print(f"Total: {summary['total']} | Passed: {summary['passed']} | Failed: {summary['failed']} | Errors: {summary['errors']}")
+
+    # Cost summary (VV-006)
+    if args.show_cost:
+        print(format_cost_summary(results['cost_summary']))
+
+    # Exit code
+    if summary['failed'] > 0 or summary['errors'] > 0:
+        sys.exit(1)
+    sys.exit(0)
 
 
 def cmd_visual_template(args):
@@ -1820,7 +2002,10 @@ Examples:
     complete_parser.add_argument('item', help='Item ID to complete')
     complete_parser.add_argument('--notes', '-n', help='Notes about the completion')
     complete_parser.add_argument('--skip-verify', action='store_true', help='Skip verification')
+    complete_parser.add_argument('--skip-auto-review', action='store_true',
+                                 help='Skip auto-running third-party review (not recommended)')
     complete_parser.add_argument('--quiet', '-q', action='store_true', help='Minimal output')
+    complete_parser.add_argument('--dir', '-d', help='Working directory')
     complete_parser.set_defaults(func=cmd_complete)
     
     # Skip command
@@ -1910,10 +2095,22 @@ Examples:
     visual_verify_parser = subparsers.add_parser('visual-verify', help='Run visual verification against a URL')
     visual_verify_parser.add_argument('--url', '-u', required=True, help='URL to verify')
     visual_verify_parser.add_argument('--spec', '-s', required=True, help='Path to specification file or inline spec')
+    visual_verify_parser.add_argument('--device', '-d', choices=list(DEVICE_PRESETS.keys()), help='Device preset (e.g., iphone-14, desktop)')
     visual_verify_parser.add_argument('--no-mobile', dest='mobile', action='store_false', default=True, help='Skip mobile viewport test')
     visual_verify_parser.add_argument('--style-guide', '-g', help='Path to style guide file')
+    visual_verify_parser.add_argument('--show-cost', action='store_true', help='Show cost/token usage (VV-006)')
+    visual_verify_parser.add_argument('--save-baseline', action='store_true', help='Save screenshots as baselines (VV-004)')
     visual_verify_parser.set_defaults(func=cmd_visual_verify)
-    
+
+    # Visual-verify-all command (VV-003)
+    visual_verify_all_parser = subparsers.add_parser('visual-verify-all', help='Run all visual tests in tests/visual/')
+    visual_verify_all_parser.add_argument('--tests-dir', '-t', default='tests/visual', help='Directory containing test files')
+    visual_verify_all_parser.add_argument('--app-url', '-a', help='Base URL to prepend to relative URLs')
+    visual_verify_all_parser.add_argument('--tag', action='append', help='Filter tests by tag (can repeat)')
+    visual_verify_all_parser.add_argument('--save-baselines', action='store_true', help='Save screenshots as baselines')
+    visual_verify_all_parser.add_argument('--show-cost', action='store_true', help='Show cost summary')
+    visual_verify_all_parser.set_defaults(func=cmd_visual_verify_all)
+
     # Visual-template command (NEW)
     visual_template_parser = subparsers.add_parser('visual-template', help='Generate a visual test template')
     visual_template_parser.add_argument('feature_name', help='Name of the feature to test')

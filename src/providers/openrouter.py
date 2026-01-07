@@ -13,7 +13,7 @@ import time
 import json
 import logging
 from pathlib import Path
-from typing import Optional, Any
+from typing import Optional, Any, Generator, Iterator
 
 try:
     import requests
@@ -563,3 +563,185 @@ class OpenRouterProvider(AgentProvider):
             error_msg = f"{error_msg}: {response.text[:200]}"
 
         return self._sanitize_error(error_msg)
+
+    def execute_streaming(
+        self,
+        prompt: str,
+        model: Optional[str] = None,
+        on_chunk: Optional[callable] = None
+    ) -> Generator[str, None, ExecutionResult]:
+        """
+        Execute the prompt with streaming response (CORE-012).
+
+        Yields text chunks as they arrive, enabling real-time display.
+        Note: Streaming is incompatible with function calling - tools are disabled.
+
+        Args:
+            prompt: The prompt to execute
+            model: Optional model override
+            on_chunk: Optional callback called with each chunk
+
+        Yields:
+            str: Text chunks as they arrive
+
+        Returns:
+            ExecutionResult: Final result after streaming completes
+        """
+        if not self.is_available():
+            yield ""
+            return ExecutionResult(
+                success=False,
+                output="",
+                error="OpenRouter API key not configured. Set OPENROUTER_API_KEY environment variable."
+            )
+
+        model_to_use = model or self._model
+        start_time = time.time()
+
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/workflow-orchestrator",
+            "X-Title": "Workflow Orchestrator"
+        }
+
+        payload = {
+            "model": model_to_use,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": True
+        }
+
+        try:
+            response = requests.post(
+                self.API_URL,
+                headers=headers,
+                json=payload,
+                timeout=self._timeout,
+                stream=True
+            )
+
+            if response.status_code != 200:
+                error_msg = self._parse_error_response(response)
+                yield ""
+                return ExecutionResult(
+                    success=False,
+                    output="",
+                    error=error_msg,
+                    model_used=model_to_use,
+                    duration_seconds=time.time() - start_time
+                )
+
+            full_output = []
+            total_tokens = 0
+
+            for line in response.iter_lines():
+                if not line:
+                    continue
+
+                # SSE format: "data: {...}"
+                line_str = line.decode('utf-8') if isinstance(line, bytes) else line
+
+                if not line_str.startswith('data: '):
+                    continue
+
+                data_str = line_str[6:]  # Remove "data: " prefix
+
+                if data_str.strip() == '[DONE]':
+                    break
+
+                try:
+                    data = json.loads(data_str)
+
+                    # Track usage if present
+                    if 'usage' in data:
+                        total_tokens = data['usage'].get('total_tokens', total_tokens)
+
+                    # Extract content delta
+                    if 'choices' in data and len(data['choices']) > 0:
+                        delta = data['choices'][0].get('delta', {})
+                        content = delta.get('content', '')
+
+                        if content:
+                            full_output.append(content)
+                            if on_chunk:
+                                on_chunk(content)
+                            yield content
+
+                except json.JSONDecodeError:
+                    logger.debug(f"Failed to parse SSE data: {data_str[:100]}")
+                    continue
+
+            duration = time.time() - start_time
+            complete_output = ''.join(full_output)
+
+            return ExecutionResult(
+                success=True,
+                output=complete_output,
+                model_used=model_to_use,
+                tokens_used=total_tokens if total_tokens > 0 else None,
+                duration_seconds=duration,
+                metadata={
+                    "provider": "openrouter",
+                    "streaming": True,
+                    "used_function_calling": False
+                }
+            )
+
+        except requests.exceptions.Timeout:
+            duration = time.time() - start_time
+            yield ""
+            return ExecutionResult(
+                success=False,
+                output="",
+                error=f"Request timed out after {self._timeout}s",
+                model_used=model_to_use,
+                duration_seconds=duration
+            )
+
+        except requests.exceptions.RequestException as e:
+            duration = time.time() - start_time
+            yield ""
+            return ExecutionResult(
+                success=False,
+                output="",
+                error=self._sanitize_error(str(e)),
+                model_used=model_to_use,
+                duration_seconds=duration
+            )
+
+    def stream_to_console(
+        self,
+        prompt: str,
+        model: Optional[str] = None
+    ) -> ExecutionResult:
+        """
+        Execute with streaming and print chunks to console in real-time.
+
+        Convenience method for interactive use.
+
+        Args:
+            prompt: The prompt to execute
+            model: Optional model override
+
+        Returns:
+            ExecutionResult: Final result after streaming completes
+        """
+        import sys
+
+        result = None
+        for chunk in self.execute_streaming(prompt, model):
+            sys.stdout.write(chunk)
+            sys.stdout.flush()
+
+        # Get the final result (returned from generator)
+        # This is a bit awkward but necessary for generator return values
+        try:
+            gen = self.execute_streaming(prompt, model)
+            for _ in gen:
+                pass
+            result = gen.send(None)
+        except StopIteration as e:
+            result = e.value
+
+        print()  # Newline after streaming
+        return result

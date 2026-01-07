@@ -30,9 +30,13 @@ settings:
   # Documentation directory
   docs_dir: "docs"
   
-  # Tests directory  
+  # Tests directory
   tests_dir: "tests"
-  
+
+  # Roadmap and Changelog files (for LEARN phase automation)
+  roadmap_file: "ROADMAP.md"
+  changelog_file: "CHANGELOG.md"
+
   # Claude Code is the default executor - only skip for trivial tasks
   default_executor: "claude_code"
   
@@ -378,6 +382,17 @@ phases:
         description: "Update any relevant project documentation with approved learnings."
         required: false
         skippable: true
+
+      - id: "update_changelog_roadmap"
+        name: "Update Changelog and Roadmap"
+        description: "Move completed roadmap items to CHANGELOG.md. Check ROADMAP.md for items marked as completed during this workflow. For each completed item: 1) Add entry to CHANGELOG.md with date and summary, 2) Remove from ROADMAP.md. This keeps documentation current."
+        required: false
+        skippable: true
+        skip_conditions: ["no_roadmap_items_completed", "no_roadmap_exists"]
+        notes:
+          - "[tip] Check workflow constraints and completed items to identify roadmap items that were addressed"
+          - "[tip] Changelog format: ## [version] - YYYY-MM-DD followed by bullet points"
+          - "[caution] Only move items that are fully completed, not partially done"
 
       - id: "commit_and_sync"
         name: "Commit and Sync Changes"

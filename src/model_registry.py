@@ -322,6 +322,86 @@ class ModelRegistry:
 
         return defaults.get("general")
 
+    def get_latest_model(self, category: str) -> str:
+        """
+        Get the latest available model for a category (WF-003).
+
+        Categories map to model families used for different review types:
+        - "codex": Code-specialized models (OpenAI Codex family) for security/quality reviews
+        - "gemini": Long-context models (Google Gemini) for consistency/holistic reviews
+        - "claude": General-purpose models (Anthropic Claude) for general tasks
+        - "security": Alias for codex
+        - "quality": Alias for codex
+        - "consistency": Alias for gemini
+        - "holistic": Alias for gemini
+
+        Principle: Use the latest generation model available, don't hardcode versions.
+
+        Args:
+            category: Model category or review type
+
+        Returns:
+            Model ID string (e.g., "openai/gpt-5.1-codex-max")
+        """
+        # Map review types to model families
+        category_mapping = {
+            "security": "codex",
+            "quality": "codex",
+            "consistency": "gemini",
+            "holistic": "gemini",
+        }
+        resolved_category = category_mapping.get(category.lower(), category.lower())
+
+        # Latest models by category (update these as new models are released)
+        latest_models = {
+            "codex": [
+                "openai/gpt-5.1-codex-max",
+                "openai/gpt-5.1-codex",
+                "openai/gpt-5.1",
+                "openai/gpt-4.1",
+                "openai/gpt-4o",
+            ],
+            "gemini": [
+                "google/gemini-3-pro-preview",
+                "google/gemini-3-pro",
+                "google/gemini-2.5-pro",
+                "google/gemini-2.0-flash",
+                "google/gemini-pro-1.5",
+            ],
+            "claude": [
+                "anthropic/claude-opus-4",
+                "anthropic/claude-sonnet-4",
+                "anthropic/claude-3.5-sonnet",
+                "anthropic/claude-3-opus",
+            ],
+        }
+
+        # Default fallbacks
+        fallbacks = {
+            "codex": "openai/gpt-4o",
+            "gemini": "google/gemini-pro-1.5",
+            "claude": "anthropic/claude-sonnet-4",
+        }
+
+        candidates = latest_models.get(resolved_category, [])
+
+        # Check registry for available models
+        for model_id in candidates:
+            if model_id in self.models:
+                logger.debug(f"Found {model_id} in registry for category {category}")
+                return model_id
+
+        # Check static list
+        for model_id in candidates:
+            if model_id in STATIC_FUNCTION_CALLING_MODELS:
+                logger.debug(f"Using static fallback {model_id} for category {category}")
+                return model_id
+
+        # Last resort fallback
+        fallback = fallbacks.get(resolved_category, "anthropic/claude-sonnet-4")
+        logger.debug(f"Using default fallback {fallback} for category {category}")
+        return fallback
+
 
 # Module-level singleton
 _default_registry: Optional[ModelRegistry] = None
@@ -425,3 +505,25 @@ def update_registry(
         True if update successful.
     """
     return get_model_registry(working_dir).update(force=force)
+
+
+def get_latest_model(
+    category: str,
+    working_dir: Optional[Path] = None
+) -> str:
+    """
+    Get the latest available model for a category (WF-003).
+
+    Categories:
+    - "codex" / "security" / "quality": Code-specialized models
+    - "gemini" / "consistency" / "holistic": Long-context models
+    - "claude": General-purpose models
+
+    Args:
+        category: Model category or review type
+        working_dir: Optional working directory
+
+    Returns:
+        Model ID string
+    """
+    return get_model_registry(working_dir).get_latest_model(category)
