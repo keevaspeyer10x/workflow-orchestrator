@@ -1,72 +1,106 @@
-# Risk Analysis: CORE-010 & CORE-011
-
-## Summary
-
-**Overall Risk Level: LOW**
-
-These features are additive enhancements to CLI output. No breaking changes to existing functionality or data structures.
+# Risk Analysis: CORE-006, SEC-004, CORE-017, CORE-018
 
 ## Risk Matrix
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|------------|--------|------------|
-| Breaking existing CLI output parsing | Low | Medium | Changes are additive; existing success/error indicators (✓, ✗) unchanged |
-| Performance degradation | Low | Low | Summary is O(n) where n = total items; typical workflows have <50 items |
-| Duration calculation edge cases | Medium | Low | Handle None start/end times gracefully; show "N/A" if unavailable |
-| Confusing output for new users | Low | Low | Clear visual separators and headers improve readability |
+| API rate limiting (CORE-017/018) | Medium | Low | Cache results, exponential backoff |
+| Network failures during model fetch | Medium | Low | Fall back to static list |
+| User confusion with interactive prompts | Low | Low | Clear messaging, default options |
+| Breaking existing provider auto-detection | Medium | Medium | Comprehensive tests, backward compat |
+| Secrets file corruption during copy | Low | High | Validate before overwrite |
 
-## Detailed Analysis
+---
 
-### 1. CLI Output Changes
+## CORE-006 Risks
 
-**Risk**: Scripts or users parsing CLI output may break
+### Risk 1: Breaking Auto-Detection
+- **Description**: Changes to provider detection could break existing workflows
+- **Likelihood**: Medium
+- **Impact**: Medium
+- **Mitigation**:
+  - Keep existing `_auto_detect_provider()` logic as baseline
+  - Only add interactive selection when explicitly requested (`--interactive`)
+  - Comprehensive test coverage for all detection paths
 
-**Analysis**:
-- `cmd_skip` currently outputs: `"✓ {message}"`
-- New output adds lines BEFORE the success message
-- Success indicator remains unchanged
-- Low likelihood of breaking existing usage
+### Risk 2: Manus Connector Detection False Positives
+- **Description**: May incorrectly detect Manus environment
+- **Likelihood**: Low
+- **Impact**: Low
+- **Mitigation**:
+  - Use multiple indicators (env vars, file paths, API availability)
+  - Conservative detection (require multiple signals)
 
-**Mitigation**: Keep existing success/error format; add new content as additional context
+---
 
-### 2. Engine Method Additions
+## SEC-004 Risks
 
-**Risk**: New methods could affect existing functionality
+### Risk 1: Accidental File Overwrite
+- **Description**: User might accidentally overwrite existing secrets
+- **Likelihood**: Medium
+- **Impact**: High
+- **Mitigation**:
+  - Check if destination exists and warn
+  - Require `--force` flag to overwrite
+  - Never modify source file
 
-**Analysis**:
-- All new methods are pure getters (read-only)
-- No modification to state or side effects
-- Return empty/None values if data unavailable
-- Zero risk to existing functionality
+### Risk 2: Path Traversal
+- **Description**: Malicious paths could access unintended files
+- **Likelihood**: Low
+- **Impact**: Medium
+- **Mitigation**:
+  - Validate paths are within expected directories
+  - Use `Path.resolve()` to normalize paths
+  - Only copy the specific secrets file, not arbitrary files
 
-### 3. Duration Calculation
+---
 
-**Risk**: Edge cases in datetime handling
+## CORE-017 Risks
 
-**Analysis**:
-- `started_at` or `completed_at` may be None
-- Timezone handling could vary
-- Need graceful fallback
+### Risk 1: API Unavailability
+- **Description**: OpenRouter API may be down or rate-limited
+- **Likelihood**: Medium
+- **Impact**: Low
+- **Mitigation**:
+  - Cache model list locally
+  - Fall back to hardcoded defaults
+  - Retry with exponential backoff
 
-**Mitigation**:
-- Check for None before calculation
-- Use UTC consistently (already the case in schema)
-- Show "Duration: N/A" if times unavailable
+### Risk 2: Model List Changes
+- **Description**: API response format might change
+- **Likelihood**: Low
+- **Impact**: Medium
+- **Mitigation**:
+  - Validate API response structure
+  - Graceful degradation to static list
+  - Version-check API responses
 
-## Security Considerations
+---
 
-- No new user input handling beyond existing validation
-- No file system operations beyond existing state access
-- No network operations
-- No privilege escalation risks
+## CORE-018 Risks
 
-## Rollback Plan
+### Risk 1: Incorrect Capability Detection
+- **Description**: API might report incorrect capabilities
+- **Likelihood**: Low
+- **Impact**: Medium
+- **Mitigation**:
+  - Cross-reference with known static list
+  - Conservative default (assume no function calling if unknown)
+  - Allow manual override via config
 
-If issues arise:
-1. Changes are isolated to CLI output only
-2. Revert commits that modify `cmd_skip`, `cmd_advance`, `cmd_finish`
-3. Engine methods are additive and can remain (unused)
+### Risk 2: Cache Staleness
+- **Description**: Cached capabilities become outdated
+- **Likelihood**: Medium
+- **Impact**: Low
+- **Mitigation**:
+  - Auto-refresh after 30 days
+  - Manual refresh via `update-models` command
+  - Warning when cache is old
 
-## Conclusion
+---
 
-This is a low-risk change. The features add visibility without modifying core workflow logic or data structures.
+## Overall Assessment
+
+**Risk Level: LOW**
+
+All changes are additive and backward-compatible. Existing functionality is preserved with new features layered on top. Main risks are around API availability, which is mitigated by caching and fallbacks.

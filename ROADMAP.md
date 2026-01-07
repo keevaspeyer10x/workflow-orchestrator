@@ -13,11 +13,19 @@ For completed features, see [CHANGELOG.md](CHANGELOG.md).
 ### Short-term (Low Effort)
 
 #### CORE-006: Automatic Connector Detection with User Fallback
-**Status:** Planned  
-**Complexity:** Medium  
-**Priority:** High  
-**Source:** v2.2 Implementation Learning  
+**Status:** ✅ Completed (2026-01-07)
+**Complexity:** Medium
+**Priority:** High
+**Source:** v2.2 Implementation Learning
 **Description:** Automatically detect available agent connectors and ask user before defaulting to manual implementation when preferred agent is unavailable.
+
+**Implementation:**
+- Added `detect_manus_connector()` and `get_available_connectors()` to `src/environment.py`
+- Added `get_available_providers()` and `prompt_user_for_provider()` to `src/providers/__init__.py`
+- Checks Claude Code CLI, Manus connector, OpenRouter API availability
+- 17 tests in `tests/test_provider_detection.py`
+
+**Files:** `src/environment.py`, `src/providers/__init__.py`, `tests/test_provider_detection.py`
 
 **Problem Solved:**
 During v2.2 implementation, Claude Code CLI was unavailable in Manus sandbox. Instead of asking the user about alternative connection methods (Manus direct connector), the agent defaulted to manual implementation. This missed an opportunity to use a specialized coding AI.
@@ -567,11 +575,21 @@ The same model that writes code shouldn't review it. Different models have diffe
 ---
 
 #### CORE-017: Auto-Update Review Models
-**Status:** Planned
+**Status:** ✅ Completed (2026-01-07)
 **Complexity:** Low
 **Priority:** Medium
 **Source:** Current workflow
 **Description:** Automatically detect and use latest available AI models for reviews.
+
+**Implementation:**
+- Created new `src/model_registry.py` module with `ModelRegistry` class
+- 30-day staleness detection with auto-update capability
+- Added `update-models` CLI command with `--check` and `--force` flags
+- Queries OpenRouter API for model list
+- Caches model information in `.model_registry.json`
+- 21 tests in `tests/test_model_registry.py`
+
+**Files:** `src/model_registry.py`, `src/cli.py`, `tests/test_model_registry.py`
 
 **Problem Solved:**
 Model versions in config become stale as new models are released. Currently requires manual updates.
@@ -617,11 +635,20 @@ def check_and_auto_update():
 ---
 
 #### CORE-018: Dynamic Function Calling Detection
-**Status:** Planned
+**Status:** ✅ Completed (2026-01-07)
 **Complexity:** Low
 **Priority:** Medium
 **Source:** Function calling implementation (this workflow)
 **Description:** Detect model function calling support from OpenRouter API instead of static list.
+
+**Implementation:**
+- Added `get_model_capabilities()` and `supports_function_calling()` to `ModelRegistry`
+- Registry-based capability detection with cache
+- Falls back to static `STATIC_FUNCTION_CALLING_MODELS` list when API unavailable
+- Integrated with model registry staleness system (CORE-017)
+- Tests included in `tests/test_model_registry.py`
+
+**Files:** `src/model_registry.py`, `tests/test_model_registry.py`
 
 **Problem Solved:**
 FUNCTION_CALLING_MODELS is a static list that requires manual updates. New models may support function calling but aren't in the list.
@@ -1022,11 +1049,19 @@ if not service_url.startswith('https://'):
 ---
 
 ### SEC-004: Cross-Repo Secrets Copy Command
-**Status:** Planned
+**Status:** ✅ Completed (2026-01-07)
 **Complexity:** Low
 **Priority:** High
 **Source:** Secrets Management Code Review
 **Description:** Add `orchestrator secrets copy` command to easily copy encrypted secrets to other repos.
+
+**Implementation:**
+- Added `copy_secrets_file()` function to `src/secrets.py`
+- Added `secrets copy` CLI action with `--from`, `--to`, `--force` flags
+- Path validation with `Path.resolve()` for security
+- 11 tests in `tests/test_secrets_copy.py`
+
+**Files:** `src/secrets.py`, `src/cli.py`, `tests/test_secrets_copy.py`
 
 **Problem Solved:**
 Currently users must manually copy `.manus/secrets.enc` between repos. This is error-prone and not discoverable.

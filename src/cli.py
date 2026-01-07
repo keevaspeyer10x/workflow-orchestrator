@@ -1547,9 +1547,74 @@ def cmd_secrets(args):
                 elif info.get("repo"):
                     print(f"      - Repo: {info.get('repo')}")
 
+    elif action == "copy":
+        # SEC-004: Copy secrets between repos
+        from src.secrets import copy_secrets_file
+
+        source_dir = getattr(args, 'from_dir', None) or getattr(args, 'source', None)
+        dest_dir = getattr(args, 'to_dir', None) or working_dir
+        force = getattr(args, 'force', False)
+
+        if not source_dir:
+            print("Error: 'secrets copy' requires --from argument")
+            print("Usage: orchestrator secrets copy --from /path/to/source [--to /path/to/dest]")
+            sys.exit(1)
+
+        source_path = Path(source_dir)
+        dest_path = Path(dest_dir)
+
+        if copy_secrets_file(source_path, dest_path, force=force):
+            print(f"✓ Secrets copied from {source_path} to {dest_path}")
+        else:
+            print(f"✗ Failed to copy secrets")
+            if (dest_path / SIMPLE_SECRETS_FILE).exists() and not force:
+                print("  Destination already has secrets. Use --force to overwrite.")
+            sys.exit(1)
+
     else:
         print(f"Unknown action: {action}")
-        print("Available actions: init, test, source, sources")
+        print("Available actions: init, test, source, sources, copy")
+        sys.exit(1)
+
+
+def cmd_update_models(args):
+    """Update the model registry from OpenRouter API (CORE-017)."""
+    from src.model_registry import get_model_registry
+
+    working_dir = Path(args.dir or '.')
+    force = getattr(args, 'force', False)
+    check_only = getattr(args, 'check', False)
+
+    registry = get_model_registry(working_dir=working_dir)
+
+    if check_only:
+        # Just check staleness
+        if registry.is_stale():
+            last = registry.last_updated
+            if last:
+                print(f"⚠️  Model registry is stale (last updated: {last.date()})")
+            else:
+                print("⚠️  Model registry has never been updated")
+            print("Run 'orchestrator update-models' to update")
+            sys.exit(1)
+        else:
+            print(f"✓ Model registry is up to date (last updated: {registry.last_updated.date()})")
+            sys.exit(0)
+
+    # Perform update
+    print("Fetching latest models from OpenRouter API...")
+
+    if registry.update(force=force):
+        print(f"✓ Model registry updated with {len(registry.models)} models")
+        print(f"  Last updated: {registry.last_updated}")
+
+        # Show summary of function-calling capable models
+        fc_models = [m for m, caps in registry.models.items()
+                     if caps.get('supports_tools', False)]
+        print(f"  Function-calling models: {len(fc_models)}")
+    else:
+        print("✗ Failed to update model registry")
+        print("  API may be unavailable. Using cached data if available.")
         sys.exit(1)
 
 
@@ -1774,11 +1839,20 @@ Examples:
 
     # Secrets command
     secrets_parser = subparsers.add_parser('secrets', help='Manage and test secret access')
-    secrets_parser.add_argument('action', choices=['init', 'test', 'source', 'sources'], help='Secrets action')
+    secrets_parser.add_argument('action', choices=['init', 'test', 'source', 'sources', 'copy'], help='Secrets action')
     secrets_parser.add_argument('name', nargs='?', help='Secret name (for test/source)')
     secrets_parser.add_argument('--password', help='Encryption password for init (otherwise prompted)')
     secrets_parser.add_argument('--from-env', action='store_true', help='Read API keys from environment instead of prompting')
+    secrets_parser.add_argument('--from', dest='from_dir', help='Source directory for copy action')
+    secrets_parser.add_argument('--to', dest='to_dir', help='Destination directory for copy action')
+    secrets_parser.add_argument('--force', action='store_true', help='Overwrite existing secrets file')
     secrets_parser.set_defaults(func=cmd_secrets)
+
+    # Update-models command (CORE-017)
+    update_models_parser = subparsers.add_parser('update-models', help='Update model registry from OpenRouter API')
+    update_models_parser.add_argument('--force', action='store_true', help='Update even if not stale')
+    update_models_parser.add_argument('--check', action='store_true', help='Only check if registry is stale')
+    update_models_parser.set_defaults(func=cmd_update_models)
 
     args = parser.parse_args()
     

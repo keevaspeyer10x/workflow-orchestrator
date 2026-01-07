@@ -702,6 +702,62 @@ def decrypt_secrets(input_path: Path, password: str) -> Optional[Dict[str, str]]
         return None
 
 
+def copy_secrets_file(
+    source_dir: Path,
+    dest_dir: Path,
+    force: bool = False
+) -> bool:
+    """
+    Copy encrypted secrets file from one directory to another.
+
+    Args:
+        source_dir: Source directory containing the secrets file.
+        dest_dir: Destination directory.
+        force: If True, overwrite existing secrets file.
+
+    Returns:
+        True if copy was successful, False otherwise.
+    """
+    import shutil as _shutil
+
+    source_dir = Path(source_dir).resolve()
+    dest_dir = Path(dest_dir).resolve()
+
+    # Validate source
+    if not source_dir.exists():
+        logger.error(f"Source directory does not exist: {source_dir}")
+        return False
+
+    source_file = source_dir / SIMPLE_SECRETS_FILE
+    if not source_file.exists():
+        logger.error(f"Secrets file not found: {source_file}")
+        return False
+
+    # Check destination
+    dest_file = dest_dir / SIMPLE_SECRETS_FILE
+
+    if dest_file.exists() and not force:
+        logger.error(f"Destination secrets file already exists: {dest_file}")
+        logger.error("Use force=True to overwrite")
+        return False
+
+    # Create destination directory if needed
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        logger.error(f"Failed to create destination directory: {e}")
+        return False
+
+    # Copy the file
+    try:
+        _shutil.copy2(source_file, dest_file)
+        logger.info(f"Copied secrets from {source_file} to {dest_file}")
+        return True
+    except IOError as e:
+        logger.error(f"Failed to copy secrets file: {e}")
+        return False
+
+
 def init_secrets_interactive(working_dir: Path, password: str = None, from_env: bool = False) -> bool:
     """
     Initialize secrets interactively or from environment.

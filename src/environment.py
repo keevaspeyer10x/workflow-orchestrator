@@ -181,20 +181,89 @@ def get_environment_info() -> dict:
 def get_recommended_provider(environment: Optional[Environment] = None) -> str:
     """
     Get the recommended provider for the given environment.
-    
+
     Args:
         environment: Environment to get recommendation for (auto-detects if None)
-    
+
     Returns:
         str: Recommended provider name
     """
     if environment is None:
         environment = detect_environment()
-    
+
     recommendations = {
         Environment.CLAUDE_CODE: "claude_code",
         Environment.MANUS: "openrouter",  # Manus has OpenRouter available
         Environment.STANDALONE: "manual",  # Safest default for unknown environments
     }
-    
+
     return recommendations.get(environment, "manual")
+
+
+def detect_manus_connector() -> bool:
+    """
+    Detect if Manus direct connector is available.
+
+    Checks for:
+    1. MANUS_API_URL environment variable
+    2. MANUS_SESSION environment variable
+    3. Other Manus-specific indicators
+
+    Returns:
+        True if Manus connector appears available, False otherwise.
+    """
+    # Check for explicit API URL
+    if os.environ.get("MANUS_API_URL"):
+        logger.debug("Manus connector detected via MANUS_API_URL")
+        return True
+
+    # Check for session indicator
+    if os.environ.get("MANUS_SESSION"):
+        logger.debug("Manus connector detected via MANUS_SESSION")
+        return True
+
+    # Check for Manus task ID
+    if os.environ.get("MANUS_TASK_ID"):
+        logger.debug("Manus connector detected via MANUS_TASK_ID")
+        return True
+
+    # Check if in Manus environment with connector available
+    if _is_manus_environment():
+        # Additional check for connector availability
+        manus_connector_path = Path("/home/ubuntu/.manus/connector")
+        if manus_connector_path.exists():
+            logger.debug("Manus connector detected via connector path")
+            return True
+
+    return False
+
+
+def get_available_connectors() -> list:
+    """
+    Get list of all available connectors/providers.
+
+    Returns:
+        List of connector names that are currently available.
+    """
+    available = []
+
+    # Check Claude Code CLI
+    try:
+        import shutil
+        if shutil.which("claude"):
+            available.append("claude_code")
+    except Exception:
+        pass
+
+    # Check Manus connector
+    if detect_manus_connector():
+        available.append("manus_direct")
+
+    # Check OpenRouter
+    if os.environ.get("OPENROUTER_API_KEY"):
+        available.append("openrouter")
+
+    # Manual is always available
+    available.append("manual")
+
+    return available

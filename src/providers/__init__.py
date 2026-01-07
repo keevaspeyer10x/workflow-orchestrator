@@ -219,6 +219,94 @@ def register_provider(name: str, provider_class: Type[AgentProvider]) -> None:
     logger.info(f"Registered provider: {name}")
 
 
+def get_available_providers() -> List[str]:
+    """
+    Get list of currently available providers.
+
+    Checks each provider's availability and returns only those
+    that can actually be used.
+
+    Returns:
+        List[str]: Names of available providers in priority order.
+    """
+    available = []
+
+    # Check Claude Code CLI
+    claude_provider = ClaudeCodeProvider()
+    if claude_provider.is_available():
+        available.append("claude_code")
+
+    # Check Manus connector (if environment module available)
+    if _HAS_ENVIRONMENT:
+        try:
+            from ..environment import detect_manus_connector
+            if detect_manus_connector():
+                available.append("manus_direct")
+        except ImportError:
+            pass
+
+    # Check OpenRouter
+    if os.environ.get("OPENROUTER_API_KEY"):
+        available.append("openrouter")
+
+    # Manual is always available
+    available.append("manual")
+
+    return available
+
+
+def prompt_user_for_provider(
+    available: List[str],
+    preferred: Optional[str] = None
+) -> str:
+    """
+    Interactively prompt user to select a provider.
+
+    Displays available providers and allows user to select one.
+    If user presses Enter without selection, returns the first/default option.
+
+    Args:
+        available: List of available provider names.
+        preferred: Optional preferred provider (shown first if available).
+
+    Returns:
+        str: Selected provider name.
+    """
+    if not available:
+        return "manual"
+
+    # Reorder to put preferred first if it's available
+    if preferred and preferred in available:
+        available = [preferred] + [p for p in available if p != preferred]
+
+    print("\nAvailable providers:")
+    for i, provider in enumerate(available, 1):
+        marker = " (recommended)" if i == 1 else ""
+        print(f"  {i}) {provider}{marker}")
+
+    print()
+
+    while True:
+        try:
+            choice = input(f"Select provider [1-{len(available)}, default=1]: ").strip()
+
+            if not choice:
+                # Default to first option
+                return available[0]
+
+            idx = int(choice) - 1
+            if 0 <= idx < len(available):
+                return available[idx]
+            else:
+                print(f"Please enter a number between 1 and {len(available)}")
+
+        except ValueError:
+            print("Please enter a valid number")
+        except (KeyboardInterrupt, EOFError):
+            # Return default on interrupt
+            return available[0]
+
+
 # Export public API
 __all__ = [
     "AgentProvider",
@@ -229,4 +317,6 @@ __all__ = [
     "get_provider",
     "list_providers",
     "register_provider",
+    "get_available_providers",
+    "prompt_user_for_provider",
 ]
