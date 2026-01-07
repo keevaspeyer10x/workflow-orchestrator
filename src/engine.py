@@ -597,7 +597,98 @@ class WorkflowEngine:
         ))
         
         return True, f"Item {item_id} skipped"
-    
+
+    # ========================================================================
+    # Skip Visibility Methods (CORE-010)
+    # ========================================================================
+
+    def get_skipped_items(self, phase_id: str) -> list[Tuple[str, str]]:
+        """
+        Get list of skipped items for a specific phase.
+
+        Args:
+            phase_id: The phase ID to query
+
+        Returns:
+            List of (item_id, skip_reason) tuples for skipped items
+        """
+        if not self.state:
+            return []
+
+        phase = self.state.phases.get(phase_id)
+        if not phase:
+            return []
+
+        return [
+            (item_id, item.skip_reason or "No reason provided")
+            for item_id, item in phase.items.items()
+            if item.status == ItemStatus.SKIPPED
+        ]
+
+    def get_all_skipped_items(self) -> dict[str, list[Tuple[str, str]]]:
+        """
+        Get all skipped items grouped by phase.
+
+        Returns:
+            Dict mapping phase_id to list of (item_id, skip_reason) tuples
+        """
+        if not self.state:
+            return {}
+
+        result = {}
+        for phase_id in self.state.phases:
+            skipped = self.get_skipped_items(phase_id)
+            if skipped:
+                result[phase_id] = skipped
+        return result
+
+    def get_item_definition(self, item_id: str):
+        """
+        Get the workflow definition for an item by ID.
+
+        Args:
+            item_id: The item ID to find
+
+        Returns:
+            ChecklistItemDef if found, None otherwise
+        """
+        if not self.workflow_def:
+            return None
+
+        for phase in self.workflow_def.phases:
+            for item in phase.items:
+                if item.id == item_id:
+                    return item
+        return None
+
+    # ========================================================================
+    # Workflow Summary Methods (CORE-011)
+    # ========================================================================
+
+    def get_workflow_summary(self) -> dict:
+        """
+        Get summary of items per phase.
+
+        Returns:
+            Dict mapping phase_id to dict with 'completed', 'skipped', 'total' counts
+        """
+        if not self.state:
+            return {}
+
+        summary = {}
+        for phase_id, phase in self.state.phases.items():
+            completed = sum(1 for i in phase.items.values()
+                          if i.status == ItemStatus.COMPLETED)
+            skipped = sum(1 for i in phase.items.values()
+                         if i.status == ItemStatus.SKIPPED)
+            total = len(phase.items)
+            summary[phase_id] = {
+                'completed': completed,
+                'skipped': skipped,
+                'total': total
+            }
+        return summary
+
     def approve_item(self, item_id: str, notes: Optional[str] = None) -> Tuple[bool, str]:
         """Approve a manual gate item."""
         item_def, item_state, error = self._validate_item_in_current_phase(item_id)
