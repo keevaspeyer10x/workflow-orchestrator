@@ -111,6 +111,7 @@ phases:
         skippable: true
         skip_conditions: ["requirements_crystal_clear", "user_provided_full_context"]
         notes:
+          - "[caution] MUST pause and wait for user answers after presenting questions. Do NOT proceed with default recommendations without explicit user confirmation."
           - "[caution] Never ask open-ended questions without recommendations. Users should be able to say 'yes, use your recommendations' and move forward."
           - "[tip] Format each question as: Question → Recommendation → Alternatives → Tradeoffs"
           - "[example] 'Should we include run_command? Recommendation: No (security risk). Alternatives: Yes with allowlist, Yes unrestricted. Tradeoffs: Security vs flexibility.'"
