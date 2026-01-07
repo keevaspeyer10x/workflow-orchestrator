@@ -1085,6 +1085,53 @@ pip install -q --upgrade git+https://github.com/keevaspeyer10x/workflow-orchestr
 HOOK_MARKER = "# Added by: orchestrator install-hook"
 
 
+def _find_secrets_source() -> Path | None:
+    """Find an existing secrets file to copy from.
+
+    Checks in order:
+    1. Orchestrator installation directory
+    2. User config directory (~/.config/orchestrator/)
+
+    Returns:
+        Path to secrets file if found, None otherwise.
+    """
+    # Check orchestrator installation directory
+    src_dir = Path(__file__).parent
+    orchestrator_secrets = src_dir.parent / SIMPLE_SECRETS_FILE
+    if orchestrator_secrets.exists():
+        return orchestrator_secrets
+
+    # Check user config directory
+    user_secrets = Path.home() / ".config" / "orchestrator" / "secrets.enc"
+    if user_secrets.exists():
+        return user_secrets
+
+    return None
+
+
+def _copy_secrets_to_repo(source: Path, working_dir: Path) -> bool:
+    """Copy secrets file to a repo.
+
+    Args:
+        source: Source secrets file path
+        working_dir: Target repo directory
+
+    Returns:
+        True if copied successfully
+    """
+    import shutil
+
+    dest = working_dir / SIMPLE_SECRETS_FILE
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        shutil.copy(source, dest)
+        return True
+    except Exception as e:
+        print(f"Error copying secrets: {e}")
+        return False
+
+
 def cmd_setup(args):
     """Set up automatic updates for this repo, or remove the setup."""
     working_dir = Path(args.dir or '.')
@@ -1157,6 +1204,28 @@ def cmd_setup(args):
     print("")
     print("The orchestrator will automatically update when you start a new Claude Code session.")
     print("Works in both Claude Code CLI and Claude Code Web.")
+
+    # Check if secrets need to be copied
+    local_secrets = working_dir / SIMPLE_SECRETS_FILE
+    if not local_secrets.exists():
+        source_secrets = _find_secrets_source()
+        if source_secrets:
+            print("")
+            print(f"Found encrypted secrets at: {source_secrets}")
+
+            # Auto-copy if --copy-secrets flag or prompt user
+            if getattr(args, 'copy_secrets', False):
+                if _copy_secrets_to_repo(source_secrets, working_dir):
+                    print(f"✓ Secrets copied to {local_secrets}")
+                    print("  Set SECRETS_PASSWORD env var to decrypt in Claude Code Web")
+            else:
+                print("Run with --copy-secrets to copy them to this repo")
+                print("  orchestrator setup --copy-secrets")
+        else:
+            print("")
+            print("No secrets file found in this repo.")
+            print("Run 'orchestrator secrets init' to set up encrypted API keys")
+
     print("")
     print("To disable: orchestrator setup --remove")
 
@@ -1511,6 +1580,7 @@ Examples:
     setup_parser.add_argument('--dir', '-d', help='Target directory (default: current)')
     setup_parser.add_argument('--force', '-f', action='store_true', help='Overwrite existing setup')
     setup_parser.add_argument('--remove', action='store_true', help='Remove auto-updates from this repo')
+    setup_parser.add_argument('--copy-secrets', action='store_true', help='Copy encrypted secrets from orchestrator repo')
     setup_parser.set_defaults(func=cmd_setup)
 
     # Config command
