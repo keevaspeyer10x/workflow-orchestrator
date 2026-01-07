@@ -1,114 +1,87 @@
-# Test Cases: Aider Review Provider Integration
+# Test Cases: CORE-010 & CORE-011
 
-## Unit Tests
+## Engine Tests (tests/test_engine.py)
 
-### AiderExecutor Tests
+### get_skipped_items()
 
-#### TC-AID-001: Execute Review Success
-**Component:** `src/review/aider_executor.py`
-**Description:** Execute review with Aider returns successful ReviewResult
-**Setup:** Mock subprocess to return review output
-**Input:** `review_type="security"`
-**Expected:** ReviewResult with success=True, model contains "gemini"
-**Assertions:**
-- result.success is True
-- result.method_used == "aider"
-- "gemini" in result.model_used.lower()
-- result.raw_output is not empty
+| ID | Test Case | Input | Expected Output |
+|----|-----------|-------|-----------------|
+| E1 | No skipped items | Phase with all completed items | Empty list `[]` |
+| E2 | One skipped item | Phase with one skipped item, reason="Not applicable" | `[("item_id", "Not applicable")]` |
+| E3 | Multiple skipped items | Phase with 2 skipped items | List with both items and reasons |
+| E4 | Missing skip reason | Skipped item with None reason | `[("item_id", "No reason provided")]` |
+| E5 | Invalid phase ID | Non-existent phase_id | Empty list `[]` |
+| E6 | No active workflow | state=None | Empty list `[]` |
 
-#### TC-AID-002: Execute Review Timeout
-**Component:** `src/review/aider_executor.py`
-**Description:** Handle timeout when Aider takes too long
-**Setup:** Mock subprocess to raise TimeoutExpired
-**Input:** `review_type="holistic"`
-**Expected:** ReviewResult with success=False, error mentions timeout
-**Assertions:**
-- result.success is False
-- "timeout" in result.error.lower()
+### get_all_skipped_items()
 
-#### TC-AID-003: Execute Review Command Not Found
-**Component:** `src/review/aider_executor.py`
-**Description:** Handle missing aider command gracefully
-**Setup:** Mock subprocess to raise FileNotFoundError
-**Input:** `review_type="quality"`
-**Expected:** ReviewResult with success=False, helpful error message
-**Assertions:**
-- result.success is False
-- "aider" in result.error.lower() or "install" in result.error.lower()
+| ID | Test Case | Input | Expected Output |
+|----|-----------|-------|-----------------|
+| E7 | No skips anywhere | Workflow with no skipped items | Empty dict `{}` |
+| E8 | Skips in one phase | Skip in PLAN only | `{"PLAN": [("item", "reason")]}` |
+| E9 | Skips in multiple phases | Skips in PLAN and VERIFY | Dict with both phases |
+| E10 | No active workflow | state=None | Empty dict `{}` |
 
-#### TC-AID-004: Execute Review Parse Output
-**Component:** `src/review/aider_executor.py`
-**Description:** Parse Aider output into findings
-**Setup:** Mock subprocess with structured review output
-**Input:** `review_type="consistency"`
-**Expected:** ReviewResult with parsed findings
-**Assertions:**
-- result.findings is not None
-- len(result.findings) > 0 or result.raw_output is not empty
+### get_item_definition()
 
-### ReviewSetup Tests
+| ID | Test Case | Input | Expected Output |
+|----|-----------|-------|-----------------|
+| E11 | Item exists | Valid item_id | ChecklistItemDef object |
+| E12 | Item not found | Unknown item_id | None |
+| E13 | No workflow def | workflow_def=None | None |
 
-#### TC-AID-005: Check Aider Available
-**Component:** `src/review/setup.py`
-**Description:** Detect when aider is installed
-**Setup:** Mock shutil.which to return path
-**Expected:** ReviewSetup.aider_cli is True
-**Assertions:**
-- setup.aider_cli is True
+### get_workflow_summary()
 
-#### TC-AID-006: Check Aider Not Available
-**Component:** `src/review/setup.py`
-**Description:** Detect when aider is not installed
-**Setup:** Mock shutil.which to return None
-**Expected:** ReviewSetup.aider_cli is False
-**Assertions:**
-- setup.aider_cli is False
+| ID | Test Case | Input | Expected Output |
+|----|-----------|-------|-----------------|
+| E14 | Mixed statuses | Phase with 2 completed, 1 skipped | `{"completed": 2, "skipped": 1, "total": 3}` |
+| E15 | All completed | Phase with all completed | `{"completed": 3, "skipped": 0, "total": 3}` |
+| E16 | No active workflow | state=None | Empty dict `{}` |
 
-### ReviewRouter Tests
+## CLI Tests (tests/test_cli.py)
 
-#### TC-AID-007: Route to Aider When Available
-**Component:** `src/review/router.py`
-**Description:** Router selects aider method when available
-**Setup:** ReviewSetup with aider_cli=True, openrouter_key=True
-**Input:** `method="aider"`
-**Expected:** Router uses AIDER method
-**Assertions:**
-- router.method == ReviewMethod.AIDER
+### cmd_skip() Enhanced Output
 
-#### TC-AID-008: Fallback When Aider Unavailable
-**Component:** `src/review/router.py`
-**Description:** Router falls back to API when aider unavailable
-**Setup:** ReviewSetup with aider_cli=False, openrouter_key=True
-**Input:** `method="auto"`
-**Expected:** Router uses API method
-**Assertions:**
-- router.method == ReviewMethod.API
+| ID | Test Case | Verification |
+|----|-----------|--------------|
+| C1 | Skip shows separator | Output contains "=" * 60 |
+| C2 | Skip shows item ID | Output contains "SKIPPING: {item_id}" |
+| C3 | Skip shows reason | Output contains "Reason: {reason}" |
+| C4 | Skip shows description | Output contains item description if available |
 
-#### TC-AID-009: Status Message Shows Aider
-**Component:** `src/review/router.py`
-**Description:** Status message includes aider availability
-**Setup:** ReviewSetup with aider_cli=True
-**Expected:** Status message contains "aider"
-**Assertions:**
-- "aider" in router.get_status_message().lower()
+### cmd_advance() Shows Skipped Items
+
+| ID | Test Case | Verification |
+|----|-----------|--------------|
+| C5 | Shows skipped count | Output contains "completed with N skipped item(s)" |
+| C6 | Lists skipped items | Output contains each skipped item_id and reason |
+| C7 | No skips, no extra output | Output does not mention skipped if none exist |
+
+### cmd_finish() Completion Summary
+
+| ID | Test Case | Verification |
+|----|-----------|--------------|
+| C8 | Shows task description | Output contains task from state |
+| C9 | Shows duration | Output contains formatted duration |
+| C10 | Shows phase summary | Output contains completed/skipped counts per phase |
+| C11 | Shows skipped items list | Output contains all skipped items with reasons |
+| C12 | Shows next steps prompt | Output contains PR suggestion and follow-up prompts |
+| C13 | Handles missing times | Duration shows "N/A" if times unavailable |
+
+## Helper Function Tests
+
+### format_duration()
+
+| ID | Test Case | Input | Expected Output |
+|----|-----------|-------|-----------------|
+| H1 | Hours and minutes | timedelta(hours=2, minutes=15) | "2h 15m" |
+| H2 | Minutes only | timedelta(minutes=45) | "45m" |
+| H3 | Less than a minute | timedelta(seconds=30) | "< 1m" |
+| H4 | Zero duration | timedelta(0) | "< 1m" |
 
 ## Integration Tests
 
-#### TC-AID-010: End-to-End Review with Aider
-**Component:** Full review pipeline
-**Description:** Complete review flow using Aider
-**Setup:** Real aider installation, OPENROUTER_API_KEY set
-**Input:** Run `orchestrator review --method aider`
-**Expected:** Review completes with Gemini output
-**Assertions:**
-- Exit code 0
-- Output contains review findings
-- Model mentions gemini
-
-## Test Implementation Priority
-
-1. TC-AID-001, TC-AID-002, TC-AID-003 - Core executor tests
-2. TC-AID-005, TC-AID-006 - Setup detection
-3. TC-AID-007, TC-AID-008 - Router integration
-4. TC-AID-009 - Status display
-5. TC-AID-010 - End-to-end (manual/CI)
+| ID | Test Case | Verification |
+|----|-----------|--------------|
+| I1 | Full workflow with skips | Skip items, advance, finish - verify all output |
+| I2 | Workflow with no skips | Complete all items, finish - verify no skip mentions |

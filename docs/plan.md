@@ -1,102 +1,100 @@
-# Implementation Plan: Aider Review Provider
+# Implementation Plan: CORE-010 & CORE-011
 
 ## Overview
 
-Integrate Aider as an invisible review provider, enabling Gemini reviews with full repo context. Aider uses a "repo map" that efficiently provides codebase awareness to LLMs.
+Implement two related features that improve visibility and accountability at workflow skip/completion:
 
-## Architecture
-
-```
-orchestrator review
-       │
-       ▼
-  ReviewRouter
-       │
-       ├─► CLI Executor (codex, gemini) - Gemini blocked in Claude Code Web
-       ├─► API Executor (openrouter) - Limited context
-       └─► Aider Executor (NEW) - Full repo context via repo map
-```
+1. **CORE-010: Enhanced Skip Visibility** - Make skipped items more visible to force deliberate consideration
+2. **CORE-011: Workflow Completion Summary & Next Steps** - Show comprehensive summary and prompt for next steps
 
 ## Implementation Steps
 
-### 1. Install aider-chat dependency
-- Add to requirements.txt or install via pip
-- Update session-start.sh to ensure aider is available
+### Phase 1: Engine Methods (src/engine.py)
 
-### 2. Create Aider Executor (`src/review/aider_executor.py`)
-```python
-class AiderExecutor:
-    def execute(self, review_type: str) -> ReviewResult:
-        # Run: aider --model openrouter/google/gemini-2.0-flash-001 --message "review prompt"
-        # Aider automatically builds repo map for context
-        # Parse output to ReviewResult
-```
+Add three new methods to `WorkflowEngine`:
 
-### 3. Update Review Router
-- Add `AIDER = "aider"` to ReviewMethod enum
-- Add aider availability check to ReviewSetup
-- Route to AiderExecutor when method is "aider"
-- Make aider preferred for Gemini reviews when available
+1. **`get_skipped_items(phase_id: str) -> list[tuple[str, str]]`**
+   - Returns list of (item_id, skip_reason) for skipped items in a phase
+   - Used by cmd_advance to show skipped items from completed phase
 
-### 4. Update setup.py checks
-- Add `aider_available: bool` to ReviewSetup dataclass
-- Check for `aider` command availability
+2. **`get_all_skipped_items() -> dict[str, list[tuple[str, str]]]`**
+   - Returns all skipped items grouped by phase
+   - Used by cmd_finish for full summary
 
-### 5. Configuration
-- Allow specifying aider models in workflow.yaml or config
-- Default: `openrouter/google/gemini-2.0-flash-001`
-- Alternative: `openrouter/google/gemini-2.5-pro-preview-06-05`
+3. **`get_item_definition(item_id: str) -> Optional[ChecklistItemDef]`**
+   - Gets the workflow definition for an item by ID
+   - Used by cmd_skip to show item description/implications
 
-## Files to Modify/Create
+4. **`get_workflow_summary() -> dict`**
+   - Returns summary of items per phase (completed, skipped, total)
+   - Used by cmd_finish for completion summary
 
-| File | Action |
-|------|--------|
-| `src/review/aider_executor.py` | CREATE - New executor |
-| `src/review/router.py` | MODIFY - Add AIDER method |
-| `src/review/setup.py` | MODIFY - Add aider check |
-| `src/review/__init__.py` | MODIFY - Export AiderExecutor |
-| `requirements.txt` | MODIFY - Add aider-chat |
-| `install.sh` | MODIFY - Add pip install aider-chat |
-| `.claude/hooks/session-start.sh` | MODIFY - Auto-install aider if missing |
-| `docs/SETUP_GUIDE.md` | MODIFY - Document Aider as review provider |
-| `tests/test_review_aider.py` | CREATE - Tests |
+### Phase 2: CLI Updates (src/cli.py)
 
-## User Experience
+1. **Update `cmd_skip()`**:
+   - Add enhanced output showing item being skipped with visual separator
+   - Show item description (from definition) if available
+   - Display "Implications" section
 
-```bash
-# User sees this (unchanged)
-orchestrator review
+2. **Update `cmd_advance()`**:
+   - After successful advance, show skipped items from the completed phase
+   - Format: `Phase X completed with N skipped item(s):`
 
-# Behind the scenes, if aider available + openrouter key:
-# → AiderExecutor runs Gemini with full repo context
+3. **Update `cmd_finish()`**:
+   - Add `print_completion_summary()` function:
+     - Task description
+     - Duration (if start/end times available)
+     - Phase summary table (completed/skipped/total per phase)
+     - Skipped items list
+   - Add `print_next_steps_prompt()` function:
+     - Suggest creating PR
+     - Suggest continuing discussion
+     - Prompt for next actions
 
-# Status shows:
-Review Infrastructure Status:
-  CLI Tools:      ✓ codex, ✗ gemini (blocked)
-  Aider:          ✓ aider (gemini via openrouter)
-  API Key:        ✓ OPENROUTER_API_KEY
-```
+### Phase 3: Helper Functions
 
-## Aider Command
+1. **`format_duration(timedelta) -> str`**
+   - Format duration as "Xh Ym" or "Xm Ys"
 
-```bash
-aider \
-  --model openrouter/google/gemini-2.0-flash-001 \
-  --no-auto-commits \
-  --no-git \
-  --message "Review prompt here" \
-  2>&1
-```
+2. **`get_pr_title(state) -> str`**
+   - Generate suggested PR title from task description
 
-Key flags:
-- `--no-auto-commits` - Don't create commits (review only)
-- `--no-git` - Don't interact with git
-- `--message` - Non-interactive mode with prompt
+## Files to Modify
 
-## Success Criteria
+| File | Changes |
+|------|---------|
+| `src/engine.py` | Add 4 methods: `get_skipped_items`, `get_all_skipped_items`, `get_item_definition`, `get_workflow_summary` |
+| `src/cli.py` | Update `cmd_skip`, `cmd_advance`, `cmd_finish`; add helper functions |
+| `tests/test_engine.py` | Add tests for new engine methods |
+| `tests/test_cli.py` | Add tests for CLI output changes |
 
-1. `orchestrator review` works with Gemini via Aider
-2. User doesn't know Aider is being used (invisible)
-3. Gemini gets full repo context (via repo map)
-4. Falls back to OpenRouter API if Aider unavailable
-5. Tests pass
+## Test Cases
+
+### Engine Tests
+- `test_get_skipped_items_returns_empty_for_no_skips`
+- `test_get_skipped_items_returns_skipped_with_reasons`
+- `test_get_all_skipped_items_groups_by_phase`
+- `test_get_item_definition_finds_item`
+- `test_get_item_definition_returns_none_for_unknown`
+- `test_get_workflow_summary_counts_correctly`
+
+### CLI Tests
+- `test_cmd_skip_shows_enhanced_output`
+- `test_cmd_advance_shows_skipped_items`
+- `test_cmd_finish_shows_completion_summary`
+- `test_cmd_finish_shows_next_steps_prompt`
+- `test_format_duration`
+
+## Risk Assessment
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| Breaking existing CLI output parsing | Low | Medium | Changes are additive, existing success/error indicators unchanged |
+| Performance with many skipped items | Low | Low | Summary is O(n) where n = items, typical workflows have <50 items |
+| Duration calculation edge cases | Medium | Low | Handle None start/end times gracefully |
+
+## Dependencies
+
+- No external dependencies
+- Uses existing `ItemStatus.SKIPPED` enum
+- Uses existing `skip_reason` field on `ItemState`
