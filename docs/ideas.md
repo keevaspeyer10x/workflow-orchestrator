@@ -45,3 +45,5 @@ Don't forget
 - At the end suggest committing changes if they haven't been
 
 - Tidy up the repo - archive unnecessary file
+
+Proactively add CI/CD tests on PR or merge - Code reviews, other things to think about? Should we putting CI/CD practices into place as part of this whole process. Should we be reviewing the workflow from a Expert CI/CD perspective?
