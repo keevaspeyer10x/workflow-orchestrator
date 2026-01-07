@@ -1265,15 +1265,247 @@ This is a significant architectural change. May be better suited for a separate 
 ---
 
 ### WF-003: Model Selection Guidance
-**Status:** Planned  
-**Complexity:** Low  
-**Source:** Visual Verification Service task  
+**Status:** Planned
+**Complexity:** Low
+**Source:** Visual Verification Service task
 **Description:** Use "latest generation available" principle for model selection instead of hardcoding specific model names.
 
 **Implementation Notes:**
 - Add `model_preference: latest` setting
 - Maintain mapping of "latest" to current best model
 - Update mapping when new models released
+
+---
+
+### WF-005: Summary Before Approval Gates
+**Status:** Planned
+**Complexity:** Low
+**Priority:** High
+**Source:** ideas.md - "Provide a summary on screen before asking for approval"
+**Description:** Show a concise summary of work completed, issues found, and AI feedback before any manual approval gate.
+
+**Problem Solved:**
+When workflows reach manual gates (phase advances, item approvals), users must scroll back through logs to understand what happened. This slows down review and increases the chance of rubber-stamping approvals.
+
+**Desired Behavior:**
+Before any manual gate, display:
+```
+============================================================
+📋 SUMMARY BEFORE APPROVAL
+============================================================
+Phase: EXECUTE → REVIEW
+
+Completed Items:
+  ✓ implement_core_logic - "Added retry mechanism to API client"
+  ✓ write_unit_tests - "18 tests, all passing"
+  ✓ integration_tests - "3 integration tests added"
+
+Skipped Items:
+  ⊘ performance_tests - "Deferred to follow-up task"
+
+Files Modified: 8
+  • src/api/client.py (+45, -12)
+  • src/api/retry.py (new, +78)
+  • tests/test_client.py (+156)
+  • ...
+
+Ready to advance to REVIEW phase?
+============================================================
+```
+
+**Implementation Notes:**
+- Hook into `cmd_advance()` and any approval commands
+- Gather: completed items with notes, skipped items with reasons, file changes (git diff --stat)
+- Display summary, then prompt for confirmation
+- Add `--yes` flag to skip confirmation for automation
+
+**Tasks:**
+- [ ] Create `generate_phase_summary()` function in CLI
+- [ ] Integrate git diff --stat for file change summary
+- [ ] Add summary display before `advance` confirmation
+- [ ] Add `--yes` flag to bypass for CI/automation
+- [ ] Add tests for summary generation
+
+---
+
+### WF-006: File Links in Status Output
+**Status:** Planned
+**Complexity:** Low
+**Priority:** Medium
+**Source:** ideas.md - "Need a link to the relevant files in the comments after each section before approve"
+**Description:** Include direct file paths in status output and completion notes to speed up human review.
+
+**Problem Solved:**
+When reviewing completed items, humans need to find the relevant code. Currently they must search or ask the agent. Direct file links make review faster.
+
+**Desired Behavior:**
+```
+✓ implement_auth_middleware
+  Notes: Added JWT validation middleware
+  Files:
+    • src/middleware/auth.py:15-45 (new function)
+    • src/routes/api.py:8 (import added)
+    • tests/test_auth.py:1-89 (new file)
+```
+
+**Implementation Notes:**
+- Track files modified during item completion (via git diff or explicit logging)
+- Store file list in item completion metadata
+- Display in `orchestrator status` output
+- Format as clickable paths for terminal emulators that support it
+
+**Tasks:**
+- [ ] Add `files_modified` field to item completion metadata
+- [ ] Auto-detect files from git diff when completing items
+- [ ] Update status display to show file links
+- [ ] Add `--files` flag to show/hide file details
+- [ ] Support terminal hyperlinks (OSC 8) for clickable paths
+
+---
+
+### WF-007: Learnings to Roadmap Pipeline
+**Status:** Planned
+**Complexity:** Low
+**Priority:** Medium
+**Source:** ideas.md - "Are we checking if Learnings implies new things for the ROADMAP?"
+**Description:** Automatically suggest roadmap items based on captured learnings during the LEARN phase.
+
+**Problem Solved:**
+Learnings are captured but often not actioned. The loop from "lesson learned" to "roadmap item" to "implemented improvement" is manual and often forgotten.
+
+**Desired Behavior:**
+When completing the LEARN phase:
+```
+============================================================
+📚 LEARNINGS CAPTURED
+============================================================
+1. "API retry logic was duplicated in 3 places - should extract to utility"
+   → Suggested roadmap item: ARCH-XXX: Extract API retry utility
+
+2. "Test setup took 20 minutes due to missing documentation"
+   → Suggested roadmap item: WF-XXX: Improve test setup docs
+
+3. "Model context window exceeded during large file review"
+   → Suggested roadmap item: CORE-XXX: Chunked file review
+
+Add these to ROADMAP.md? [y/N/edit]
+============================================================
+```
+
+**Implementation Notes:**
+- Parse learnings for actionable patterns (e.g., "should", "need to", "next time")
+- Generate suggested roadmap entries with appropriate prefixes
+- Optionally use AI to categorize and format suggestions
+- Append to ROADMAP.md under a "Suggested from Learnings" section
+
+**Tasks:**
+- [ ] Create `analyze_learnings()` function to extract actionable items
+- [ ] Generate roadmap entry templates from learnings
+- [ ] Add interactive prompt to accept/edit/skip suggestions
+- [ ] Append accepted items to ROADMAP.md
+- [ ] Add `--auto-roadmap` flag to skip interactive prompt
+
+---
+
+### WF-008: AI Critique at Phase Gates
+**Status:** Planned
+**Complexity:** Medium
+**Priority:** Medium
+**Source:** ideas.md - "Should we have an AI critique the plan - or every step?"
+**Description:** Add optional AI critique checkpoints at phase transitions, not just during REVIEW phase.
+
+**Problem Solved:**
+Currently multi-model review (CORE-016) only happens in REVIEW phase. Problems in planning or design aren't caught until code is written. Earlier critique catches issues sooner.
+
+**Desired Behavior:**
+At each phase gate, optionally run a quick AI critique:
+```
+============================================================
+🔍 PHASE CRITIQUE: PLAN → EXECUTE
+============================================================
+Reviewer: gemini-2.0-flash (quick critique mode)
+
+Observations:
+  ⚠️ Risk analysis doesn't address API rate limiting
+  ⚠️ No rollback plan specified
+  ✓ Test strategy is comprehensive
+  ✓ Dependencies correctly identified
+
+Recommendation: Address rate limiting before proceeding
+
+Continue anyway? [y/N/address]
+============================================================
+```
+
+**Implementation Notes:**
+- Lighter-weight than full REVIEW phase reviews
+- Use fast/cheap model (e.g., gemini-flash, gpt-4o-mini)
+- Focus on gaps, risks, and completeness rather than deep analysis
+- Configurable: `phase_critique: true/false` in workflow.yaml
+- Can be skipped with `--no-critique` flag
+
+**Critique Focus by Phase:**
+- PLAN → EXECUTE: Are requirements clear? Risks identified?
+- EXECUTE → REVIEW: Are all items complete? Tests passing?
+- REVIEW → VERIFY: Were review findings addressed?
+- VERIFY → LEARN: Did verification pass? Any remaining issues?
+
+**Tasks:**
+- [ ] Create `PhaseTransitionCritique` class
+- [ ] Define critique prompts for each phase transition
+- [ ] Integrate with `cmd_advance()`
+- [ ] Add `phase_critique` setting to workflow.yaml
+- [ ] Add `--no-critique` flag to bypass
+- [ ] Use existing review router for model selection
+
+---
+
+### WF-009: Document Phase
+**Status:** Planned
+**Complexity:** Low
+**Priority:** Medium
+**Source:** ideas.md - "Add a final stage - document - update PRD, spec document, README files, set-up instructions"
+**Description:** Add optional DOCUMENT phase after VERIFY to ensure documentation stays current.
+
+**Problem Solved:**
+Documentation often lags behind code changes. After verification passes, there's no prompt to update READMEs, setup guides, or specs. This leads to documentation drift.
+
+**Desired Behavior:**
+After VERIFY phase, optionally run DOCUMENT phase:
+```yaml
+# workflow.yaml
+phases:
+  # ... existing phases ...
+  - id: DOCUMENT
+    name: Documentation Update
+    optional: true  # Can be skipped if no docs needed
+    items:
+      - id: update_readme
+        name: Update README if needed
+        optional: true
+      - id: update_setup_guide
+        name: Update setup/install instructions
+        optional: true
+      - id: update_api_docs
+        name: Update API documentation
+        optional: true
+      - id: changelog_entry
+        name: Add changelog entry
+        optional: false  # Always required
+```
+
+**Implementation Notes:**
+- Phase is optional - can be skipped entirely for small changes
+- Individual items are mostly optional
+- AI can auto-detect which docs need updates based on changes
+- Changelog entry is typically required
+
+**Tasks:**
+- [ ] Add DOCUMENT phase to default workflow.yaml
+- [ ] Make phase skippable with `orchestrator skip-phase DOCUMENT`
+- [ ] Add doc-update detection (which files changed → which docs affected)
+- [ ] Add changelog entry template generation
+- [ ] Document when to skip vs. complete this phase
 
 ---
 
