@@ -97,11 +97,27 @@ class ResolutionPipeline:
 
         # Stage 1: Context Assembly
         logger.info("=== Stage 1: Context Assembly ===")
-        context = self.context_assembler.assemble(detection_result)
+        try:
+            context = self.context_assembler.assemble(detection_result)
+        except Exception as e:
+            logger.error(f"Stage 1 (Context Assembly) failed: {e}", exc_info=True)
+            return Resolution(
+                resolution_id=resolution_id,
+                needs_escalation=True,
+                escalation_reason="stage_1_context_assembly_failed",
+            )
 
         # Stage 2: Intent Extraction
         logger.info("=== Stage 2: Intent Extraction ===")
-        intents = self.intent_extractor.extract(context)
+        try:
+            intents = self.intent_extractor.extract(context)
+        except Exception as e:
+            logger.error(f"Stage 2 (Intent Extraction) failed: {e}", exc_info=True)
+            return Resolution(
+                resolution_id=resolution_id,
+                needs_escalation=True,
+                escalation_reason="stage_2_intent_extraction_failed",
+            )
 
         # Check if we should escalate due to low confidence
         if self.auto_escalate_low_confidence and intents.overall_confidence == "low":
@@ -114,7 +130,15 @@ class ResolutionPipeline:
 
         # Stage 3: Interface Harmonization
         logger.info("=== Stage 3: Interface Harmonization ===")
-        harmonized = self.harmonizer.harmonize(context, intents)
+        try:
+            harmonized = self.harmonizer.harmonize(context, intents)
+        except Exception as e:
+            logger.error(f"Stage 3 (Interface Harmonization) failed: {e}", exc_info=True)
+            return Resolution(
+                resolution_id=resolution_id,
+                needs_escalation=True,
+                escalation_reason="stage_3_interface_harmonization_failed",
+            )
 
         # Check if harmonization failed
         if not harmonized.build_passes:
@@ -124,7 +148,15 @@ class ResolutionPipeline:
 
         # Stage 4: Candidate Generation
         logger.info("=== Stage 4: Candidate Generation ===")
-        candidates = self.candidate_generator.generate(context, intents, harmonized)
+        try:
+            candidates = self.candidate_generator.generate(context, intents, harmonized)
+        except Exception as e:
+            logger.error(f"Stage 4 (Candidate Generation) failed: {e}", exc_info=True)
+            return Resolution(
+                resolution_id=resolution_id,
+                needs_escalation=True,
+                escalation_reason="stage_4_candidate_generation_failed",
+            )
 
         if not candidates:
             logger.warning("No candidates generated - escalating")
@@ -136,11 +168,29 @@ class ResolutionPipeline:
 
         # Stage 5: Validation
         logger.info("=== Stage 5: Validation ===")
-        validated = self.validator.validate(candidates, context)
+        try:
+            validated = self.validator.validate(candidates, context)
+        except Exception as e:
+            logger.error(f"Stage 5 (Validation) failed: {e}", exc_info=True)
+            return Resolution(
+                resolution_id=resolution_id,
+                needs_escalation=True,
+                escalation_reason="stage_5_validation_failed",
+                all_candidates=candidates,  # Include what we have
+            )
 
         # Stage 6: Selection
         logger.info("=== Stage 6: Selection ===")
-        return self._select_winner(resolution_id, validated, intents, context)
+        try:
+            return self._select_winner(resolution_id, validated, intents, context)
+        except Exception as e:
+            logger.error(f"Stage 6 (Selection) failed: {e}", exc_info=True)
+            return Resolution(
+                resolution_id=resolution_id,
+                needs_escalation=True,
+                escalation_reason="stage_6_selection_failed",
+                all_candidates=validated,  # Include validated candidates
+            )
 
     def _select_winner(
         self,

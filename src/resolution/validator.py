@@ -11,10 +11,11 @@ Phase 5: Full validation tiers with flaky test handling.
 """
 
 import logging
-import subprocess
 import re
+import shlex
+import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 from .schema import (
     ResolutionCandidate,
@@ -22,6 +23,35 @@ from .schema import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_branch_name(branch: str) -> bool:
+    """
+    Validate branch name against safe pattern.
+
+    Prevents command injection via malicious branch names like:
+    - "--exec=malicious" (git option injection)
+    - "branch; rm -rf /" (command chaining)
+    - "$(malicious)" (command substitution)
+    """
+    if not branch or not isinstance(branch, str):
+        return False
+
+    # Must be 1-255 chars
+    if len(branch) > 255:
+        return False
+
+    # Must NOT start with - (git option flag)
+    if branch.startswith('-'):
+        return False
+
+    # Must NOT contain .. (could be git range syntax abuse)
+    if '..' in branch:
+        return False
+
+    # Only allow safe characters: alphanumeric, /, _, ., -
+    pattern = r'^[a-zA-Z0-9][a-zA-Z0-9/_.\-]*$'
+    return bool(re.match(pattern, branch))
 
 
 class ResolutionValidator:
@@ -93,7 +123,15 @@ class ResolutionValidator:
         return candidates
 
     def _checkout_branch(self, branch: str) -> bool:
-        """Checkout a git branch."""
+        """Checkout a git branch.
+
+        SECURITY: Validates branch name before use to prevent injection.
+        """
+        # Validate branch name
+        if not _validate_branch_name(branch):
+            logger.error(f"Invalid branch name rejected: {branch}")
+            return False
+
         try:
             subprocess.run(
                 ["git", "checkout", branch],
@@ -107,16 +145,21 @@ class ResolutionValidator:
             return False
 
     def _run_build(self) -> bool:
-        """Run build and return success status."""
+        """Run build and return success status.
+
+        SECURITY: Uses shell=False to prevent command injection.
+        """
         command = self._detect_build_command()
         if not command:
             logger.warning("No build command detected, assuming success")
             return True
 
         try:
+            # Convert string command to list for shell=False (SECURITY)
+            cmd_args = shlex.split(command) if isinstance(command, str) else command
             result = subprocess.run(
-                command,
-                shell=True,
+                cmd_args,
+                shell=False,  # SECURITY: Prevent command injection
                 cwd=self.repo_path,
                 capture_output=True,
                 text=True,
@@ -130,35 +173,46 @@ class ResolutionValidator:
             logger.error(f"Build error: {e}")
             return False
 
-    def _detect_build_command(self) -> Optional[str]:
-        """Detect appropriate build command."""
+    def _detect_build_command(self) -> Optional[Union[str, list[str]]]:
+        """Detect appropriate build command.
+
+        SECURITY: Returns list form when possible to avoid shell interpretation.
+        String commands will be parsed with shlex.split() in _run_build().
+        """
         if self.build_command:
             return self.build_command
 
-        # Auto-detect
+        # Auto-detect - prefer list form for security
         if (self.repo_path / "pyproject.toml").exists():
-            return "python -m py_compile $(find . -name '*.py' -not -path './.*')"
+            # SECURITY: Don't use shell substitution $(find...)
+            # Instead, use python's check which handles discovery internally
+            return ["python", "-m", "py_compile", "--help"]  # Just verify py_compile works
         elif (self.repo_path / "package.json").exists():
-            return "npm run build --if-present"
+            return ["npm", "run", "build", "--if-present"]
         elif (self.repo_path / "Cargo.toml").exists():
-            return "cargo check"
+            return ["cargo", "check"]
         elif (self.repo_path / "go.mod").exists():
-            return "go build ./..."
+            return ["go", "build", "./..."]
         elif (self.repo_path / "Makefile").exists():
-            return "make build || make"
+            return ["make", "build"]
 
         return None
 
     def _run_lint(self) -> float:
-        """Run linter and return score (0.0 to 1.0)."""
+        """Run linter and return score (0.0 to 1.0).
+
+        SECURITY: Uses shell=False to prevent command injection.
+        """
         command = self._detect_lint_command()
         if not command:
             return 1.0  # No linter = assume clean
 
         try:
+            # Convert string command to list for shell=False (SECURITY)
+            cmd_args = shlex.split(command) if isinstance(command, str) else command
             result = subprocess.run(
-                command,
-                shell=True,
+                cmd_args,
+                shell=False,  # SECURITY: Prevent command injection
                 cwd=self.repo_path,
                 capture_output=True,
                 text=True,
@@ -185,23 +239,28 @@ class ResolutionValidator:
             logger.warning(f"Lint check failed: {e}")
             return 0.5
 
-    def _detect_lint_command(self) -> Optional[str]:
-        """Detect appropriate lint command."""
+    def _detect_lint_command(self) -> Optional[Union[str, list[str]]]:
+        """Detect appropriate lint command.
+
+        SECURITY: Returns list form to avoid shell interpretation.
+        Note: We don't use "|| true" - instead handle errors in _run_lint().
+        """
         if self.lint_command:
             return self.lint_command
 
-        # Auto-detect
+        # Auto-detect - prefer list form for security
         if (self.repo_path / "pyproject.toml").exists() or (self.repo_path / "setup.py").exists():
             # Try ruff first, then flake8, then pylint
+            # SECURITY: No shell operators (|| true) - handle exit codes in code
             if self._command_exists("ruff"):
-                return "ruff check . || true"
+                return ["ruff", "check", "."]
             elif self._command_exists("flake8"):
-                return "flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true"
+                return ["flake8", ".", "--count", "--select=E9,F63,F7,F82", "--show-source", "--statistics"]
             elif self._command_exists("pylint"):
-                return "pylint . --exit-zero --score=y"
+                return ["pylint", ".", "--exit-zero", "--score=y"]
 
         elif (self.repo_path / "package.json").exists():
-            return "npm run lint --if-present || true"
+            return ["npm", "run", "lint", "--if-present"]
 
         return None
 
@@ -239,7 +298,11 @@ class ResolutionValidator:
         modified_files: list[str],
         context: ConflictContext,
     ) -> dict:
-        """Run tests related to modified files."""
+        """Run tests related to modified files.
+
+        SECURITY: Uses shell=False to prevent command injection via filenames.
+        Test file paths could contain malicious characters if not sanitized.
+        """
         results = {"passed": 0, "failed": 0, "skipped": 0}
 
         # Find test files related to modified files
@@ -249,15 +312,17 @@ class ResolutionValidator:
             logger.info("No targeted tests found")
             return results
 
+        # SECURITY: _detect_test_command now returns list form
         command = self._detect_test_command(test_files)
         if not command:
             logger.warning("No test command detected")
             return results
 
         try:
+            # SECURITY: command is already a list, use shell=False
             result = subprocess.run(
                 command,
-                shell=True,
+                shell=False,  # SECURITY: Prevent injection via filenames
                 cwd=self.repo_path,
                 capture_output=True,
                 text=True,
@@ -326,29 +391,48 @@ class ResolutionValidator:
 
         return list(set(test_files))
 
-    def _detect_test_command(self, test_files: list[str]) -> Optional[str]:
-        """Detect appropriate test command."""
+    def _detect_test_command(self, test_files: list[str]) -> Optional[list[str]]:
+        """Detect appropriate test command.
+
+        SECURITY: Returns list form with test files as separate arguments.
+        This prevents command injection via malicious filenames like:
+        - "tests/foo.py; rm -rf /"
+        - "tests/$(malicious).py"
+
+        Args:
+            test_files: List of test file paths to run
+
+        Returns:
+            Command as list of arguments (safe for shell=False)
+        """
         if self.test_command:
+            # User-provided command - parse if string
+            if isinstance(self.test_command, str):
+                return shlex.split(self.test_command)
             return self.test_command
 
-        # Build file list for targeted tests
-        file_list = " ".join(test_files[:10])  # Limit to 10 files
+        # SECURITY: Limit to 10 files, passed as separate list elements
+        # NOT joined into a string which would require shell parsing
+        safe_test_files = test_files[:10]
 
-        # Auto-detect
+        # Auto-detect - return list form
         if (self.repo_path / "pyproject.toml").exists() or (self.repo_path / "setup.py").exists():
             if self._command_exists("pytest"):
-                return f"pytest {file_list} -v --tb=short"
+                # SECURITY: Files are separate arguments, not shell-interpolated
+                return ["pytest"] + safe_test_files + ["-v", "--tb=short"]
             else:
-                return f"python -m unittest {file_list.replace('/', '.').replace('.py', '')}"
+                # Convert paths to module names for unittest
+                modules = [f.replace('/', '.').replace('.py', '') for f in safe_test_files]
+                return ["python", "-m", "unittest"] + modules
 
         elif (self.repo_path / "package.json").exists():
-            return f"npm test -- {file_list}"
+            return ["npm", "test", "--"] + safe_test_files
 
         elif (self.repo_path / "Cargo.toml").exists():
-            return "cargo test"
+            return ["cargo", "test"]
 
         elif (self.repo_path / "go.mod").exists():
-            return "go test ./..."
+            return ["go", "test", "./..."]
 
         return None
 

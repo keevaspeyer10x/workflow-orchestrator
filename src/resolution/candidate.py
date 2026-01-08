@@ -11,6 +11,7 @@ Phase 5 will generate multiple candidates with diversity enforcement.
 """
 
 import logging
+import re
 import subprocess
 import uuid
 from pathlib import Path
@@ -24,6 +25,41 @@ from .schema import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_branch_name(branch: str) -> bool:
+    """
+    Validate branch name against safe pattern.
+
+    SECURITY: Prevents command injection via malicious branch names like:
+    - "--exec=malicious" (git option injection)
+    - "branch; rm -rf /" (command chaining)
+    - "$(malicious)" (command substitution)
+
+    Args:
+        branch: Branch name to validate
+
+    Returns:
+        True if branch name is safe, False otherwise
+    """
+    if not branch or not isinstance(branch, str):
+        return False
+
+    # Must be 1-255 chars
+    if len(branch) > 255:
+        return False
+
+    # Must NOT start with - (git option flag)
+    if branch.startswith('-'):
+        return False
+
+    # Must NOT contain .. (could be git range syntax abuse)
+    if '..' in branch:
+        return False
+
+    # Only allow safe characters: alphanumeric, /, _, ., -
+    pattern = r'^[a-zA-Z0-9][a-zA-Z0-9/_.\-]*$'
+    return bool(re.match(pattern, branch))
 
 
 class CandidateGenerator:
@@ -40,6 +76,11 @@ class CandidateGenerator:
         base_branch: str = "main",
     ):
         self.repo_path = repo_path or Path.cwd()
+
+        # SECURITY: Validate base_branch before storing
+        if not _validate_branch_name(base_branch):
+            logger.error(f"Invalid base_branch rejected: {base_branch}")
+            raise ValueError(f"Invalid base branch name: {base_branch}")
         self.base_branch = base_branch
 
     def generate(
@@ -164,7 +205,15 @@ class CandidateGenerator:
         strategy: str,
         context: ConflictContext,
     ) -> bool:
-        """Create a resolution branch using the selected strategy."""
+        """Create a resolution branch using the selected strategy.
+
+        SECURITY: Validates all branch names before git commands.
+        """
+
+        # SECURITY: Validate branch_name parameter
+        if not _validate_branch_name(branch_name):
+            logger.error(f"Invalid resolution branch name rejected: {branch_name}")
+            return False
 
         agent_ids = context.agent_ids
         branches = list(context.agent_branches.values())
@@ -173,8 +222,14 @@ class CandidateGenerator:
             logger.warning("Need at least 2 branches to resolve")
             return False
 
+        # SECURITY: Validate all agent branches before any git operations
+        for branch in branches:
+            if not _validate_branch_name(branch):
+                logger.error(f"Invalid agent branch name rejected: {branch}")
+                return False
+
         try:
-            # Start from base
+            # Start from base (already validated in __init__)
             subprocess.run(
                 ["git", "checkout", self.base_branch],
                 cwd=self.repo_path,
@@ -182,7 +237,7 @@ class CandidateGenerator:
                 check=True,
             )
 
-            # Create new branch
+            # Create new branch (validated above)
             subprocess.run(
                 ["git", "checkout", "-b", branch_name],
                 cwd=self.repo_path,
@@ -228,7 +283,16 @@ class CandidateGenerator:
             return False
 
     def _merge_branch(self, branch: str, allow_conflicts: bool = False) -> bool:
-        """Merge a branch into current HEAD."""
+        """Merge a branch into current HEAD.
+
+        SECURITY: Validates branch name. Called only from _create_resolution_branch
+        which already validates, but defense-in-depth is important.
+        """
+        # SECURITY: Validate branch name before git command
+        if not _validate_branch_name(branch):
+            logger.error(f"Invalid branch name in merge rejected: {branch}")
+            return False
+
         try:
             result = subprocess.run(
                 ["git", "merge", "--no-edit", branch],
@@ -250,6 +314,7 @@ class CandidateGenerator:
                         cwd=self.repo_path,
                         capture_output=True,
                     )
+                    # SECURITY: Branch name already validated, safe in commit message
                     subprocess.run(
                         ["git", "commit", "-m", f"Resolve conflicts from {branch}"],
                         cwd=self.repo_path,
@@ -267,7 +332,15 @@ class CandidateGenerator:
             return False
 
     def _get_diff_from_base(self, branch_name: str) -> str:
-        """Get diff between base and resolution branch."""
+        """Get diff between base and resolution branch.
+
+        SECURITY: Validates branch name before git command.
+        """
+        # SECURITY: Validate branch_name
+        if not _validate_branch_name(branch_name):
+            logger.error(f"Invalid branch name in diff rejected: {branch_name}")
+            return ""
+
         try:
             result = subprocess.run(
                 ["git", "diff", f"{self.base_branch}...{branch_name}"],
@@ -280,7 +353,15 @@ class CandidateGenerator:
             return ""
 
     def _get_modified_files(self, branch_name: str) -> list[str]:
-        """Get list of files modified in resolution."""
+        """Get list of files modified in resolution.
+
+        SECURITY: Validates branch name before git command.
+        """
+        # SECURITY: Validate branch_name
+        if not _validate_branch_name(branch_name):
+            logger.error(f"Invalid branch name in modified files rejected: {branch_name}")
+            return []
+
         try:
             result = subprocess.run(
                 ["git", "diff", "--name-only", f"{self.base_branch}...{branch_name}"],

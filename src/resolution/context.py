@@ -29,6 +29,79 @@ from ..coordinator.manifest_store import ManifestStore
 logger = logging.getLogger(__name__)
 
 
+def _sanitize_filepath(filepath: str) -> str:
+    """
+    Sanitize a filepath by removing dangerous sequences.
+
+    SECURITY: Prevents path traversal and injection attacks.
+    """
+    if not filepath:
+        return ""
+
+    # Remove null bytes (path injection)
+    filepath = filepath.replace('\x00', '')
+
+    # Normalize path separators
+    filepath = filepath.replace('\\', '/')
+
+    # Remove leading slashes (treat as relative)
+    while filepath.startswith('/'):
+        filepath = filepath[1:]
+
+    # Collapse multiple slashes
+    filepath = re.sub(r'/+', '/', filepath)
+
+    # Remove leading/trailing whitespace
+    filepath = filepath.strip()
+
+    return filepath
+
+
+def _validate_repo_path(filepath: str, repo_path: Path) -> bool:
+    """
+    Validate that a filepath is within repository bounds.
+
+    SECURITY: Prevents path traversal attacks like:
+    - ../../../etc/passwd
+    - /etc/passwd (absolute paths)
+    - .git/config (accessing git internals)
+
+    Args:
+        filepath: Path to validate (should be relative)
+        repo_path: Root of the repository
+
+    Returns:
+        True if filepath is safe, False otherwise
+    """
+    if not filepath:
+        return False
+
+    # Reject absolute paths
+    if filepath.startswith('/'):
+        return False
+
+    # Reject null bytes
+    if '\x00' in filepath:
+        return False
+
+    # Reject .git access
+    if '.git' in filepath.split('/'):
+        return False
+
+    # Normalize and check if path stays within repo
+    try:
+        # Resolve the path (handles ../ etc.)
+        full_path = (repo_path / filepath).resolve()
+        repo_resolved = repo_path.resolve()
+
+        # Check that resolved path is within repo
+        full_path.relative_to(repo_resolved)
+        return True
+    except (ValueError, RuntimeError, OSError):
+        # relative_to() raises ValueError if not relative
+        return False
+
+
 class ContextAssembler:
     """
     Assembles complete context for conflict resolution.
@@ -255,7 +328,17 @@ class ContextAssembler:
         return agent_files
 
     def _get_file_content(self, ref: str, filepath: str) -> Optional[str]:
-        """Get content of a file at a specific git reference."""
+        """Get content of a file at a specific git reference.
+
+        SECURITY: Validates filepath before passing to git to prevent
+        path traversal attacks like ../../../etc/passwd
+        """
+        # SECURITY: Sanitize and validate filepath
+        filepath = _sanitize_filepath(filepath)
+        if not _validate_repo_path(filepath, self.repo_path):
+            logger.warning(f"Path traversal blocked: {filepath}")
+            return None
+
         try:
             result = subprocess.run(
                 ["git", "show", f"{ref}:{filepath}"],

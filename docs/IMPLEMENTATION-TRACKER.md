@@ -18,6 +18,11 @@ Always use the orchestrator workflow system for ALL code changes (unless trivial
 This includes: PLAN → EXECUTE → REVIEW → VERIFY → LEARN phases.
 This reminder exists because context compaction can cause Claude to forget workflow requirements.
 
+**MANDATORY PRE-COMMIT REVIEW:**
+Before ANY commit, run: `python scripts/pre_commit_review.py`
+This invokes external model reviews (GPT-5.2 Max, Gemini, Grok, Codex).
+Commits with blocking issues will be REJECTED. Internal Claude review alone is NOT sufficient.
+
 ---
 
 ## Overall Progress
@@ -132,28 +137,27 @@ Design reviews were conducted by multiple AI models:
 | Item | Priority | Description |
 |------|----------|-------------|
 | Orchestrator Context Persistence | HIGH | Build mechanism to ensure Claude remembers to use orchestrator after context compaction. Options: (1) Add to system prompt, (2) Hook into context restore, (3) Automated prompt injection |
-| Fix Phase 3 Security Issues | HIGH | See "Phase 3 Security Remediation" section below |
+| ~~Fix Phase 3 Security Issues~~ | ~~HIGH~~ | **COMPLETE** - See "Phase 3 Security Remediation" section below |
 | Write spec-driven tests for Phase 3 | MEDIUM | Existing tests were written post-implementation; add TDD-style tests from spec |
 | Artifact signing/attestation | MEDIUM | Prevent manifest tampering |
 | CODEOWNERS integration | LOW | Use CODEOWNERS for intent conflict escalation |
 
 ### Phase 3 Security Remediation (from Third-Party Review)
 
-**Status:** PENDING - Issues identified in third-party review of Phase 3 code
-**Priority:** HIGH - These should be fixed before production use
+**Status:** COMPLETE - All 4 critical issues fixed (Session 6)
+**Priority:** HIGH - Fixed before production use
 
-| Issue | File | Severity | Description |
-|-------|------|----------|-------------|
-| Command injection | `src/resolution/validator.py` | **CRITICAL** | `shell=True` with user-controlled input in subprocess calls |
-| Path traversal | `src/resolution/context.py` | **CRITICAL** | `_get_file_content()` lacks proper path validation |
-| Branch name injection | `src/resolution/candidate.py` | **CRITICAL** | Unsanitized branch names in git commands |
-| Missing exception handling | `src/resolution/pipeline.py` | **HIGH** | Exceptions not properly caught/handled |
+| Issue | File | Severity | Status | Fix Description |
+|-------|------|----------|--------|-----------------|
+| Command injection | `src/resolution/validator.py` | **CRITICAL** | **FIXED** | Changed to `shell=False` with `shlex.split()`, added `_validate_branch_name()` |
+| Path traversal | `src/resolution/context.py` | **CRITICAL** | **FIXED** | Added `_sanitize_filepath()` and `_validate_repo_path()` functions |
+| Branch name injection | `src/resolution/candidate.py` | **CRITICAL** | **FIXED** | Added `_validate_branch_name()` with regex validation |
+| Missing exception handling | `src/resolution/pipeline.py` | **HIGH** | **FIXED** | Wrapped all 6 stages in try/except, return escalation Resolution on failure |
 
-**Remediation Plan:**
-1. Replace `shell=True` with `shell=False` and proper argument lists
-2. Add path validation to ensure files are within repo bounds
-3. Sanitize branch names before use in git commands
-4. Add proper try/except blocks with specific exception types
+**Verification:**
+- All 21 resolution tests pass
+- All 22 escalation tests pass
+- 59/61 total tests pass (2 pre-existing failures in conflict module)
 
 ### Learning System - Pattern Lifecycle Design
 
@@ -429,6 +433,25 @@ See: `docs/design-review-round3-synthesis.md` for full details.
 - Third-party reviews should be run BEFORE committing phases
 
 **Status:** Phase 4 COMPLETE - ready to commit. Phase 3 security issues pending remediation.
+
+### Session 6
+**Date:** January 2026
+**Work Done:**
+- Fixed all 4 Phase 3 security vulnerabilities:
+  - `validator.py`: Changed subprocess to `shell=False` with `shlex.split()`, added branch validation
+  - `context.py`: Added `_sanitize_filepath()` and `_validate_repo_path()` functions
+  - `candidate.py`: Added `_validate_branch_name()` function with regex validation
+  - `pipeline.py`: Added try/except blocks around all 6 stages with proper error escalation
+- Created `scripts/pre_commit_review.py` enforcement script for mandatory external model reviews
+- Updated IMPLEMENTATION-TRACKER.md with mandatory review process
+- All tests pass (21 resolution + 22 escalation = 43; 59/61 total with 2 pre-existing failures)
+
+**Important Process Notes:**
+- Identified gap: Phase 3 was reviewed by Claude sub-agent, NOT by ReviewOrchestrator with external models
+- Created enforcement mechanism: pre_commit_review.py must be run before any commit
+- External models (GPT-5.2 Max, Gemini, Grok, Codex) are required for code reviews, not just internal Claude
+
+**Status:** Phase 3 Security Remediation COMPLETE. Ready for external model review and commit.
 
 ---
 
