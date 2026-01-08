@@ -8,6 +8,8 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 from pathlib import Path
 
+from src.conflict.detector import ConflictSeverity, ConflictType
+
 
 class TestDetectionPipeline:
     """Tests for the main detection pipeline orchestrator."""
@@ -46,8 +48,11 @@ class TestDetectionPipeline:
             # Simulate critical textual conflict
             mock_textual.detect.return_value = Mock(
                 has_conflicts=True,
-                severity="critical"
+                severity=ConflictSeverity.CRITICAL,
+                conflicting_files=[],  # Empty list for iteration
+                file_count=1
             )
+            mock_textual.detect_risk_flags.return_value = []
 
             result = pipeline.run(["branch1", "branch2"])
 
@@ -61,12 +66,20 @@ class TestDetectionPipeline:
         pipeline = DetectionPipeline(base_branch="main")
 
         with patch.object(pipeline, 'textual_detector') as mock_textual, \
-             patch.object(pipeline, 'build_tester') as mock_build:
+             patch.object(pipeline, 'build_tester') as mock_build, \
+             patch.object(pipeline, 'dependency_analyzer') as mock_dep, \
+             patch.object(pipeline, 'semantic_analyzer') as mock_semantic:
 
             # Git says clean
             mock_textual.detect.return_value = Mock(has_conflicts=False)
             # But build fails
-            mock_build.test.return_value = Mock(build_passed=False, error="Type error")
+            mock_build.test.return_value = Mock(
+                build_passed=False,
+                all_passed=False,  # Pipeline checks this attribute
+                error="Type error"
+            )
+            mock_dep.analyze.return_value = []
+            mock_semantic.analyze.return_value = Mock(has_semantic_conflicts=False)
 
             result = pipeline.run(["branch1", "branch2"])
 
