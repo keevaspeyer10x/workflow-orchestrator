@@ -10,6 +10,83 @@ For completed features, see [CHANGELOG.md](CHANGELOG.md).
 
 > Items identified during v2.2 implementation for future work
 
+### High Priority - Architecture Simplification
+
+#### PRD-001: Claude Squad Integration (Replaces Multi-Agent Spawning)
+**Status:** Design Complete - Ready for Implementation
+**Complexity:** Medium
+**Priority:** Critical
+**Source:** Session 7 - Agent orchestration review
+**Design Doc:** `docs/designs/claude_squad_integration_detailed.md`
+
+**Description:** Replace complex multi-backend agent spawning with Claude Squad integration for interactive multi-agent workflows. This is a major simplification that:
+
+1. **Removes** complex spawning backends (Modal, Render, Local subprocess)
+2. **Delegates** session management to Claude Squad (tmux-based)
+3. **Keeps** merge coordination, conflict resolution, task tracking
+4. **Adds** persistent session registry, capability detection
+
+**What Gets Decommissioned:**
+| File | Status |
+|------|--------|
+| `src/prd/worker_pool.py` | REMOVE - replaced by squad_adapter |
+| `src/prd/backends/local.py` | REMOVE - subprocess spawning |
+| `src/prd/backends/modal_worker.py` | REMOVE - cloud spawning |
+| `src/prd/backends/render.py` | REMOVE - cloud spawning |
+| `src/prd/backends/sequential.py` | REMOVE - fallback |
+
+**What Gets Added:**
+| File | Purpose |
+|------|---------|
+| `src/prd/squad_adapter.py` | Claude Squad integration |
+| `src/prd/squad_capabilities.py` | Capability detection |
+| `src/prd/session_registry.py` | Persistent state |
+| `src/prd/backend_selector.py` | Hybrid mode selection |
+
+**What Gets Retained:**
+- `src/prd/backends/github_actions.py` - For batch/remote execution
+- `src/prd/integration.py` - Branch management, merging
+- `src/prd/wave_resolver.py` - Conflict resolution
+- `src/prd/schema.py` - Data structures
+
+**New CLI Commands:**
+```bash
+orchestrator prd check-squad    # Verify Claude Squad compatibility
+orchestrator prd spawn          # Spawn interactive sessions
+orchestrator prd sessions       # List active sessions
+orchestrator prd attach <id>    # Attach to session
+orchestrator prd done <id>      # Mark complete
+orchestrator prd cleanup        # Clean orphaned sessions
+```
+
+**AI Review Status:** Approved with minor changes (GPT-5.2, Gemini 2.5, Grok 4)
+
+**Tasks:**
+- [ ] Implement `src/prd/session_registry.py` (persistent state)
+- [ ] Implement `src/prd/squad_capabilities.py` (capability detection)
+- [ ] Implement `src/prd/squad_adapter.py` (main integration)
+- [ ] Implement `src/prd/backend_selector.py` (hybrid selection)
+- [ ] Add CLI commands
+- [ ] Remove deprecated backend files
+- [ ] Update executor.py to use new adapters
+- [ ] Add comprehensive tests
+- [ ] Update documentation
+
+---
+
+#### PRD-002: Superseded - Multi-Backend Worker Pool
+**Status:** SUPERSEDED by PRD-001
+**Reason:** Claude Squad integration provides better UX (interactive sessions) with less code complexity. The worker pool approach of fire-and-forget spawning doesn't match user needs for visibility and interaction.
+
+**Original Files (to be removed):**
+- `src/prd/worker_pool.py`
+- `src/prd/backends/local.py`
+- `src/prd/backends/modal_worker.py`
+- `src/prd/backends/render.py`
+- `src/prd/backends/sequential.py`
+
+---
+
 ### Short-term (Low Effort)
 
 #### CORE-006: Automatic Connector Detection with User Fallback
@@ -862,30 +939,29 @@ class EncryptedCheckpointBackend(CheckpointBackend):
 ---
 
 #### CORE-015: Distributed Workflow Execution
-**Status:** Planned  
-**Complexity:** High  
-**Priority:** Low  
+**Status:** RECONSIDERED - See PRD-001
+**Complexity:** High
+**Priority:** Low
 **Description:** Support multiple agents working on the same workflow with item locking and claiming.
 
-**Desired State:**
+**Update (2026-01-09):** This feature is being reconsidered in light of PRD-001 (Claude Squad integration). Rather than building complex distributed coordination, we're:
+1. **Delegating multi-agent management** to Claude Squad (tmux-based sessions)
+2. **Focusing on merge coordination** rather than agent spawning/monitoring
+3. **Keeping it simple** - user manually interacts with each agent session
+
+The original vision of fully autonomous distributed agents with locking/claiming may be over-engineering. Claude Squad + good merge handling may be sufficient.
+
+**Original Desired State:**
 - Central workflow state (database-backed)
 - Item claiming/locking mechanism
 - Conflict resolution for concurrent updates
 - Agent identification and tracking
 
-**Implementation Notes:**
-- Requires CORE-009 (database backend) first
-- Add `claimed_by`, `claimed_at` fields to item state
-- Add `orchestrator claim <item_id>` command
-- Add heartbeat mechanism for stale claim detection
-
-**Tasks:**
-- [ ] Design distributed state schema
-- [ ] Implement item locking mechanism
-- [ ] Add agent identification
-- [ ] Add claim/release commands
-- [ ] Add conflict resolution strategy
-- [ ] Add heartbeat and stale claim cleanup
+**Revised Approach (PRD-001):**
+- Claude Squad handles agent sessions
+- Session registry tracks task↔session mapping
+- Wave resolver handles merge conflicts
+- User maintains visibility and control
 
 ---
 
@@ -1958,6 +2034,7 @@ These features were considered but deferred for future consideration:
 ### DEF-010: Distributed/Team Workflows
 **Complexity:** High
 **Reason Deferred:** Multiple agents on same workflow, locking/claiming items. Complex, long-term.
+**Update (2026-01-09):** See PRD-001 for simpler approach using Claude Squad + merge coordination.
 
 ### DEF-011: LLM-Assisted Workflow Generation
 **Complexity:** Medium
