@@ -164,6 +164,39 @@ orchestrator handoff --files "src/main.py,src/utils.py"
 orchestrator handoff --execute --timeout 600
 ```
 
+## Happy Integration
+
+If you use [Happy](https://happy.engineering/) to access Claude Code from your mobile device, you can configure the orchestrator to spawn sessions using Happy instead of Claude. This allows spawned Claude Squad sessions to appear in your Happy mobile app.
+
+### One-Time Global Setup
+
+```bash
+# Set Happy as the default Claude binary (persists across all repos)
+orchestrator config set claude_binary happy
+```
+
+This saves to `~/.config/orchestrator/config.yaml` and applies globally.
+
+### Per-Session Override
+
+```bash
+# Override for a single session
+CLAUDE_BINARY=happy orchestrator prd spawn --count 3
+```
+
+### Priority Order
+
+1. `CLAUDE_BINARY` environment variable (highest priority)
+2. Global config (`orchestrator config set claude_binary happy`)
+3. Default: `claude`
+
+### Verify Configuration
+
+```bash
+# Check current setting
+orchestrator config get claude_binary
+```
+
 ## For AI Agents
 
 ### Critical Rules

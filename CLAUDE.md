@@ -43,6 +43,20 @@ This installs the orchestrator AND enables automatic updates for future sessions
 
 **Note:** Auto-updates only update the orchestrator code. Your repo-specific files (`workflow.yaml`, workflow state, logs) are never modified.
 
+## Happy Integration (Optional)
+
+If the user uses [Happy](https://happy.engineering/) to access Claude Code from mobile, configure the orchestrator to spawn sessions using Happy:
+
+```bash
+# One-time global setup (persists across all repos)
+orchestrator config set claude_binary happy
+
+# Or per-session override
+CLAUDE_BINARY=happy orchestrator prd spawn --count 3
+```
+
+This allows Claude Squad sessions to appear in the Happy mobile app.
+
 ## Using the Orchestrator
 
 After installation, the user can say things naturally:

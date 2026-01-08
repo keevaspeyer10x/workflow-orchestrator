@@ -13,7 +13,8 @@ Changes from v0.1:
 import subprocess
 import json
 import re
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, List
 from datetime import datetime, timezone
@@ -21,14 +22,43 @@ import logging
 
 from .session_registry import SessionRegistry, SessionRecord
 from .squad_capabilities import CapabilityDetector, SquadCapabilities
+from src.secrets import get_user_config_value
 
 logger = logging.getLogger(__name__)
+
+
+def get_claude_binary() -> str:
+    """
+    Get the Claude binary to use for spawning sessions.
+
+    Priority (highest to lowest):
+    1. CLAUDE_BINARY environment variable
+    2. Global orchestrator config (claude_binary)
+    3. Default: "claude"
+
+    This enables Happy (https://happy.engineering) integration by setting:
+    - `CLAUDE_BINARY=happy` in environment, or
+    - `orchestrator config set claude_binary happy` globally
+    """
+    # 1. Environment variable (highest priority)
+    env_binary = os.environ.get("CLAUDE_BINARY")
+    if env_binary:
+        return env_binary
+
+    # 2. Global orchestrator config
+    configured = get_user_config_value("claude_binary")
+    if configured:
+        return configured
+
+    # 3. Default
+    return "claude"
 
 
 @dataclass
 class SquadConfig:
     """Configuration for Claude Squad integration."""
     claude_squad_path: str = "claude-squad"
+    claude_binary: str = field(default_factory=get_claude_binary)
     auto_yes: bool = True
     session_prefix: str = "wfo"  # workflow-orchestrator prefix
     command_timeout: int = 30
@@ -228,7 +258,8 @@ class ClaudeSquadAdapter:
         prompt_file.write_text(prompt)
 
         # Build command
-        cmd = ["new", "--name", session_name, "--dir", str(self.working_dir)]
+        # -p flag specifies the Claude binary (supports Happy integration)
+        cmd = ["new", "--name", session_name, "-p", self.config.claude_binary, "--dir", str(self.working_dir)]
 
         if self.capabilities.supports_branch:
             cmd.extend(["--branch", branch])

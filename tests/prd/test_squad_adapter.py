@@ -31,6 +31,67 @@ class TestSquadConfig:
         assert config.session_prefix == "wfo"
         assert config.command_timeout == 30
 
+    def test_claude_binary_default(self):
+        """Should default claude_binary to 'claude'."""
+        # Clear any env var that might interfere
+        import os
+        old_val = os.environ.pop("CLAUDE_BINARY", None)
+        try:
+            # Also mock the config lookup to return None
+            with patch('src.prd.squad_adapter.get_user_config_value', return_value=None):
+                config = SquadConfig()
+                assert config.claude_binary == "claude"
+        finally:
+            if old_val is not None:
+                os.environ["CLAUDE_BINARY"] = old_val
+
+    def test_claude_binary_from_env(self):
+        """Should use CLAUDE_BINARY env var when set."""
+        import os
+        old_val = os.environ.get("CLAUDE_BINARY")
+        try:
+            os.environ["CLAUDE_BINARY"] = "happy"
+            with patch('src.prd.squad_adapter.get_user_config_value', return_value=None):
+                config = SquadConfig()
+                assert config.claude_binary == "happy"
+        finally:
+            if old_val is None:
+                os.environ.pop("CLAUDE_BINARY", None)
+            else:
+                os.environ["CLAUDE_BINARY"] = old_val
+
+    def test_claude_binary_from_config(self):
+        """Should use global config when env var not set."""
+        import os
+        old_val = os.environ.pop("CLAUDE_BINARY", None)
+        try:
+            with patch('src.prd.squad_adapter.get_user_config_value', return_value="happy"):
+                config = SquadConfig()
+                assert config.claude_binary == "happy"
+        finally:
+            if old_val is not None:
+                os.environ["CLAUDE_BINARY"] = old_val
+
+    def test_claude_binary_env_overrides_config(self):
+        """Environment variable should take priority over config."""
+        import os
+        old_val = os.environ.get("CLAUDE_BINARY")
+        try:
+            os.environ["CLAUDE_BINARY"] = "env-binary"
+            with patch('src.prd.squad_adapter.get_user_config_value', return_value="config-binary"):
+                config = SquadConfig()
+                assert config.claude_binary == "env-binary"
+        finally:
+            if old_val is None:
+                os.environ.pop("CLAUDE_BINARY", None)
+            else:
+                os.environ["CLAUDE_BINARY"] = old_val
+
+    def test_claude_binary_explicit_override(self):
+        """Explicitly passed value should be used."""
+        config = SquadConfig(claude_binary="custom-binary")
+        assert config.claude_binary == "custom-binary"
+
 
 class TestClaudeSquadAdapter:
     """Tests for ClaudeSquadAdapter."""
@@ -158,6 +219,57 @@ class TestClaudeSquadAdapter:
         retrieved = adapter.registry.get("reg-test")
         assert retrieved is not None
         assert retrieved.session_name == record.session_name
+
+    def test_spawn_session_includes_p_flag(self, temp_dir, mock_capabilities):
+        """Should include -p flag with claude_binary in spawn command."""
+        with patch('src.prd.squad_adapter.CapabilityDetector') as mock_detector:
+            mock_detector.return_value.detect.return_value = mock_capabilities
+            with patch('src.prd.squad_adapter.get_user_config_value', return_value=None):
+                config = SquadConfig(claude_binary="happy")
+                adapter = ClaudeSquadAdapter(temp_dir, config=config)
+                adapter._list_squad_sessions = MagicMock(return_value=[])
+
+        with patch.object(adapter, '_run_command') as mock_run:
+            mock_run.return_value = MagicMock(
+                stdout="session: test-session",
+                returncode=0
+            )
+
+            adapter.spawn_session("p-flag-test", "prompt", "branch")
+
+            # Verify -p flag was included
+            call_args = mock_run.call_args[0][0]
+            assert "-p" in call_args
+            p_index = call_args.index("-p")
+            assert call_args[p_index + 1] == "happy"
+
+    def test_spawn_session_default_claude_binary(self, temp_dir, mock_capabilities):
+        """Should use 'claude' as default binary in -p flag."""
+        import os
+        old_val = os.environ.pop("CLAUDE_BINARY", None)
+        try:
+            with patch('src.prd.squad_adapter.CapabilityDetector') as mock_detector:
+                mock_detector.return_value.detect.return_value = mock_capabilities
+                with patch('src.prd.squad_adapter.get_user_config_value', return_value=None):
+                    adapter = ClaudeSquadAdapter(temp_dir)
+                    adapter._list_squad_sessions = MagicMock(return_value=[])
+
+            with patch.object(adapter, '_run_command') as mock_run:
+                mock_run.return_value = MagicMock(
+                    stdout="session: test-session",
+                    returncode=0
+                )
+
+                adapter.spawn_session("default-binary-test", "prompt", "branch")
+
+                # Verify -p flag uses 'claude' by default
+                call_args = mock_run.call_args[0][0]
+                assert "-p" in call_args
+                p_index = call_args.index("-p")
+                assert call_args[p_index + 1] == "claude"
+        finally:
+            if old_val is not None:
+                os.environ["CLAUDE_BINARY"] = old_val
 
     def test_spawn_batch(self, adapter):
         """Should spawn multiple sessions."""
