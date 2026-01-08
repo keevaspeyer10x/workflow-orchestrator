@@ -233,6 +233,10 @@ class EventType(str, Enum):
     HUMAN_OVERRIDE = "human_override"
     NOTE_ADDED = "note_added"
     ERROR = "error"
+    # Review tracking events
+    REVIEW_STARTED = "review_started"
+    REVIEW_COMPLETED = "review_completed"
+    REVIEW_FAILED = "review_failed"
 
 
 class WorkflowEvent(BaseModel):

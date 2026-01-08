@@ -69,6 +69,12 @@ STATIC_FUNCTION_CALLING_MODELS = {
     "google/gemini-2.5-pro",
     "google/gemini-3-pro",
     "google/gemini-3-pro-preview",
+    # xAI Grok models (OpenRouter format)
+    "x-ai/grok-4.1-fast",
+    "x-ai/grok-4-fast",
+    "x-ai/grok-4",
+    "x-ai/grok-3",
+    "x-ai/grok-code-fast-1",
 }
 
 
@@ -349,10 +355,13 @@ class ModelRegistry:
             "quality": "codex",
             "consistency": "gemini",
             "holistic": "gemini",
+            "vibe_coding": "grok",
+            "vibe": "grok",
         }
         resolved_category = category_mapping.get(category.lower(), category.lower())
 
         # Latest models by category (update these as new models are released)
+        # NOTE: Keep these updated! Check provider docs for latest versions.
         latest_models = {
             "codex": [
                 "openai/gpt-5.1-codex-max",
@@ -374,6 +383,12 @@ class ModelRegistry:
                 "anthropic/claude-3.5-sonnet",
                 "anthropic/claude-3-opus",
             ],
+            "grok": [
+                "x-ai/grok-4.1-fast",  # Latest as of Jan 2026
+                "x-ai/grok-4-fast",
+                "x-ai/grok-4",
+                "x-ai/grok-3",
+            ],
         }
 
         # Default fallbacks
@@ -381,6 +396,7 @@ class ModelRegistry:
             "codex": "openai/gpt-4o",
             "gemini": "google/gemini-pro-1.5",
             "claude": "anthropic/claude-sonnet-4",
+            "grok": "x-ai/grok-4.1-fast",
         }
 
         candidates = latest_models.get(resolved_category, [])

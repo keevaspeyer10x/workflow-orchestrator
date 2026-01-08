@@ -1,5 +1,31 @@
 # Workflow Orchestrator - Claude Code Instructions
 
+## CRITICAL: API Keys for External Reviews
+
+**External AI model reviews are REQUIRED for code changes.** Before starting any workflow:
+
+```bash
+# Load API keys from SOPS-encrypted secrets
+eval "$(sops -d secrets.enc.yaml | sed 's/: /=/' | sed 's/^/export /')"
+
+# Or use direnv (if .envrc exists)
+direnv allow
+
+# Verify keys are loaded
+env | grep -i api_key
+```
+
+**Required keys:**
+- `GEMINI_API_KEY` - For Gemini 3 Pro reviews
+- `OPENAI_API_KEY` - For GPT-5.2 Max / Codex reviews
+- `OPENROUTER_API_KEY` - For API fallback
+- `XAI_API_KEY` - For Grok 4.1 reviews
+
+**If keys are not loaded:**
+- Reviews will FAIL during the REVIEW phase
+- The workflow will NOT complete properly
+- `orchestrator finish` will show "No external model reviews recorded!"
+
 ## Installing (Run When Asked)
 
 **When the user says any of these:**

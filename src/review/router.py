@@ -177,12 +177,19 @@ class ReviewRouter:
 
     def execute_all_reviews(self) -> dict[str, ReviewResult]:
         """
-        Execute all four reviews.
+        Execute all five reviews (gold-plated for vibe coding).
+
+        Reviews:
+        - security (Codex): OWASP, injection, auth
+        - quality (Codex): Edge cases, error handling
+        - consistency (Gemini): Codebase patterns, existing utilities
+        - holistic (Gemini): Fresh eyes, senior engineer perspective
+        - vibe_coding (Grok): AI-specific issues, hallucinations, cargo cult
 
         Returns:
             Dict mapping review_type to ReviewResult
         """
         results = {}
-        for review_type in ["security", "consistency", "quality", "holistic"]:
+        for review_type in ["security", "quality", "consistency", "holistic", "vibe_coding"]:
             results[review_type] = self.execute_review(review_type)
         return results

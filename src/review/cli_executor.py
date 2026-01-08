@@ -44,6 +44,13 @@ CLI_PROMPTS = {
         "What questions would you ask? What would you do differently? "
         "Be the skeptical senior engineer this code hasn't had."
     ),
+    "vibe_coding": (
+        "This is AI-generated code with ZERO human review. "
+        "Check for AI-specific issues: hallucinated APIs that don't exist, "
+        "plausible-but-wrong logic, tests that pass but don't test real behavior, "
+        "comment/code drift, deprecated patterns from training data, cargo cult code. "
+        "AI optimizes locally - find where it missed the big picture."
+    ),
 }
 
 
@@ -65,7 +72,7 @@ class CLIExecutor:
         Execute a review using the appropriate CLI tool.
 
         Args:
-            review_type: One of security, consistency, quality, holistic
+            review_type: One of security, consistency, quality, holistic, vibe_coding
 
         Returns:
             ReviewResult with findings
@@ -78,6 +85,8 @@ class CLIExecutor:
         try:
             if tool == "codex":
                 output, model = self._run_codex(prompt)
+            elif tool == "grok":
+                output, model = self._run_grok(prompt)
             else:
                 output, model = self._run_gemini(prompt)
 
@@ -220,10 +229,113 @@ Analyze the git diff and changed files to provide your review. Output your findi
                 process.kill()
                 process.wait()
 
+    def _run_grok(self, prompt: str) -> tuple[str, str]:
+        """
+        Run Grok review via OpenRouter API (more reliable than XAI direct).
+
+        Uses the model registry to get the latest Grok model version.
+
+        Returns (output, model_name)
+        """
+        import os
+        import json
+        import urllib.request
+        import urllib.error
+        from src.model_registry import get_model_registry
+
+        # Get latest Grok model from registry
+        registry = get_model_registry(self.working_dir)
+        model_id = registry.get_latest_model("grok")
+        logger.info(f"Using Grok model from registry: {model_id}")
+
+        # Try OpenRouter first (more reliable), fall back to XAI direct
+        api_key = os.environ.get("OPENROUTER_API_KEY")
+        use_openrouter = bool(api_key)
+
+        if not api_key:
+            api_key = os.environ.get("XAI_API_KEY")
+            if not api_key:
+                raise ValueError("Neither OPENROUTER_API_KEY nor XAI_API_KEY environment variable set")
+
+        # Get git diff for context
+        try:
+            diff_result = subprocess.run(
+                ["git", "diff", "HEAD~1"],
+                cwd=self.working_dir,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            git_diff = diff_result.stdout[:50000]  # Limit context size
+        except Exception:
+            git_diff = "(Could not get git diff)"
+
+        full_prompt = f"""{prompt}
+
+## Git Diff (recent changes)
+```diff
+{git_diff}
+```
+
+Analyze the code changes and provide your review."""
+
+        if use_openrouter:
+            # Use OpenRouter API with model from registry
+            url = "https://openrouter.ai/api/v1/chat/completions"
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+                "HTTP-Referer": "https://github.com/workflow-orchestrator",
+            }
+            data = {
+                "model": model_id,
+                "messages": [
+                    {"role": "system", "content": "You are a code reviewer specializing in catching issues in AI-generated code."},
+                    {"role": "user", "content": full_prompt}
+                ],
+                "max_tokens": 4096,
+            }
+            model_name = f"grok/{model_id.split('/')[-1]}-via-openrouter"
+        else:
+            # Use XAI API directly - strip provider prefix
+            xai_model = model_id.replace("x-ai/", "")
+            url = "https://api.x.ai/v1/chat/completions"
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+            }
+            data = {
+                "model": xai_model,
+                "messages": [
+                    {"role": "system", "content": "You are a code reviewer specializing in catching issues in AI-generated code."},
+                    {"role": "user", "content": full_prompt}
+                ],
+                "max_tokens": 4096,
+            }
+            model_name = f"grok/{xai_model}"
+
+        try:
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(data).encode("utf-8"),
+                headers=headers,
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=self.timeout) as response:
+                result = json.loads(response.read().decode("utf-8"))
+                output = result["choices"][0]["message"]["content"]
+                return output, model_name
+
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode("utf-8") if e.fp else str(e)
+            raise RuntimeError(f"Grok API error: {e.code} - {error_body}")
+
     def check_tools_available(self) -> dict[str, bool]:
         """Check if required CLI tools are available."""
         import shutil
+        import os
         return {
             "codex": shutil.which("codex") is not None,
             "gemini": shutil.which("gemini") is not None,
+            "grok": bool(os.environ.get("XAI_API_KEY")),
         }

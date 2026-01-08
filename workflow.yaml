@@ -3,16 +3,27 @@ version: "2.1"
 description: "A general-purpose 5-phase workflow for software development tasks. Works with any project type (Node.js, Python, etc.). Default to using Claude Code for implementation unless task is trivial."
 
 # =============================================================================
-# SETUP REQUIREMENTS
+# SETUP REQUIREMENTS - READ THIS FIRST!
 # =============================================================================
 # Before starting this workflow, ensure:
 # 1. Claude Code CLI is installed: npm install -g @anthropic-ai/claude-code
 # 2. Required environment variables are set (check with: env | grep -i api_key)
 # 3. Project dependencies are installed
 #
-# Available secrets (check your environment):
-# - ANTHROPIC_API_KEY: Required for Claude Code and Claude API calls
-# - OPENAI_API_KEY: For multi-model reviews (use latest generation available)
+# CRITICAL: API KEYS FOR EXTERNAL REVIEWS
+# External AI reviews are MANDATORY for code changes. Load secrets with:
+#   eval "$(sops -d secrets.enc.yaml | sed 's/: /=/' | sed 's/^/export /')"
+#
+# Required keys:
+# - GEMINI_API_KEY: For Gemini 3 Pro reviews (architecture, design)
+# - OPENAI_API_KEY: For GPT-5.2 Max / Codex reviews (security, correctness)
+# - OPENROUTER_API_KEY: For API fallback when CLIs unavailable
+# - XAI_API_KEY: For Grok 4.1 reviews (operations, edge cases)
+#
+# If keys are not loaded:
+# - REVIEW phase items will FAIL
+# - Workflow completion will show "No external model reviews recorded!"
+# - You will need to reload keys and re-run reviews
 # =============================================================================
 
 settings:
@@ -65,13 +76,16 @@ settings:
     # Model versions - UPDATE THESE when new models are released
     # CLI models are used when running Codex/Gemini CLIs directly
     # API models are used when routing through OpenRouter
+    # NOTE: Use model_registry.get_latest_model() to get current versions dynamically
     models:
       cli:
         codex: "gpt-5.1-codex-max"       # Latest Codex model
         gemini: "gemini-3-pro-preview"   # Latest Gemini model (preview)
+        grok: "grok-4.1-fast"  # Latest Grok model (Jan 2026)
       api:
         codex: "openai/gpt-5.1"          # OpenRouter model ID
         gemini: "google/gemini-3-pro-preview"  # OpenRouter model ID
+        grok: "x-ai/grok-4.1-fast"   # OpenRouter model ID
 
     # GitHub Actions configuration
     github_actions:
@@ -204,37 +218,85 @@ phases:
   # ===========================================================================
   # PHASE 3: REVIEW
   # ===========================================================================
+  # IMPORTANT: All 4 reviews use EXTERNAL MODELS (not the implementation model)
+  # Reviews should be started IN THE BACKGROUND at phase start to run in parallel
+  # API keys required: GEMINI_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY
+  # Load keys with: eval "$(sops -d secrets.enc.yaml | sed 's/: /=/' | sed 's/^/export /')"
+  # ===========================================================================
   - id: "REVIEW"
-    name: "Code & Architecture Review"
-    description: "Perform multi-agent review of the code against best practices. MUST use a different model than the one that wrote the code. Use latest generation model available."
+    name: "Multi-Model Code Review"
+    description: "Run ALL 4 external model reviews. Security+Quality use Codex, Consistency+Holistic use Gemini. Start reviews in BACKGROUND to run in parallel. Do NOT skip any review without explicit user approval."
+    notes:
+      - "[critical] ALL 4 REVIEWS ARE MANDATORY. Do not skip without user approval."
+      - "[critical] START ALL REVIEWS IN BACKGROUND at phase start to run in parallel."
+      - "[critical] API keys required: GEMINI_API_KEY, OPENAI_API_KEY. Load with: eval $(sops -d secrets.enc.yaml)"
+      - "[tip] Run all reviews in parallel in background for speed."
+      - "[learning] Gemini (1M context) catches codebase-wide issues that Codex misses."
     items:
       - id: "security_review"
-        name: "Security Review"
-        description: "MANDATORY for code changes. Check for common security vulnerabilities (e.g., OWASP Top 10, injection attacks, auth issues, SSRF). Use a different model than the implementation model."
+        name: "Security Review [Codex]"
+        description: "MANDATORY. Uses Codex/GPT-5.1 to check for OWASP Top 10, injection attacks, auth issues, SSRF, hardcoded secrets. Run in BACKGROUND."
         required: true
         skippable: false
         skip_conditions: ["documentation_only"]
-
-      - id: "architecture_review"
-        name: "Architecture Review"
-        description: "Ensure the implementation aligns with the project's architecture and design patterns. Check for refactoring opportunities."
-        required: true
-        skippable: true
-        skip_conditions: ["minor_change", "no_architecture_impact"]
+        notes:
+          - "[model] Codex (gpt-5.1-codex-max) - code-specialized security analysis"
+          - "[background] Start this review in background, don't wait for completion"
 
       - id: "quality_review"
-        name: "Code Quality Review"
-        description: "Check for code smells, readability, maintainability, and adherence to coding standards."
+        name: "Code Quality Review [Codex]"
+        description: "MANDATORY. Uses Codex/GPT-5.1 to check for code smells, edge cases, error handling, test coverage gaps. Run in BACKGROUND."
         required: true
-        skippable: true
-        skip_conditions: ["trivial_change"]
+        skippable: false
+        skip_conditions: ["documentation_only"]
+        notes:
+          - "[model] Codex (gpt-5.1-codex-max) - code-specialized quality analysis"
+          - "[background] Start this review in background, don't wait for completion"
 
-      - id: "refactoring_assessment"
-        name: "Refactoring Assessment"
-        description: "Assess if the changes warrant broader refactoring of existing code. Document any technical debt introduced or addressed."
-        required: false
-        skippable: true
-        skip_conditions: ["isolated_change", "no_existing_code_touched"]
+      - id: "consistency_review"
+        name: "Codebase Consistency Review [Gemini]"
+        description: "MANDATORY. Uses Gemini 3 Pro (1M context) to check if new code fits existing patterns, uses existing utilities, follows conventions. Run in BACKGROUND."
+        required: true
+        skippable: false
+        skip_conditions: ["documentation_only"]
+        notes:
+          - "[model] Gemini 3 Pro (gemini-3-pro-preview) - 1M context for full codebase"
+          - "[background] Start this review in background, don't wait for completion"
+          - "[key] Requires GEMINI_API_KEY environment variable"
+
+      - id: "holistic_review"
+        name: "Holistic Senior Engineer Review [Gemini]"
+        description: "MANDATORY. Uses Gemini 3 Pro as a 'skeptical senior engineer' - would you approve this PR? What concerns you? What questions would you ask? Run in BACKGROUND."
+        required: true
+        skippable: false
+        skip_conditions: ["documentation_only"]
+        notes:
+          - "[model] Gemini 3 Pro (gemini-3-pro-preview) - fresh eyes review"
+          - "[background] Start this review in background, don't wait for completion"
+          - "[key] Requires GEMINI_API_KEY environment variable"
+
+      - id: "vibe_coding_review"
+        name: "Vibe-Coding Issues Review [Grok]"
+        description: "MANDATORY. Uses Grok 3 to catch AI-specific issues: hallucinated APIs, plausible-but-wrong logic, tests that don't test, cargo cult code. Third model perspective. Run in BACKGROUND."
+        required: true
+        skippable: false
+        skip_conditions: ["documentation_only"]
+        notes:
+          - "[model] Grok 3 - catches AI-generation blindspots"
+          - "[background] Start this review in background, don't wait for completion"
+          - "[key] Requires XAI_API_KEY environment variable"
+          - "[vibe] Specifically designed for zero-human-review workflows"
+
+      - id: "collect_review_results"
+        name: "Collect All Review Results"
+        description: "Wait for all 5 background reviews to complete. Aggregate findings. Report which models were used and any issues found. Block if any CRITICAL issues."
+        required: true
+        skippable: false
+        notes:
+          - "[gate] Do not proceed until ALL 5 reviews have completed"
+          - "[report] List each review with: model used, duration, issues found"
+          - "[block] If any review found CRITICAL issues, do not advance phase"
+          - "[models] Codex (security, quality), Gemini (consistency, holistic), Grok (vibe_coding)"
 
   # ===========================================================================
   # PHASE 4: VERIFY

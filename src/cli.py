@@ -15,7 +15,7 @@ from src.engine import WorkflowEngine
 from src.analytics import WorkflowAnalytics
 from src.learning import LearningEngine
 from src.dashboard import start_dashboard, generate_static_dashboard
-from src.schema import WorkflowDef
+from src.schema import WorkflowDef, WorkflowEvent, EventType
 from src.claude_integration import ClaudeCodeIntegration
 from src.providers import get_provider, list_providers, AgentProvider
 from src.environment import detect_environment, get_environment_info, Environment
@@ -67,7 +67,7 @@ REVIEW_ITEM_MAPPING = {
 }
 
 
-def run_auto_review(review_type: str, working_dir: Path = None) -> tuple[bool, str, str]:
+def run_auto_review(review_type: str, working_dir: Path = None) -> tuple[bool, str, str, dict]:
     """
     Run an automated third-party review.
 
@@ -76,27 +76,38 @@ def run_auto_review(review_type: str, working_dir: Path = None) -> tuple[bool, s
         working_dir: Working directory for the review
 
     Returns:
-        Tuple of (success, notes, error_message)
+        Tuple of (success, notes, error_message, review_info)
         - success: True if review passed
         - notes: Completion notes describing the review result
         - error_message: Error description if review couldn't run (CLIs not available, etc.)
+        - review_info: Dict with model info for tracking: {model_name, method, issues, success}
     """
     working_dir = working_dir or Path('.')
 
     try:
         router = ReviewRouter(working_dir=working_dir)
     except ValueError as e:
-        return False, "", f"Review infrastructure not available: {e}"
+        return False, "", f"Review infrastructure not available: {e}", {}
 
     # Check if method is available
     if router.method == ReviewMethod.UNAVAILABLE:
-        return False, "", "No review method available (install Codex/Gemini CLIs or configure OpenRouter API)"
+        return False, "", "No review method available (install Codex/Gemini CLIs or configure OpenRouter API)", {}
 
     try:
         result = router.execute_review(review_type)
 
+        # Build review info for tracking
+        review_info = {
+            "model": result.model_used or "unknown",
+            "method": router.method.value,
+            "success": not result.error and result.blocking_count == 0,
+            "issues": len(result.findings) if result.findings else 0,
+            "blocking": result.blocking_count,
+        }
+
         if result.error:
-            return False, "", f"Review error: {result.error}"
+            review_info["error"] = result.error
+            return False, "", f"Review error: {result.error}", review_info
 
         # Build completion notes from review result
         model_info = f"[{router.method.value}] {result.model_used}"
@@ -107,16 +118,16 @@ def run_auto_review(review_type: str, working_dir: Path = None) -> tuple[bool, s
             blocking_count = result.blocking_count
             if blocking_count > 0:
                 notes = f"THIRD-PARTY REVIEW ({model_info}, {duration}): {finding_count} findings, {blocking_count} BLOCKING"
-                return False, notes, f"Review found {blocking_count} blocking issue(s)"
+                return False, notes, f"Review found {blocking_count} blocking issue(s)", review_info
             else:
                 notes = f"THIRD-PARTY REVIEW ({model_info}, {duration}): {finding_count} non-blocking findings. {result.summary or 'Passed'}"
-                return True, notes, ""
+                return True, notes, "", review_info
         else:
             notes = f"THIRD-PARTY REVIEW ({model_info}, {duration}): No issues found"
-            return True, notes, ""
+            return True, notes, "", review_info
 
     except Exception as e:
-        return False, "", f"Review execution failed: {e}"
+        return False, "", f"Review execution failed: {e}", {"error": str(e), "success": False}
 
 
 # ============================================================================
@@ -285,13 +296,46 @@ def cmd_complete(args):
     item_id = args.item
     if item_id in REVIEW_ITEM_MAPPING and not args.skip_auto_review:
         review_type = REVIEW_ITEM_MAPPING[item_id]
+        
+        engine.log_event(WorkflowEvent(
+            event_type=EventType.REVIEW_STARTED,
+            workflow_id=engine.state.workflow_id,
+            phase_id=engine.state.current_phase_id,
+            item_id=item_id,
+            message=f"Starting {review_type} review",
+            details={"review_type": review_type}
+        ))
+
         print(f"Running third-party {review_type} review...")
         print()
 
         working_dir = Path(args.dir) if hasattr(args, 'dir') and args.dir else Path('.')
-        review_success, review_notes, review_error = run_auto_review(review_type, working_dir)
+        review_success, review_notes, review_error, review_info = run_auto_review(review_type, working_dir)
+
+        # Store review info in workflow metadata for visibility at finish
+        if review_info:
+            if "review_models" not in engine.state.metadata:
+                engine.state.metadata["review_models"] = {}
+            current_phase = engine.state.current_phase_id
+            if current_phase not in engine.state.metadata["review_models"]:
+                engine.state.metadata["review_models"][current_phase] = {}
+            engine.state.metadata["review_models"][current_phase][review_info.get("model", item_id)] = {
+                "success": review_info.get("success", False),
+                "issues": review_info.get("issues", 0),
+                "method": review_info.get("method", "unknown"),
+                "blocking": review_info.get("blocking", 0),
+            }
+            engine.save_state()
 
         if review_error:
+            engine.log_event(WorkflowEvent(
+                event_type=EventType.REVIEW_FAILED,
+                workflow_id=engine.state.workflow_id,
+                phase_id=engine.state.current_phase_id,
+                item_id=item_id,
+                message=f"Review failed: {review_error}",
+                details={"error": review_error}
+            ))
             # Review couldn't run - block completion
             print("=" * 60)
             print(f"✗ CANNOT COMPLETE: Third-party review required")
@@ -306,6 +350,14 @@ def cmd_complete(args):
             sys.exit(1)
 
         if not review_success:
+            engine.log_event(WorkflowEvent(
+                event_type=EventType.REVIEW_FAILED,
+                workflow_id=engine.state.workflow_id,
+                phase_id=engine.state.current_phase_id,
+                item_id=item_id,
+                message=f"Review failed: {review_error or 'Blocking issues found'}",
+                details={"review_notes": review_notes}
+            ))
             # Review found blocking issues
             print("=" * 60)
             print(f"✗ REVIEW FAILED: {review_error or 'Blocking issues found'}")
@@ -317,6 +369,14 @@ def cmd_complete(args):
             print(f"  2. Skip with explanation: orchestrator skip {item_id} --reason \"<why issues acceptable>\"")
             sys.exit(1)
 
+        engine.log_event(WorkflowEvent(
+            event_type=EventType.REVIEW_COMPLETED,
+            workflow_id=engine.state.workflow_id,
+            phase_id=engine.state.current_phase_id,
+            item_id=item_id,
+            message=f"Review passed: {review_type}",
+            details={"notes": review_notes}
+        ))
         # Review passed - append review notes to user notes
         print(f"✓ Third-party review passed")
         print()
@@ -703,6 +763,69 @@ def cmd_finish(args):
                     short_reason = reason[:50] + "..." if len(reason) > 50 else reason
                     print(f"  • {item_id}: \"{short_reason}\"")
             print()
+
+        # REVIEW MODEL VISIBILITY: Show which models reviewed each phase
+        review_info = engine.state.metadata.get("review_models", {})
+        if review_info:
+            print("EXTERNAL REVIEWS PERFORMED")
+            print("-" * 60)
+            for phase_id, models in review_info.items():
+                if models:
+                    print(f"  {phase_id}:")
+                    for model_name, status in models.items():
+                        status_icon = "✓" if status.get("success") else "✗"
+                        issues = status.get("issues", 0)
+                        print(f"    {status_icon} {model_name}: {issues} issues found")
+            print()
+        else:
+            print("EXTERNAL REVIEWS")
+            print("-" * 60)
+            print("  ⚠️  No external model reviews recorded!")
+            print("  External reviews are REQUIRED for code changes.")
+            print("  Ensure API keys are loaded: eval $(sops -d secrets.enc.yaml)")
+            print()
+
+        # LEARNINGS SUMMARY: Show actions vs roadmap items
+        try:
+            learnings_path = Path(args.dir or '.') / 'LEARNINGS.md'
+            if learnings_path.exists():
+                print("LEARNINGS SUMMARY")
+                print("-" * 60)
+                content = learnings_path.read_text()
+
+                # Parse actions from learnings
+                immediate_actions = []
+                roadmap_items = []
+                current_section = None
+
+                for line in content.split('\n'):
+                    line_lower = line.lower()
+                    if 'immediate action' in line_lower or 'apply now' in line_lower:
+                        current_section = 'immediate'
+                    elif 'roadmap' in line_lower or 'future' in line_lower or 'later' in line_lower:
+                        current_section = 'roadmap'
+                    elif line.strip().startswith('- ') or line.strip().startswith('* '):
+                        item = line.strip()[2:].strip()
+                        if current_section == 'immediate' and item:
+                            immediate_actions.append(item[:60])
+                        elif current_section == 'roadmap' and item:
+                            roadmap_items.append(item[:60])
+
+                if immediate_actions:
+                    print("  IMMEDIATE ACTIONS:")
+                    for action in immediate_actions[:5]:
+                        print(f"    → {action}")
+
+                if roadmap_items:
+                    print("  ROADMAP ITEMS:")
+                    for item in roadmap_items[:5]:
+                        print(f"    ○ {item}")
+
+                if not immediate_actions and not roadmap_items:
+                    print("  No specific actions identified. Review LEARNINGS.md manually.")
+                print()
+        except Exception as e:
+            print(f"Warning: Could not parse LEARNINGS.md: {e}", file=sys.stderr)
 
         # Next steps prompt
         print("=" * 60)

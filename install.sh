@@ -12,6 +12,33 @@ echo "Enabling automatic updates for this repo..."
 orchestrator setup
 
 echo ""
+echo "============================================================"
+echo "IMPORTANT: API Keys for External Reviews"
+echo "============================================================"
+echo ""
+
+# Check for API keys
+MISSING_KEYS=""
+[ -z "$GEMINI_API_KEY" ] && MISSING_KEYS="$MISSING_KEYS GEMINI_API_KEY"
+[ -z "$OPENAI_API_KEY" ] && MISSING_KEYS="$MISSING_KEYS OPENAI_API_KEY"
+[ -z "$OPENROUTER_API_KEY" ] && MISSING_KEYS="$MISSING_KEYS OPENROUTER_API_KEY"
+
+if [ -n "$MISSING_KEYS" ]; then
+    echo "WARNING: Missing API keys:$MISSING_KEYS"
+    echo ""
+    echo "External model reviews REQUIRE these keys to be set."
+    echo "Load secrets with:"
+    echo '  eval "$(sops -d secrets.enc.yaml | sed '\''s/: /=/'\'' | sed '\''s/^/export /'\'')"'
+    echo ""
+    echo "Or with direnv:"
+    echo "  direnv allow"
+    echo ""
+else
+    echo "All required API keys are loaded."
+fi
+
+echo "============================================================"
+echo ""
 echo "Ready! You can now say things like:"
 echo "  'Use orchestrator to build a login page'"
 echo "  'Start a workflow for fixing the search bug'"

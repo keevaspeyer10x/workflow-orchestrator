@@ -181,6 +181,62 @@ You are the final check - the skeptical senior engineer this code hasn't had.
 <brief justification>
 """
 
+# Vibe-coding specific review - catches AI-generation blindspots
+VIBE_CODING_REVIEW_PROMPT = """
+This code was written by an AI with ZERO human review ("vibe coding").
+
+AI-generated code has specific failure modes that traditional reviews miss.
+Your job is to catch these AI-specific issues.
+
+KEY INSIGHT: AI agents optimize locally without seeing the big picture.
+They write code that makes sense in isolation but may duplicate existing
+utilities, violate architectural patterns, or miss opportunities for reuse.
+
+## Check For
+
+1. **HALLUCINATED APIs**
+   - Does the code call methods/functions that don't exist?
+   - Are imports referencing real packages with correct APIs?
+   - "This uses `requests.fetch()` but requests doesn't have a fetch method"
+
+2. **PLAUSIBLE BUT WRONG**
+   - Code that looks correct but has subtle logic errors
+   - Off-by-one errors, wrong operators, inverted conditions
+   - "The loop condition should be `<` not `<=`"
+
+3. **TESTS THAT DON'T TEST**
+   - Tests that pass but don't verify actual behavior
+   - Mocks that make tests tautological
+   - "This test mocks the function it's testing - it will always pass"
+
+4. **COMMENT/CODE DRIFT**
+   - Comments that describe something different than the code does
+   - Docstrings with wrong parameter descriptions
+   - "Comment says 'returns user ID' but code returns username"
+
+5. **TRAINING DATA ARTIFACTS**
+   - Deprecated APIs from older code in training data
+   - Patterns that were common in 2020 but not now
+   - "Uses `componentWillMount` which is deprecated since React 16.3"
+
+6. **CARGO CULT CODE**
+   - Code copied without understanding
+   - Unnecessary complexity, dead branches, vestigial parameters
+   - "This null check can never trigger given the type signature"
+
+## Output Format
+
+### Vibe-Coding Issues Found
+
+For each issue:
+- **[CRITICAL|HIGH|MEDIUM|LOW]** <title>
+- **Evidence:** <the problematic code>
+- **Why AI Wrote This:** <likely reason the AI made this mistake>
+- **Fix:** <specific correction>
+
+If no issues: "No vibe-coding issues found. Verified: [list what you checked]"
+"""
+
 # Mapping of review types to their prompts
 REVIEW_PROMPTS = {
     "security_review": SECURITY_REVIEW_PROMPT,
@@ -191,9 +247,15 @@ REVIEW_PROMPTS = {
     "quality": QUALITY_REVIEW_PROMPT,
     "holistic_review": HOLISTIC_REVIEW_PROMPT,
     "holistic": HOLISTIC_REVIEW_PROMPT,
+    "vibe_coding_review": VIBE_CODING_REVIEW_PROMPT,
+    "vibe_coding": VIBE_CODING_REVIEW_PROMPT,
+    "vibe": VIBE_CODING_REVIEW_PROMPT,
 }
 
 # Which tool to use for each review
+# Codex for code-correctness (security, quality)
+# Gemini for codebase-wide context (consistency, holistic)
+# Grok for vibe-coding (third model perspective, catches what others miss)
 REVIEW_TOOLS = {
     "security_review": "codex",
     "security": "codex",
@@ -203,6 +265,9 @@ REVIEW_TOOLS = {
     "quality": "codex",
     "holistic_review": "gemini",
     "holistic": "gemini",
+    "vibe_coding_review": "grok",
+    "vibe_coding": "grok",
+    "vibe": "grok",
 }
 
 
