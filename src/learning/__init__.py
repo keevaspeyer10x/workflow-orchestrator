@@ -31,6 +31,7 @@ from .strategy_schema import (
     DEFAULT_STRATEGY_ORDER,
 )
 from .strategy_tracker import StrategyTracker
+from .feedback_loop import FeedbackLoop, MAX_HISTORY_PER_AGENT
 from .feedback_schema import (
     FeedbackType,
     FeedbackSeverity,
@@ -74,6 +75,9 @@ __all__ = [
     "DEFAULT_STRATEGY_ORDER",
     # Tracker
     "StrategyTracker",
+    # Feedback Loop
+    "FeedbackLoop",
+    "MAX_HISTORY_PER_AGENT",
     # Feedback Enums
     "FeedbackType",
     "FeedbackSeverity",

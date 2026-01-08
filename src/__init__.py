@@ -18,7 +18,7 @@ from .schema import (
 
 from .engine import WorkflowEngine
 from .analytics import WorkflowAnalytics
-from .learning import LearningEngine
+from .learning_engine import LearningEngine
 
 # Multi-model review system
 from .review import (

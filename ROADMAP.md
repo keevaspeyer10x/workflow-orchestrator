@@ -1301,6 +1301,122 @@ class ReviewDaemon:
 
 ---
 
+### WF-012: Workflow State Injection After Context Compaction
+**Status:** Planned
+**Complexity:** Medium
+**Priority:** Critical
+**Source:** Phase 7 Learning - Process compliance failure
+**Description:** Always inject workflow state into conversation context after context compaction so the AI cannot forget there's an active workflow.
+
+**Problem Solved:**
+During Phase 7 implementation, context compaction caused the AI to lose awareness of the active orchestrator workflow. It continued coding without the workflow, bypassing all quality gates (REVIEW, VERIFY, LEARN phases).
+
+**Implementation:**
+- Add Claude Code hook that runs after context compaction
+- Hook injects current `orchestrator status` output into context
+- If workflow is active, inject prominent reminder: "ACTIVE WORKFLOW - You MUST follow the orchestrator process"
+
+**Files:** `.claude/hooks/`, `CLAUDE.md`
+
+**Tasks:**
+- [ ] Create post-compaction hook script
+- [ ] Inject workflow state into context
+- [ ] Add prominent warning if workflow active but not in expected phase
+- [ ] Test with simulated context compaction
+
+---
+
+### WF-013: Block Implementation Code Without Active Workflow Phase
+**Status:** Planned
+**Complexity:** Medium
+**Priority:** Critical
+**Source:** Phase 7 Learning - Process compliance failure
+**Description:** When an orchestrator workflow is active, refuse to write implementation code unless the workflow is in the EXECUTE phase.
+
+**Problem Solved:**
+AI can currently write code regardless of workflow phase. This allows bypassing PLAN phase approval and working during REVIEW/VERIFY/LEARN phases when it should be reviewing, not coding.
+
+**Implementation:**
+- Add behavioral instruction to CLAUDE.md
+- Before writing code, check if workflow is active
+- If active and not in EXECUTE phase, refuse and explain why
+- Exception: Test files can be written in VERIFY phase
+
+**Behavioral Rule:**
+```
+IF orchestrator workflow is active:
+  IF current phase is NOT "EXECUTE":
+    REFUSE to write implementation code
+    EXPLAIN: "Workflow is in {phase} phase. Cannot write code until EXECUTE phase."
+    SUGGEST: Complete current phase items first
+```
+
+**Files:** `CLAUDE.md`
+
+**Tasks:**
+- [ ] Add behavioral instruction to CLAUDE.md
+- [ ] Document phase-specific allowed actions
+- [ ] Add examples of what to refuse and when
+
+---
+
+### WF-014: Block Workflow Finish Without Required Reviews
+**Status:** Planned
+**Complexity:** Low
+**Priority:** High
+**Source:** Phase 7 Learning - Process compliance failure
+**Description:** Prevent `orchestrator finish` from completing if required external model reviews were not run.
+
+**Problem Solved:**
+Currently, workflows can be finished even if REVIEW phase items were completed without actually running external reviews. This defeats the purpose of multi-model review.
+
+**Implementation:**
+- Check workflow log for `review_completed` events with external model notes
+- If security_review or quality_review completed without external review, block finish
+- Require explicit `--skip-reviews` flag with reason to override
+
+**Files:** `src/cli.py`, `src/engine.py`
+
+**Tasks:**
+- [ ] Add review completion validation to `cmd_finish()`
+- [ ] Check for "THIRD-PARTY REVIEW" in completion notes
+- [ ] Add `--skip-reviews` override flag with required reason
+- [ ] Display warning showing which reviews were missed
+
+---
+
+### WF-015: Detect and Warn on Work Outside Active Workflow
+**Status:** Planned
+**Complexity:** Medium
+**Priority:** High
+**Source:** Phase 7 Learning - Process compliance failure
+**Description:** Detect when significant work (file changes, test runs) occurs outside an active workflow and warn loudly.
+
+**Problem Solved:**
+AI can work completely outside the orchestrator, creating code without any process. This should trigger warnings so user knows process is being bypassed.
+
+**Implementation:**
+- Monitor for file writes to src/ during active workflow
+- If workflow active but phase doesn't match activity, warn
+- If no workflow active but significant code written, suggest starting one
+
+**Detection Rules:**
+| Activity | Expected Phase | Warning If Different |
+|----------|----------------|----------------------|
+| Writing src/*.py | EXECUTE | "Code changes outside EXECUTE phase" |
+| Running pytest | EXECUTE or VERIFY | "Tests run outside expected phase" |
+| Writing docs/*.md | DOCUMENT or LEARN | "Docs updated outside expected phase" |
+
+**Files:** `.claude/hooks/`, `src/cli.py`
+
+**Tasks:**
+- [ ] Create activity monitoring hook
+- [ ] Define activity-to-phase mapping
+- [ ] Add warning display mechanism
+- [ ] Track warnings in workflow log
+
+---
+
 ### CORE-019: Fix OpenAI/LiteLLM Model Configuration
 **Status:** Planned
 **Complexity:** Low
