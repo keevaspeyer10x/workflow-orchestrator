@@ -1500,6 +1500,293 @@ AI can work completely outside the orchestrator, creating code without any proce
 
 ---
 
+### WF-017: Document Plan File Requirement
+**Status:** Planned
+**Complexity:** Low
+**Priority:** High
+**Source:** PRD-001 Session - Workflow verification failure
+**Description:** The orchestrator's PLAN phase verification expects `docs/plan.md` but this requirement isn't documented anywhere.
+
+**Problem Solved:**
+Workflow failed during PRD-001 implementation with "File not found: docs/plan.md" requiring manual intervention.
+
+**Options:**
+1. **Document requirement** - Add to CLAUDE.md and workflow.yaml comments
+2. **Make configurable** - `plan_file_path` setting in workflow.yaml
+3. **Remove verification** - Don't require specific file path for plan
+
+**Recommendation:** Option 2 - make configurable with `docs/plan.md` as default.
+
+**Tasks:**
+- [ ] Add `plan_file_path` setting to workflow.yaml schema
+- [ ] Update verification to use configurable path
+- [ ] Document in CLAUDE.md
+- [ ] Add sensible default
+
+---
+
+### WF-018: Allow "No New Failures" Verification Mode
+**Status:** Planned
+**Complexity:** Medium
+**Priority:** High
+**Source:** PRD-001 Session - Pre-existing test failures blocking verification
+**Description:** Allow `run_tests` verification to accept "no new failures" instead of requiring all tests pass.
+
+**Problem Solved:**
+2 pre-existing test failures in `tests/conflict/test_pipeline.py` caused orchestrator's `run_tests` verification to fail, even though all PRD-related tests passed. Had to skip the item.
+
+**Implementation:**
+```yaml
+- id: "run_tests"
+  verification:
+    type: command
+    command: "pytest tests/"
+    mode: "no_new_failures"  # vs "all_pass" (default)
+```
+
+**Tasks:**
+- [ ] Add `mode` parameter to command verification
+- [ ] Implement baseline test results tracking
+- [ ] Compare current failures vs baseline
+- [ ] Pass if no NEW failures introduced
+
+---
+
+### WF-019: Enforce TDD Order in Workflow
+**Status:** Planned
+**Complexity:** Medium
+**Priority:** Medium
+**Source:** PRD-001 Session, Global Installation Learnings
+**Description:** Restructure workflow to enforce test-first development (red-green-refactor).
+
+**Problem Solved:**
+Current workflow has `write_tests` as first EXECUTE item, but nothing prevents implementing code first. This reverses TDD and leads to tests that verify "what was built" not "what was intended."
+
+**Options:**
+
+**Option A: Split into red/green phases**
+```yaml
+- id: "write_failing_tests"
+  name: "Write failing test stubs (red)"
+  verification:
+    type: command
+    command: "pytest --tb=no"
+    expect_exit_code: 1  # Tests SHOULD fail initially
+- id: "implement_code"
+  name: "Implement to pass tests (green)"
+```
+
+**Option B: Add test existence check before implementation**
+```yaml
+- id: "verify_test_stubs_exist"
+  verification:
+    type: glob
+    pattern: "tests/**/test_*.py"
+    min_files: 1
+```
+
+**Tasks:**
+- [ ] Decide on enforcement mechanism
+- [ ] Update default_workflow.yaml
+- [ ] Document TDD expectations in CLAUDE.md
+- [ ] Add `expect_exit_code` support to command verification
+
+---
+
+### WF-020: Add Missing Review Types to Default Workflow
+**Status:** ✅ Completed (2026-01-09)
+**Complexity:** Low
+**Priority:** High
+**Source:** PRD-001 Session - Only 3 of 5 review types in workflow
+**Description:** Add `consistency_review` and `vibe_coding_review` items to default workflow's REVIEW phase.
+
+**Problem Solved:**
+The multi-model review system supports 5 review types, but the workflow only triggers 3:
+
+| Review Type | Model | In Workflow? | In REVIEW_ITEM_MAPPING? |
+|------------|-------|--------------|-------------------------|
+| security | Codex | ✅ security_review | ✅ |
+| quality | Codex | ✅ quality_review | ✅ |
+| holistic | Gemini | ✅ architecture_review (maps to holistic) | ✅ |
+| consistency | Gemini | ❌ Missing | ❌ |
+| vibe_coding | Grok | ❌ Missing | ❌ |
+
+During PRD-001, only 2 reviews ran (security, quality) because architecture_review wasn't completed.
+
+**Implementation:**
+```yaml
+# In REVIEW phase - add these items
+- id: "consistency_review"
+  name: "Consistency review (patterns, utilities)"
+  description: "Gemini reviews for pattern compliance and existing utility usage"
+  optional: true
+- id: "vibe_coding_review"
+  name: "Vibe coding review (AI-specific issues)"
+  description: "Grok reviews for hallucinations, cargo cult patterns, AI blind spots"
+  optional: true
+```
+
+```python
+# In cli.py REVIEW_ITEM_MAPPING - add these mappings
+REVIEW_ITEM_MAPPING = {
+    "security_review": "security",
+    "quality_review": "quality",
+    "architecture_review": "holistic",
+    "consistency_review": "consistency",     # Add
+    "vibe_coding_review": "vibe_coding",     # Add
+}
+```
+
+**Implementation:**
+- workflow.yaml and default_workflow.yaml already had all 5 review items
+- Updated REVIEW_ITEM_MAPPING in cli.py to include all 6 mappings:
+  - security_review → security
+  - quality_review → quality
+  - architecture_review → holistic (legacy)
+  - consistency_review → consistency
+  - holistic_review → holistic
+  - vibe_coding_review → vibe_coding
+
+**Files:** `src/cli.py`
+
+**Tasks:**
+- [x] Add consistency_review to default_workflow.yaml (already present)
+- [x] Add vibe_coding_review to default_workflow.yaml (already present)
+- [x] Update REVIEW_ITEM_MAPPING in cli.py with both new mappings
+- [ ] Document all 5 review types in CLAUDE.md
+
+---
+
+### ARCH-003: Single Source of Truth for Review Types
+**Status:** ✅ Completed (2026-01-09)
+**Complexity:** Medium
+**Priority:** High
+**Source:** WF-020 Fix Session - Discovered structural issue
+**Description:** Review types are defined in 4 different places with no validation they're in sync. This caused PRD-001 to silently miss reviews.
+
+**Problem Solved:**
+Currently, adding a new review type requires updating 4 places:
+1. `workflow.yaml` REVIEW phase items
+2. `REVIEW_ITEM_MAPPING` in `src/cli.py`
+3. `execute_all_reviews()` in `src/review/router.py`
+4. `settings.reviews.types` in `workflow.yaml`
+
+If any are missed, reviews silently don't run. No validation catches this.
+
+**Desired State:**
+Single source of truth with derived/validated copies:
+
+```python
+# Option A: Derive from workflow.yaml
+# workflow.yaml's REVIEW phase items are the source of truth
+# REVIEW_ITEM_MAPPING is auto-generated from workflow items
+# execute_all_reviews() reads from workflow definition
+
+# Option B: Central registry
+# src/review/registry.py defines all review types
+# workflow.yaml, cli.py, router.py all import from registry
+# Validation at startup checks consistency
+
+# Option C: Validation-only
+# Keep current structure but add startup validation
+# Fail loudly if any review type is missing from any location
+```
+
+**Implementation (Recommended: Option C first, then Option B):**
+
+1. **Immediate: Add validation**
+```python
+def validate_review_configuration():
+    """Validate all review locations are in sync."""
+    from src.cli import REVIEW_ITEM_MAPPING
+    from src.review.router import ALL_REVIEW_TYPES
+
+    workflow_items = get_review_items_from_workflow()
+    mapping_types = set(REVIEW_ITEM_MAPPING.values())
+    router_types = set(ALL_REVIEW_TYPES)
+
+    if mapping_types != router_types:
+        raise ConfigurationError(
+            f"REVIEW_ITEM_MAPPING types {mapping_types} != "
+            f"router types {router_types}"
+        )
+```
+
+2. **Follow-up: Central registry**
+```python
+# src/review/registry.py
+REVIEW_TYPES = {
+    "security": {"model": "codex", "description": "OWASP, injection, auth"},
+    "quality": {"model": "codex", "description": "Code smells, edge cases"},
+    "consistency": {"model": "gemini", "description": "Pattern compliance"},
+    "holistic": {"model": "gemini", "description": "Senior engineer review"},
+    "vibe_coding": {"model": "grok", "description": "AI-specific issues"},
+}
+
+# All other files import from here
+```
+
+**Implementation:**
+Created `src/review/registry.py` as the single source of truth:
+- `REVIEW_TYPES` dict with `ReviewTypeDefinition` for each review type
+- `get_review_item_mapping()` - replaces hardcoded dict in cli.py
+- `get_all_review_types()` - replaces hardcoded list in router.py
+- `validate_review_configuration()` - validates all locations in sync
+- `get_configuration_status()` - debugging/display helper
+
+Updated consumers to import from registry:
+- `src/cli.py` - `REVIEW_ITEM_MAPPING = get_review_item_mapping()`
+- `src/review/router.py` - `get_all_review_types()` in execute_all_reviews()
+- `src/review/__init__.py` - exports all registry functions
+
+**Files:**
+- `src/review/registry.py` (new - 185 lines)
+- `src/cli.py` (updated import)
+- `src/review/router.py` (updated import)
+- `src/review/__init__.py` (added exports)
+- `tests/review/test_registry.py` (new - 33 tests)
+
+**Tasks:**
+- [x] Add `validate_review_configuration()` function
+- [ ] Call validation at orchestrator startup (deferred - not critical path)
+- [x] Add test that fails if reviews are out of sync
+- [x] Create `src/review/registry.py` with canonical definitions
+- [x] Update cli.py to import from registry
+- [x] Update router.py to import from registry
+- [ ] Update workflow.yaml to reference registry types (not needed - workflow.yaml is config, not code)
+
+---
+
+### WF-021: Add Manual Gate to Clarifying Questions
+**Status:** Planned
+**Complexity:** Low
+**Priority:** High
+**Source:** WF-005-009 Session - Clarifying questions not paused for
+**Description:** Make `clarifying_questions` a manual gate so the agent must pause for user answers.
+
+**Problem Solved:**
+During WF-005-009 implementation, agent presented clarifying questions but immediately continued with recommended answers instead of pausing. User feedback: "You didn't pause for me to answer the questions."
+
+**Implementation:**
+```yaml
+- id: "clarifying_questions"
+  name: "Ask Clarifying Questions"
+  verification:
+    type: "manual_gate"
+    description: "Present questions AND wait for user answers before proceeding"
+  notes:
+    - "[caution] MUST pause and wait for user answers"
+    - "[caution] Do NOT proceed with defaults without explicit user confirmation"
+```
+
+**Tasks:**
+- [ ] Update clarifying_questions in default_workflow.yaml
+- [ ] Add manual_gate verification
+- [ ] Add cautionary notes
+- [ ] Test that advance is blocked until gate approved
+
+---
+
 ### WF-016: Integrate Learning System with Git Merge Conflicts
 **Status:** Planned
 **Complexity:** Medium
@@ -1671,6 +1958,39 @@ def create(spec: ModelSpec) -> Reviewer:
 - [ ] Handle CLI tool authentication (if required)
 - [ ] Add `--prefer-api` flag to force API mode
 - [ ] Document CLI tool setup requirements
+
+---
+
+### CORE-022: Fix ReviewRouter context_override Parameter
+**Status:** Planned
+**Complexity:** Low
+**Priority:** High
+**Source:** PRD-001 Session - Error during workflow execution
+**Description:** Fix the `execute_review()` method in ReviewRouter that fails with "got unexpected keyword argument 'context_override'".
+
+**Problem Solved:**
+During PRD-001 workflow execution, the orchestrator displayed an error:
+```
+ReviewRouter.execute_review() got unexpected keyword argument 'context_override'
+```
+
+This indicates a mismatch between how the CLI calls the ReviewRouter and the actual method signature.
+
+**Implementation:**
+```python
+# Either add the parameter to the method signature:
+def execute_review(self, review_type: str, context_override: Optional[dict] = None) -> ReviewResult:
+    ...
+
+# Or fix the calling code in cli.py to not pass it:
+result = router.execute_review(review_type)  # Remove context_override
+```
+
+**Tasks:**
+- [ ] Find where `execute_review()` is called with `context_override`
+- [ ] Determine if the parameter is needed
+- [ ] Either add parameter to method or remove from call site
+- [ ] Add test to prevent regression
 
 ---
 

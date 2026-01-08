@@ -19,6 +19,7 @@ from .context import ReviewContext, ReviewContextCollector
 from .result import ReviewResult
 from .prompts import get_prompt, get_tool, REVIEW_PROMPTS
 from .setup import ReviewSetup, check_review_setup as _check_setup
+from .registry import get_all_review_types
 
 logger = logging.getLogger(__name__)
 
@@ -177,19 +178,15 @@ class ReviewRouter:
 
     def execute_all_reviews(self) -> dict[str, ReviewResult]:
         """
-        Execute all five reviews (gold-plated for vibe coding).
+        Execute all reviews defined in the registry.
 
-        Reviews:
-        - security (Codex): OWASP, injection, auth
-        - quality (Codex): Edge cases, error handling
-        - consistency (Gemini): Codebase patterns, existing utilities
-        - holistic (Gemini): Fresh eyes, senior engineer perspective
-        - vibe_coding (Grok): AI-specific issues, hallucinations, cargo cult
+        ARCH-003: Review types are now defined in registry.py (single source of truth).
+        See registry.REVIEW_TYPES for the canonical list.
 
         Returns:
             Dict mapping review_type to ReviewResult
         """
         results = {}
-        for review_type in ["security", "quality", "consistency", "holistic", "vibe_coding"]:
+        for review_type in get_all_review_types():
             results[review_type] = self.execute_review(review_type)
         return results

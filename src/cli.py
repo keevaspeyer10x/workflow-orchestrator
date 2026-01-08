@@ -39,6 +39,7 @@ from src.review import (
     check_review_setup,
     setup_reviews,
 )
+from src.review.registry import get_review_item_mapping
 from src.config import find_workflow_path, get_default_workflow_content, is_using_bundled_workflow
 from src.validation import validate_constraints, validate_note
 from src.secrets import (
@@ -56,15 +57,12 @@ VERSION = "2.0.0"
 
 
 # ============================================================================
-# Auto-Review Mapping (WF-010)
+# Auto-Review Mapping (WF-010, ARCH-003)
 # ============================================================================
 # Maps workflow item IDs to third-party review types
 # When completing these items, auto-run the corresponding review
-REVIEW_ITEM_MAPPING = {
-    "security_review": "security",
-    "quality_review": "quality",
-    "architecture_review": "holistic",  # Architecture maps to holistic review
-}
+# ARCH-003: Now imported from registry.py - single source of truth
+REVIEW_ITEM_MAPPING = get_review_item_mapping()
 
 
 def run_auto_review(review_type: str, working_dir: Path = None) -> tuple[bool, str, str, dict]:

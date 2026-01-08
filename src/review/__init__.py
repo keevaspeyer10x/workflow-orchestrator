@@ -58,6 +58,23 @@ from .cli_executor import CLIExecutor
 from .api_executor import APIExecutor
 
 # =============================================================================
+# Review Type Registry (ARCH-003)
+# Single source of truth for review types
+# =============================================================================
+from .registry import (
+    REVIEW_TYPES,
+    ReviewTypeDefinition,
+    get_review_item_mapping,
+    get_all_review_types,
+    get_review_type,
+    get_model_for_review,
+    get_workflow_item_ids,
+    validate_review_configuration,
+    get_configuration_status,
+    ReviewConfigurationError,
+)
+
+# =============================================================================
 # API-Based Orchestrator System (FALLBACK)
 # Used when CLIs unavailable or for merge conflict resolution
 # =============================================================================
