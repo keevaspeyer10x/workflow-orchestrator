@@ -2,7 +2,7 @@
 
 **Design Document:** `docs/FINAL-merge-conflict-system-design.md`
 **Started:** January 2026
-**Current Phase:** 4 - Escalation System (Next)
+**Current Phase:** 5 - Advanced Resolution (Next)
 
 ---
 
@@ -13,7 +13,10 @@ When starting a new chat, read these files in order:
 2. Design doc Section 15 (`docs/FINAL-merge-conflict-system-design.md` lines 3999-4082) - phase details
 3. Any files marked as "In Progress" below
 
-**Important:** User prefers to use the orchestrator workflow system for complex coding tasks.
+**CRITICAL PROCESS REQUIREMENT:**
+Always use the orchestrator workflow system for ALL code changes (unless trivially simple).
+This includes: PLAN → EXECUTE → REVIEW → VERIFY → LEARN phases.
+This reminder exists because context compaction can cause Claude to forget workflow requirements.
 
 ---
 
@@ -23,8 +26,8 @@ When starting a new chat, read these files in order:
 |-------|--------|---------------------|
 | 1. Foundation (MVP) | **COMPLETE** | N/A (fast-path only) |
 | 2. Conflict Detection | **COMPLETE** | N/A |
-| 3. Basic Resolution | **COMPLETE** | ~60% |
-| 4. Escalation System | Not Started | N/A |
+| 3. Basic Resolution | **COMPLETE** (needs remediation) | ~60% |
+| 4. Escalation System | **COMPLETE** | N/A |
 | 5. Advanced Resolution | Not Started | ~80% |
 | 6. PRD Mode & Scale | Not Started | N/A |
 | 7. Learning & Optimization | Not Started | N/A |
@@ -123,6 +126,34 @@ Design reviews were conducted by multiple AI models:
 - [ ] Add artifact signing/attestation
 - [ ] Add CODEOWNERS integration for intent conflicts
 - [x] Design pattern lifecycle for learning system (see below)
+
+### Roadmap / Future Enhancements
+
+| Item | Priority | Description |
+|------|----------|-------------|
+| Orchestrator Context Persistence | HIGH | Build mechanism to ensure Claude remembers to use orchestrator after context compaction. Options: (1) Add to system prompt, (2) Hook into context restore, (3) Automated prompt injection |
+| Fix Phase 3 Security Issues | HIGH | See "Phase 3 Security Remediation" section below |
+| Write spec-driven tests for Phase 3 | MEDIUM | Existing tests were written post-implementation; add TDD-style tests from spec |
+| Artifact signing/attestation | MEDIUM | Prevent manifest tampering |
+| CODEOWNERS integration | LOW | Use CODEOWNERS for intent conflict escalation |
+
+### Phase 3 Security Remediation (from Third-Party Review)
+
+**Status:** PENDING - Issues identified in third-party review of Phase 3 code
+**Priority:** HIGH - These should be fixed before production use
+
+| Issue | File | Severity | Description |
+|-------|------|----------|-------------|
+| Command injection | `src/resolution/validator.py` | **CRITICAL** | `shell=True` with user-controlled input in subprocess calls |
+| Path traversal | `src/resolution/context.py` | **CRITICAL** | `_get_file_content()` lacks proper path validation |
+| Branch name injection | `src/resolution/candidate.py` | **CRITICAL** | Unsanitized branch names in git commands |
+| Missing exception handling | `src/resolution/pipeline.py` | **HIGH** | Exceptions not properly caught/handled |
+
+**Remediation Plan:**
+1. Replace `shell=True` with `shell=False` and proper argument lists
+2. Add path validation to ensure files are within repo bounds
+3. Sanitize branch names before use in git commands
+4. Add proper try/except blocks with specific exception types
 
 ### Learning System - Pattern Lifecycle Design
 
@@ -233,11 +264,36 @@ See: `docs/design-review-round3-synthesis.md` for full details.
 
 ### Checklist
 
-- [ ] Escalation issue creation
-- [ ] Plain-English options
-- [ ] Response handling
-- [ ] Feature porting (winner/loser)
-- [ ] Timeout handling
+- [x] Escalation schema and data models (`src/escalation/schema.py`)
+- [x] Escalation issue creation (`src/escalation/issue_creator.py`)
+- [x] Plain-English options (integrated in IssueCreator)
+- [x] Response handling (`src/escalation/response_handler.py`)
+- [x] Feature porting (winner/loser) (`src/escalation/feature_porter.py`)
+- [x] Timeout handling with SLA policies (`src/escalation/timeout_handler.py`)
+- [x] Main orchestrator (`src/escalation/manager.py`)
+- [x] Tests (`tests/escalation/test_escalation.py`)
+
+### Files Created
+
+| File | Status | Description |
+|------|--------|-------------|
+| `src/escalation/__init__.py` | **DONE** | Package init with all exports |
+| `src/escalation/schema.py` | **DONE** | EscalationTrigger, Priority, Status, TimeoutPolicy, etc. |
+| `src/escalation/issue_creator.py` | **DONE** | GitHub issue creation with plain-English options |
+| `src/escalation/response_handler.py` | **DONE** | Parse and process user responses (A/B/C, explain, custom:) |
+| `src/escalation/feature_porter.py` | **DONE** | Port unique features from losing to winning option |
+| `src/escalation/timeout_handler.py` | **DONE** | SLA-based reminders and auto-selection |
+| `src/escalation/manager.py` | **DONE** | Main EscalationManager orchestrator |
+| `tests/escalation/__init__.py` | **DONE** | Test package init |
+| `tests/escalation/test_escalation.py` | **DONE** | 22 tests covering all components |
+
+### Key Design Decisions
+
+1. **Policy-based timeouts**: Different SLAs by priority (critical 24h no-auto, standard 72h with auto-select)
+2. **Never auto-select critical/high**: Security, auth, DB migrations always require human decision
+3. **Feature porting**: Unique features from losing options are ported to winning architecture
+4. **Multi-channel notifications**: GitHub, Slack, email (when configured)
+5. **Priority emojis**: 🚨 critical, ⚠️ high, 🤔 standard for visual distinction
 
 ---
 
@@ -352,6 +408,28 @@ See: `docs/design-review-round3-synthesis.md` for full details.
 
 **Status:** Phase 3 COMPLETE - ready to commit and begin Phase 4
 
+### Session 5
+**Date:** January 2026
+**Work Done:**
+- Completed Phase 4: Escalation System
+  - `src/escalation/schema.py` - EscalationTrigger, Priority, Status, TimeoutPolicy, ALWAYS_ESCALATE_TRIGGERS
+  - `src/escalation/issue_creator.py` - GitHub issue creation with priority emojis and plain-English options
+  - `src/escalation/response_handler.py` - Parse user responses (A/B/C selection, explain, custom:)
+  - `src/escalation/feature_porter.py` - Port unique features from losing to winning architecture
+  - `src/escalation/timeout_handler.py` - SLA-based reminders and auto-selection (policy-driven)
+  - `src/escalation/manager.py` - Main EscalationManager orchestrating the full lifecycle
+  - `tests/escalation/test_escalation.py` - 22 tests covering all components (all passing)
+- Ran third-party review of Phase 3 code
+  - Found 4 critical security issues (see Phase 3 Security Remediation above)
+- Added orchestrator reminder mechanism to Quick Start section
+
+**Important Process Notes:**
+- User emphasized: ALWAYS use orchestrator for code changes (not trivial documentation updates)
+- Phase 3 tests were written post-implementation (not TDD) - noted for future phases
+- Third-party reviews should be run BEFORE committing phases
+
+**Status:** Phase 4 COMPLETE - ready to commit. Phase 3 security issues pending remediation.
+
 ---
 
 ## Context Switch Guidelines
@@ -403,7 +481,13 @@ src/
 │   ├── harmonizer.py  # Stage 3: Interface harmonization
 │   ├── candidate.py   # Candidate generation
 │   └── validator.py   # Build/test validation
-├── escalation/        # Human escalation (Phase 4) - TODO
+├── escalation/        # Human escalation (Phase 4) DONE
+│   ├── schema.py      # EscalationTrigger, Priority, Status, TimeoutPolicy
+│   ├── issue_creator.py # GitHub issue creation
+│   ├── response_handler.py # Parse user responses
+│   ├── feature_porter.py # Port features from loser to winner
+│   ├── timeout_handler.py # SLA-based reminders/auto-select
+│   └── manager.py     # Main EscalationManager
 ├── review/            # Code review (DONE)
 └── git_ops/           # Git operations wrapper
 ```
