@@ -9,12 +9,23 @@ import http.server
 import socketserver
 import threading
 import webbrowser
+import secrets
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
 
 from .engine import WorkflowEngine
 from .analytics import WorkflowAnalytics
+
+# CSRF token for dashboard protection (generated per server instance)
+_CSRF_TOKEN: Optional[str] = None
+
+def _get_csrf_token() -> str:
+    """Get or generate CSRF token for this server instance."""
+    global _CSRF_TOKEN
+    if _CSRF_TOKEN is None:
+        _CSRF_TOKEN = secrets.token_urlsafe(32)
+    return _CSRF_TOKEN
 
 
 DASHBOARD_HTML = '''
@@ -371,7 +382,16 @@ DASHBOARD_HTML = '''
         // Approve current phase
         async function approvePhase() {
             try {
-                const response = await fetch('/api/approve', { method: 'POST' });
+                // Fetch CSRF token first
+                const tokenResponse = await fetch('/api/csrf-token');
+                const tokenData = await tokenResponse.json();
+
+                const response = await fetch('/api/approve', {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRF-Token': tokenData.token
+                    }
+                });
                 const result = await response.json();
                 if (result.success) {
                     fetchData();
@@ -574,39 +594,58 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
             self.end_headers()
-            
+
             # Reload state to get latest
             self.engine.load_state()
             if self.engine.state:
                 yaml_path = self.engine.working_dir / "workflow.yaml"
                 if yaml_path.exists():
                     self.engine.load_workflow_def(str(yaml_path))
-            
+
             status = self.engine.get_status()
             self.wfile.write(json.dumps(status, default=str).encode())
-        
+
+        elif self.path == '/api/csrf-token':
+            # Provide CSRF token for JavaScript
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"token": _get_csrf_token()}).encode())
+
         else:
             self.send_error(404)
     
     def do_POST(self):
         if self.path == '/api/approve':
+            # CSRF protection - require valid token in header
+            csrf_token = self.headers.get('X-CSRF-Token', '')
+            if csrf_token != _get_csrf_token():
+                self.send_response(403)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "success": False,
+                    "message": "Invalid or missing CSRF token"
+                }).encode())
+                return
+
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
             self.end_headers()
-            
+
             # Reload state
             self.engine.load_state()
             if self.engine.state:
                 yaml_path = self.engine.working_dir / "workflow.yaml"
                 if yaml_path.exists():
                     self.engine.load_workflow_def(str(yaml_path))
-            
+
             success, message = self.engine.approve_phase()
             self.wfile.write(json.dumps({
                 "success": success,
                 "message": message
             }).encode())
-        
+
         else:
             self.send_error(404)
     

@@ -694,9 +694,16 @@ class WorkflowEngine:
         result = {"type": verification.type.value, "timestamp": datetime.now(timezone.utc).isoformat()}
         
         if verification.type == VerificationType.FILE_EXISTS:
-            # Path traversal protection
+            # Path traversal protection - use is_relative_to for proper security
             path = (self.working_dir / verification.path).resolve()
-            if not str(path).startswith(str(self.working_dir)):
+            try:
+                # Python 3.9+ - proper path containment check
+                if not path.is_relative_to(self.working_dir.resolve()):
+                    result["blocked"] = True
+                    result["reason"] = "path_traversal"
+                    return False, f"Path traversal blocked: {verification.path}", result
+            except ValueError:
+                # is_relative_to raises ValueError if not relative
                 result["blocked"] = True
                 result["reason"] = "path_traversal"
                 return False, f"Path traversal blocked: {verification.path}", result

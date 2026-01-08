@@ -119,10 +119,44 @@ Design reviews were conducted by multiple AI models:
 - Tiered validation approach
 
 **Outstanding Recommendations (from reviews):**
-- [ ] Fix existing orchestrator security issues (path traversal, CSRF)
+- [x] Fix existing orchestrator security issues (path traversal, CSRF, manual gates)
 - [ ] Add artifact signing/attestation
 - [ ] Add CODEOWNERS integration for intent conflicts
-- [ ] Add pattern expiry/decay in learning system
+- [x] Design pattern lifecycle for learning system (see below)
+
+### Learning System - Pattern Lifecycle Design
+
+**Philosophy:** Autonomous improvement without human review queues.
+
+**Pattern States:**
+```
+ACTIVE (high confidence) → Used frequently, validated
+SUGGESTING (medium confidence) → Suggest but don't auto-apply
+DORMANT (low confidence) → Not matched recently, may be stale
+DEPRECATED → Failed validation, kept for reference only
+```
+
+**Lifecycle Rules:**
+
+| Event | Action |
+|-------|--------|
+| Pattern matched + validation passes | Refresh timestamp, boost confidence |
+| Pattern matched + validation fails | Decrease confidence, flag for analysis |
+| Pattern unused for N days | Decay confidence by X% |
+| Confidence drops below threshold | Move to SUGGESTING (human sees suggestion) |
+| Confidence drops to minimum | Move to DORMANT (not applied) |
+| Pattern causes repeated failures | Move to DEPRECATED |
+
+**Auto-Improvement Mechanisms:**
+1. **Success tracking**: Patterns that lead to passing builds strengthen
+2. **Failure learning**: Failed patterns generate "anti-patterns" to avoid
+3. **Context binding**: Patterns tagged with (language, framework, conflict_type)
+4. **Version awareness**: Patterns can be tied to framework versions, auto-expire when versions change
+
+**No Human Review Required:**
+- Patterns self-manage based on validation outcomes
+- System improves through use, not manual curation
+- Failed patterns are deprecated, not deleted (forensics)
 
 See: `docs/design-review-round3-synthesis.md` for full details.
 

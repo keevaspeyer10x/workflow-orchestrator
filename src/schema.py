@@ -4,7 +4,7 @@ Workflow Schema Definitions using Pydantic
 This module defines the structure for workflow YAML files and runtime state.
 """
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, Literal
 from datetime import datetime, timezone
 from enum import Enum
@@ -81,13 +81,26 @@ class ChecklistItemDef(BaseModel):
     skip_conditions: list[str] = Field(default_factory=list)
     verification: VerificationConfig = Field(default_factory=VerificationConfig)
     agent: Optional[str] = None  # Which agent should handle this (e.g., "manus", "claude_code")
-    
+
     @field_validator('id')
     @classmethod
     def id_must_be_valid(cls, v):
         if not v.replace('_', '').isalnum():
             raise ValueError('id must be alphanumeric with underscores only')
         return v
+
+    @model_validator(mode='after')
+    def manual_gates_not_skippable(self):
+        """
+        Security: Manual gate items should not be skippable by default.
+        This prevents bypassing human approval steps.
+        """
+        if self.verification.type == VerificationType.MANUAL_GATE:
+            # Force manual gates to be non-skippable unless explicitly overridden
+            # by setting skip_conditions (which still requires a valid reason)
+            if self.skippable and not self.skip_conditions:
+                self.skippable = False
+        return self
 
 
 class PhaseDef(BaseModel):
