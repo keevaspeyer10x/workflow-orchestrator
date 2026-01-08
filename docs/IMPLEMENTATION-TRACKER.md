@@ -21,7 +21,7 @@ When starting a new chat, read these files in order:
 
 | Phase | Status | Auto-Resolve Target |
 |-------|--------|---------------------|
-| 1. Foundation (MVP) | **IN PROGRESS** | N/A (fast-path only) |
+| 1. Foundation (MVP) | **COMPLETE** | N/A (fast-path only) |
 | 2. Conflict Detection | Not Started | N/A |
 | 3. Basic Resolution | Not Started | ~60% |
 | 4. Escalation System | Not Started | N/A |
@@ -43,10 +43,11 @@ When starting a new chat, read these files in order:
 - [x] Agent discovery - find claude/* branches (`src/coordinator/discovery.py`)
 - [x] Basic conflict detection - git merge-tree (`src/conflict/detector.py`)
 - [x] Fast-path merge - no conflicts → create PR (`src/coordinator/fast_path.py`)
-- [ ] GitHub Actions workflows (`.github/workflows/`)
-  - [ ] `claude-branch-ping.yml` (untrusted, minimal)
-  - [ ] `claude-coordinator.yml` (trusted, full access)
-- [ ] Simple notifications
+- [x] GitHub Actions workflows (`.github/workflows/`)
+  - [x] `claude-branch-ping.yml` (untrusted, minimal)
+  - [x] `claude-coordinator.yml` (trusted, full access)
+- [x] CLI entry point (`src/coordinator/__main__.py`)
+- [x] Simple notifications (built into coordinator via GitHubActionsFormatter)
 
 ### Files Created
 
@@ -59,6 +60,9 @@ When starting a new chat, read these files in order:
 | `src/coordinator/fast_path.py` | **DONE** | FastPathMerger, PR creation |
 | `src/conflict/__init__.py` | **DONE** | Package init |
 | `src/conflict/detector.py` | **DONE** | ConflictDetector, git merge-tree |
+| `src/coordinator/__main__.py` | **DONE** | CLI entry point for GitHub Actions |
+| `.github/workflows/claude-branch-ping.yml` | **DONE** | Untrusted ping workflow |
+| `.github/workflows/claude-coordinator.yml` | **DONE** | Trusted coordinator workflow |
 
 ### Decisions Made
 
@@ -182,7 +186,18 @@ When starting a new chat, read these files in order:
   - `src/coordinator/fast_path.py` - FastPathMerger for PR creation
   - `src/conflict/detector.py` - ConflictDetector using git merge-tree
 
-**Next:** GitHub Actions workflows, then commit
+**Next:** Simple notifications, then Phase 1 complete
+
+### Session 2
+**Date:** January 2026
+**Work Done:**
+- Created GitHub Actions workflows:
+  - `claude-branch-ping.yml` - untrusted workflow that pings coordinator on claude/* branch push
+  - `claude-coordinator.yml` - trusted workflow that runs coordination on main branch
+- Created `src/coordinator/__main__.py` - CLI entry point for running coordinator from GitHub Actions
+- Updated this tracker
+
+**Status:** Phase 1 COMPLETE - ready to commit and begin Phase 2
 
 ---
 
