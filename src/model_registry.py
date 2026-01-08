@@ -303,6 +303,50 @@ class ModelRegistry:
         # Conservative default
         return False
 
+    def _resolve_category(self, category: str) -> str:
+        """
+        Resolve a review type or category to a tool/model family.
+
+        Uses workflow.yaml settings.reviews.types as the single source of truth.
+        Falls back to built-in tool names if category is already a tool.
+
+        Args:
+            category: Review type (e.g., "security") or tool name (e.g., "codex")
+
+        Returns:
+            Tool/model family name: "codex", "gemini", "grok", or "claude"
+        """
+        # If it's already a known tool category, return as-is
+        known_tools = {"codex", "gemini", "grok", "claude"}
+        if category in known_tools:
+            return category
+
+        # Try to resolve via review config (single source of truth)
+        try:
+            from src.review.config import get_tool_for_review
+            return get_tool_for_review(category)
+        except ImportError:
+            logger.debug("Could not import review config, using fallback mapping")
+        except Exception as e:
+            logger.debug(f"Error getting tool for review type: {e}")
+
+        # Fallback: built-in mapping for common review types
+        # This is only used if review config is not available
+        fallback_mapping = {
+            "security": "codex",
+            "security_review": "codex",
+            "quality": "codex",
+            "quality_review": "codex",
+            "consistency": "gemini",
+            "consistency_review": "gemini",
+            "holistic": "gemini",
+            "holistic_review": "gemini",
+            "vibe_coding": "grok",
+            "vibe_coding_review": "grok",
+            "vibe": "grok",
+        }
+        return fallback_mapping.get(category, category)
+
     def get_recommended_model(self, category: str = "general") -> Optional[str]:
         """
         Get the recommended model for a category.
@@ -336,10 +380,7 @@ class ModelRegistry:
         - "codex": Code-specialized models (OpenAI Codex family) for security/quality reviews
         - "gemini": Long-context models (Google Gemini) for consistency/holistic reviews
         - "claude": General-purpose models (Anthropic Claude) for general tasks
-        - "security": Alias for codex
-        - "quality": Alias for codex
-        - "consistency": Alias for gemini
-        - "holistic": Alias for gemini
+        - Review types (security, quality, etc.) are resolved via workflow.yaml config
 
         Principle: Use the latest generation model available, don't hardcode versions.
 
@@ -349,16 +390,9 @@ class ModelRegistry:
         Returns:
             Model ID string (e.g., "openai/gpt-5.1-codex-max")
         """
-        # Map review types to model families
-        category_mapping = {
-            "security": "codex",
-            "quality": "codex",
-            "consistency": "gemini",
-            "holistic": "gemini",
-            "vibe_coding": "grok",
-            "vibe": "grok",
-        }
-        resolved_category = category_mapping.get(category.lower(), category.lower())
+        # Resolve review types to tools using the single source of truth (workflow.yaml)
+        # This avoids hardcoding the mapping in multiple places
+        resolved_category = self._resolve_category(category.lower())
 
         # Latest models by category (update these as new models are released)
         # NOTE: Keep these updated! Check provider docs for latest versions.

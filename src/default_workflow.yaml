@@ -60,11 +60,13 @@ settings:
     # Review types and their models
     # Security + Quality use Codex (code-specialized)
     # Consistency + Holistic use Gemini (1M context for codebase understanding)
+    # Vibe-Coding uses Grok (catches AI-specific issues)
     types:
       security_review: codex
       quality_review: codex
       consistency_review: gemini
       holistic_review: gemini
+      vibe_coding_review: grok
 
     # Model versions - UPDATE THESE when new models are released
     # CLI models are used when running Codex/Gemini CLIs directly

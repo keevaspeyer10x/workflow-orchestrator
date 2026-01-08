@@ -252,23 +252,23 @@ REVIEW_PROMPTS = {
     "vibe": VIBE_CODING_REVIEW_PROMPT,
 }
 
-# Which tool to use for each review
-# Codex for code-correctness (security, quality)
-# Gemini for codebase-wide context (consistency, holistic)
-# Grok for vibe-coding (third model perspective, catches what others miss)
-REVIEW_TOOLS = {
+# ============================================================================
+# REVIEW_TOOLS - DEPRECATED
+# ============================================================================
+# Tool assignments are now read from workflow.yaml settings.reviews.types
+# This dict is kept for reference only - DO NOT MODIFY
+# See: src/review/config.py for the single source of truth
+# ============================================================================
+_LEGACY_REVIEW_TOOLS = {
     "security_review": "codex",
-    "security": "codex",
-    "consistency_review": "gemini",
-    "consistency": "gemini",
     "quality_review": "codex",
-    "quality": "codex",
+    "consistency_review": "gemini",
     "holistic_review": "gemini",
-    "holistic": "gemini",
     "vibe_coding_review": "grok",
-    "vibe_coding": "grok",
-    "vibe": "grok",
 }
+
+# For backward compatibility, export REVIEW_TOOLS (but it now reads from config)
+# Code should use get_tool() instead of accessing REVIEW_TOOLS directly
 
 
 def get_prompt(review_type: str) -> str:
@@ -277,5 +277,36 @@ def get_prompt(review_type: str) -> str:
 
 
 def get_tool(review_type: str) -> str:
-    """Get the recommended tool for a review type."""
-    return REVIEW_TOOLS.get(review_type, "gemini")
+    """
+    Get the recommended tool for a review type.
+
+    Reads from workflow.yaml settings.reviews.types (single source of truth).
+    Falls back to defaults if not configured.
+
+    Args:
+        review_type: Review type (e.g., "security_review" or "security")
+
+    Returns:
+        Tool name: "codex", "gemini", or "grok"
+    """
+    from .config import get_tool_for_review
+    return get_tool_for_review(review_type)
+
+
+# Backward compatibility: REVIEW_TOOLS property that reads from config
+class _ReviewToolsProxy:
+    """Proxy that reads REVIEW_TOOLS from config for backward compatibility."""
+
+    def get(self, key: str, default: str = "gemini") -> str:
+        from .config import get_tool_for_review
+        return get_tool_for_review(key)
+
+    def __getitem__(self, key: str) -> str:
+        return self.get(key)
+
+    def __contains__(self, key: str) -> bool:
+        # All keys are valid (config provides defaults)
+        return True
+
+
+REVIEW_TOOLS = _ReviewToolsProxy()

@@ -152,7 +152,7 @@ Design reviews were conducted by multiple AI models:
 
 | Item | Priority | Description |
 |------|----------|-------------|
-| Review Types Single Source of Truth | **CRITICAL** | Review types are defined in 3 places: `workflow.yaml` settings, `prompts.py` REVIEW_TOOLS dict, and `model_registry.py` category_mapping. This caused bugs when adding vibe_coding_review (forgot to update all 3). **Fix:** Make `workflow.yaml` the single source of truth - code reads review config at runtime. Remove hardcoded mappings from prompts.py and model_registry.py. Add schema validation that review types in workflow match what code expects. |
+| ~~Review Types Single Source of Truth~~ | ~~**CRITICAL**~~ | **COMPLETE** - See "Review Types Consolidation" section below |
 | Orchestrator Context Persistence | HIGH | Build mechanism to ensure Claude remembers to use orchestrator after context compaction. Options: (1) Add to system prompt, (2) Hook into context restore, (3) Automated prompt injection |
 | Background Parallel Reviews | HIGH | Run external model reviews in background during workflow, not just at commit. Trigger on file save, cache results, notify when complete. Reviews should run continuously as code is written. |
 | Fix OpenAI Model Configuration | HIGH | OpenAI models (gpt-5.2-max, codex) fail in litellm due to model naming format. Need to update `src/review/models.py` to use correct litellm format (e.g., `openai/gpt-4` not `gpt-5.2-max`). |
@@ -161,6 +161,39 @@ Design reviews were conducted by multiple AI models:
 | Write spec-driven tests for Phase 3 | MEDIUM | Existing tests were written post-implementation; add TDD-style tests from spec |
 | Artifact signing/attestation | MEDIUM | Prevent manifest tampering |
 | CODEOWNERS integration | LOW | Use CODEOWNERS for intent conflict escalation |
+
+### Review Types Consolidation (CRITICAL Priority)
+
+**Status:** COMPLETE (Session 9)
+**Priority:** CRITICAL - Prevented configuration drift bugs
+
+**Problem:** Review types were defined in 3 places:
+1. `workflow.yaml` settings.reviews.types
+2. `prompts.py` REVIEW_TOOLS dict
+3. `model_registry.py` category_mapping
+
+This caused a bug when adding `vibe_coding_review` - one location was forgotten.
+
+**Solution:** Made `workflow.yaml` the single source of truth.
+
+| File | Change |
+|------|--------|
+| `src/review/config.py` | **NEW** - ReviewTypeConfig reads from workflow.yaml |
+| `src/review/prompts.py` | Removed hardcoded REVIEW_TOOLS, `get_tool()` now uses config |
+| `src/model_registry.py` | Added `_resolve_category()` that uses config |
+| `src/default_workflow.yaml` | Added `vibe_coding_review: grok` |
+| `tests/review/test_config.py` | **NEW** - 15 tests for config module |
+
+**Adding a new review type now requires changes in ONLY 2 places:**
+1. `workflow.yaml` - add type → tool mapping
+2. `prompts.py` - add the prompt template
+
+**Verification:**
+- All 15 config tests pass
+- All existing tests pass (494/496, 2 pre-existing failures)
+- Imports and functions verified working
+
+---
 
 ### Phase 3 Security Remediation (from Third-Party Review)
 
@@ -547,6 +580,25 @@ See: `docs/design-review-round3-synthesis.md` for full details.
 Review types defined in 3 places (workflow.yaml, prompts.py, model_registry.py) - added to roadmap as CRITICAL priority to consolidate to single source of truth.
 
 **Status:** Review system improvements committed. Ready for Phase 6 or architectural cleanup.
+
+### Session 9
+**Date:** January 2026
+**Work Done:**
+- Fixed CRITICAL roadmap item: Review Types Single Source of Truth
+  - Created `src/review/config.py` - ReviewTypeConfig reads from workflow.yaml
+  - Updated `src/review/prompts.py` - removed hardcoded REVIEW_TOOLS, uses config
+  - Updated `src/model_registry.py` - `_resolve_category()` uses config
+  - Updated `src/default_workflow.yaml` - added `vibe_coding_review: grok`
+  - Created `tests/review/test_config.py` - 15 tests for config module
+- Used orchestrator workflow system throughout (PLAN → EXECUTE → REVIEW → VERIFY → LEARN)
+
+**Key Changes:**
+- Adding a new review type now requires changes in ONLY 2 places:
+  1. `workflow.yaml` - add type → tool mapping
+  2. `prompts.py` - add the prompt template
+- Backward compatibility maintained via `_ReviewToolsProxy` class
+
+**Status:** Architectural cleanup COMPLETE. Ready to continue with Phase 6.
 
 ---
 
