@@ -137,6 +137,9 @@ Design reviews were conducted by multiple AI models:
 | Item | Priority | Description |
 |------|----------|-------------|
 | Orchestrator Context Persistence | HIGH | Build mechanism to ensure Claude remembers to use orchestrator after context compaction. Options: (1) Add to system prompt, (2) Hook into context restore, (3) Automated prompt injection |
+| Background Parallel Reviews | HIGH | Run external model reviews in background during workflow, not just at commit. Trigger on file save, cache results, notify when complete. Reviews should run continuously as code is written. |
+| Fix OpenAI Model Configuration | HIGH | OpenAI models (gpt-5.2-max, codex) fail in litellm due to model naming format. Need to update `src/review/models.py` to use correct litellm format (e.g., `openai/gpt-4` not `gpt-5.2-max`). |
+| Use CLI Tools for Reviews | HIGH | Use Gemini CLI (aistudio) and Codex CLI for reviews instead of API - they have better repo context because they can browse files directly. Update ReviewOrchestrator to shell out to CLI tools. |
 | ~~Fix Phase 3 Security Issues~~ | ~~HIGH~~ | **COMPLETE** - See "Phase 3 Security Remediation" section below |
 | Write spec-driven tests for Phase 3 | MEDIUM | Existing tests were written post-implementation; add TDD-style tests from spec |
 | Artifact signing/attestation | MEDIUM | Prevent manifest tampering |
