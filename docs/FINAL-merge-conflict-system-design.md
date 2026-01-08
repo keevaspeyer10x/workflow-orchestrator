@@ -25,6 +25,8 @@
 14. [New Modules to Implement](#14-new-modules-to-implement)
 15. [Implementation Phases](#15-implementation-phases)
 16. [Testing Strategy](#16-testing-strategy)
+17. [Additional Features](#17-additional-features-from-design-review)
+18. [Operational Resilience](#18-operational-resilience-from-ai-reviews)
 
 ---
 
@@ -365,6 +367,345 @@ SENSITIVE_PATTERNS = [
 ]
 ```
 
+### 4.4 Additional Security Hardening (from review feedback)
+
+**Artifact Validation (DoS Prevention):**
+
+```python
+ARTIFACT_LIMITS = {
+    "max_manifest_size_kb": 100,      # Manifests should be small
+    "max_artifact_count": 10,         # Per agent
+    "allowed_mime_types": ["application/json"],
+    "branch_name_pattern": r"^claude/[a-z0-9-]+$",  # Strict allowlist
+}
+
+def validate_artifact(artifact: bytes, metadata: dict) -> bool:
+    """Validate artifact before processing."""
+    if len(artifact) > ARTIFACT_LIMITS["max_manifest_size_kb"] * 1024:
+        raise SecurityError("Artifact exceeds size limit")
+
+    # Never execute manifest contents - treat as pure data
+    try:
+        data = json.loads(artifact)  # Parse only, never eval
+    except json.JSONDecodeError:
+        raise SecurityError("Invalid JSON in artifact")
+
+    return True
+```
+
+**Coordinator Clone Hardening:**
+
+```yaml
+# In coordinator workflow, use shallow clone without tags
+- name: Checkout default branch (trusted code)
+  uses: actions/checkout@v4
+  with:
+    ref: main
+    fetch-depth: 1        # Shallow clone
+    fetch-tags: false     # No tags from agent branches
+```
+
+**Disable Workflows on Agent Branches:**
+
+```yaml
+# .github/workflows/ci.yml - Add condition to skip agent branches
+jobs:
+  build:
+    if: "!startsWith(github.ref, 'refs/heads/claude/')"
+    # ... rest of job
+```
+
+**Artifact Signing (Optional, for high-security environments):**
+
+```python
+def sign_artifact(artifact: bytes, key: bytes) -> str:
+    """Sign artifact for integrity verification."""
+    import hmac
+    import hashlib
+    return hmac.new(key, artifact, hashlib.sha256).hexdigest()
+
+def verify_artifact(artifact: bytes, signature: str, key: bytes) -> bool:
+    """Verify artifact signature."""
+    expected = sign_artifact(artifact, key)
+    return hmac.compare_digest(expected, signature)
+```
+
+**Manifest Cross-Linking (Replay Protection):**
+
+```json
+{
+  "manifest_id": "unique-random-token",
+  "branch_sha": "abc123",
+  "created_at": "2026-01-07T10:00:00Z",
+  "expires_at": "2026-01-08T10:00:00Z",
+  "single_use": true
+}
+```
+
+### 4.5 Container Isolation for Stage-0 Builds (from Gemini/ChatGPT o3/Grok reviews)
+
+**CRITICAL: Stage-0 builds run untrusted agent code. Must be sandboxed.**
+
+The temporary merge build/test step executes arbitrary code from agent branches. A malicious or buggy agent could:
+- `rm -rf $GITHUB_WORKSPACE` - corrupt other agents' artifacts
+- Exfiltrate `GITHUB_TOKEN` if available
+- Write malicious files to `.ssh/` or `.github/workflows/`
+
+**Solution: Containerized Build Environment**
+
+```yaml
+# In coordinator workflow - Stage-0 build/test
+- name: Run Stage-0 Build in Sandbox
+  uses: docker/build-push-action@v5
+  with:
+    context: .
+    file: .claude/Dockerfile.sandbox
+    push: false
+    tags: stage0-build:${{ github.sha }}
+
+- name: Execute Sandboxed Build/Test
+  run: |
+    docker run --rm \
+      --network=none \                    # No network access
+      --cap-drop=ALL \                    # Drop all capabilities
+      --security-opt=no-new-privileges \  # Prevent privilege escalation
+      --read-only \                       # Read-only filesystem
+      --tmpfs /tmp:size=512M \            # Limited temp space
+      --memory=2g \                       # Memory limit
+      --cpus=2 \                          # CPU limit
+      -v "$(pwd):/workspace:ro" \         # Read-only source
+      -v "/tmp/build-output:/output" \    # Write-only output
+      stage0-build:${{ github.sha }} \
+      /workspace/.claude/scripts/build-test.sh
+```
+
+```dockerfile
+# .claude/Dockerfile.sandbox
+FROM node:20-slim AS sandbox
+
+# Minimal tools only
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Non-root user
+RUN useradd -m -s /bin/bash sandbox
+USER sandbox
+
+WORKDIR /workspace
+
+# No secrets in image
+# No network in runtime
+# Read-only source mount
+```
+
+**Network Isolation:**
+
+```yaml
+# Allow only package registry access
+sandbox_network:
+  allowed_hosts:
+    - "registry.npmjs.org"
+    - "pypi.org"
+    - "files.pythonhosted.org"
+  denied_hosts:
+    - "*"  # Block everything else
+```
+
+### 4.6 Rate Limiting and DoS Prevention (from Grok 4.1 review)
+
+**Problem:** Malicious actors could flood `claude/**` pushes to exhaust GitHub Actions minutes.
+
+**Solution: Multi-layer Rate Limiting**
+
+```yaml
+# Workflow A: Add rate limit check before dispatch
+- name: Rate Limit Check
+  id: rate_check
+  run: |
+    # Count dispatches in last hour
+    DISPATCH_COUNT=$(gh api repos/${{ github.repository }}/actions/runs \
+      --jq '[.workflow_runs[] | select(.created_at > (now - 3600 | todate))] | length')
+
+    if [ "$DISPATCH_COUNT" -gt 50 ]; then
+      echo "::warning::Rate limit exceeded - skipping dispatch"
+      echo "skip=true" >> $GITHUB_OUTPUT
+    else
+      echo "skip=false" >> $GITHUB_OUTPUT
+    fi
+
+- name: Notify Coordinator
+  if: steps.rate_check.outputs.skip != 'true'
+  run: |
+    # Dispatch event...
+```
+
+```python
+class RateLimiter:
+    """Multi-tier rate limiting for coordinator."""
+
+    LIMITS = {
+        "per_minute": 10,      # Max dispatches per minute
+        "per_hour": 100,       # Max per hour
+        "per_agent": 20,       # Max per agent per hour
+        "concurrent": 5,       # Max concurrent builds
+    }
+
+    def __init__(self):
+        self.redis = Redis()  # Or use GitHub Actions cache
+
+    def check_rate_limit(self, agent_id: str) -> RateLimitResult:
+        """Check if request should be rate limited."""
+        now = time.time()
+
+        # Check per-minute limit
+        minute_key = f"rate:minute:{int(now / 60)}"
+        minute_count = self.redis.incr(minute_key)
+        self.redis.expire(minute_key, 120)
+
+        if minute_count > self.LIMITS["per_minute"]:
+            return RateLimitResult(
+                allowed=False,
+                reason="per_minute_exceeded",
+                retry_after=60 - (now % 60)
+            )
+
+        # Check per-agent limit
+        agent_key = f"rate:agent:{agent_id}:{int(now / 3600)}"
+        agent_count = self.redis.incr(agent_key)
+        self.redis.expire(agent_key, 7200)
+
+        if agent_count > self.LIMITS["per_agent"]:
+            return RateLimitResult(
+                allowed=False,
+                reason="agent_limit_exceeded",
+                retry_after=3600 - (now % 3600)
+            )
+
+        return RateLimitResult(allowed=True)
+
+class BackPressureController:
+    """Prevent resource exhaustion via back-pressure."""
+
+    def __init__(self, max_queue_size: int = 50):
+        self.max_queue_size = max_queue_size
+        self.queue = PriorityQueue()
+
+    def enqueue_or_reject(self, request: CoordinatorRequest) -> bool:
+        """Add request to queue or reject if overloaded."""
+        if self.queue.qsize() >= self.max_queue_size:
+            # Reject with back-pressure signal
+            return False
+
+        # Priority: high-risk conflicts first, then FIFO
+        priority = self._calculate_priority(request)
+        self.queue.put((priority, request))
+        return True
+```
+
+### 4.7 Cryptographic Manifest Attestation (from ChatGPT o3/Grok reviews)
+
+**Problem:** Any agent can upload another agent's manifest ID with different data (confused deputy attack).
+
+**Solution: Signed Manifests with SHA Binding**
+
+```python
+import hashlib
+import hmac
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ed25519
+
+class ManifestAttestor:
+    """Cryptographically attest manifest integrity."""
+
+    def __init__(self, private_key: ed25519.Ed25519PrivateKey):
+        self.private_key = private_key
+        self.public_key = private_key.public_key()
+
+    def create_attestation(self,
+                           manifest: dict,
+                           branch_sha: str) -> Attestation:
+        """
+        Create cryptographic attestation binding:
+        - Manifest content hash
+        - Branch SHA at time of creation
+        - Timestamp
+        - Coordinator signature
+        """
+        # Canonical JSON encoding
+        manifest_bytes = json.dumps(manifest, sort_keys=True).encode()
+        manifest_hash = hashlib.sha256(manifest_bytes).hexdigest()
+
+        # Attestation payload
+        payload = {
+            "manifest_hash": manifest_hash,
+            "branch_sha": branch_sha,
+            "created_at": datetime.utcnow().isoformat(),
+            "coordinator_id": os.getenv("COORDINATOR_ID"),
+        }
+        payload_bytes = json.dumps(payload, sort_keys=True).encode()
+
+        # Sign with coordinator's private key
+        signature = self.private_key.sign(payload_bytes)
+
+        return Attestation(
+            payload=payload,
+            signature=signature.hex(),
+            public_key=self.public_key.public_bytes_raw().hex()
+        )
+
+    def verify_attestation(self,
+                           manifest: dict,
+                           attestation: Attestation,
+                           expected_sha: str) -> VerificationResult:
+        """Verify attestation before using manifest."""
+        # Verify signature
+        payload_bytes = json.dumps(attestation.payload, sort_keys=True).encode()
+        try:
+            self.public_key.verify(
+                bytes.fromhex(attestation.signature),
+                payload_bytes
+            )
+        except Exception:
+            return VerificationResult(valid=False, reason="invalid_signature")
+
+        # Verify SHA matches
+        if attestation.payload["branch_sha"] != expected_sha:
+            return VerificationResult(
+                valid=False,
+                reason="sha_mismatch",
+                details=f"Expected {expected_sha}, got {attestation.payload['branch_sha']}"
+            )
+
+        # Verify manifest hash
+        manifest_bytes = json.dumps(manifest, sort_keys=True).encode()
+        actual_hash = hashlib.sha256(manifest_bytes).hexdigest()
+        if actual_hash != attestation.payload["manifest_hash"]:
+            return VerificationResult(valid=False, reason="manifest_tampered")
+
+        return VerificationResult(valid=True)
+
+@dataclass
+class Attestation:
+    """Cryptographic attestation for manifest."""
+    payload: dict
+    signature: str
+    public_key: str
+```
+
+**Artifact Naming with SHA Binding:**
+
+```yaml
+# When uploading manifest artifact
+- name: Upload Manifest with SHA Binding
+  uses: actions/upload-artifact@v4
+  with:
+    # Include SHA in artifact name for integrity
+    name: manifest-${{ github.sha }}-${{ hashFiles('manifest.json') }}
+    path: manifest.json
+    retention-days: 7
+```
+
 ---
 
 ## 5. Agent Registration & Tracking
@@ -482,6 +823,115 @@ class AgentRegistry:
 
     def cleanup_stale_agents(self, max_age_hours: int = 72):
         """Remove agents that have been inactive too long."""
+```
+
+### 5.4 Agent Completion Detection (from design review)
+
+**CRITICAL: How do we know an agent is "done"?**
+
+Claude Web/CLI don't have a "done" button - users just stop responding or close the tab. The system must infer completion.
+
+```python
+class CompletionDetector:
+    """
+    Detect when an agent has completed its work.
+
+    Problem: No explicit "done" signal from Claude Web/CLI.
+    Solution: Multi-signal heuristic approach.
+    """
+
+    COMPLETION_SIGNALS = {
+        "explicit_marker": 10,      # .claude-complete file or [COMPLETE] in commit
+        "tests_pass": 3,            # All tests pass on branch
+        "no_wip_commits": 2,        # No "WIP", "fixup", "squash" in recent commits
+        "inactivity": 1,            # No commits for threshold period
+        "pr_ready_marker": 5,       # Branch has PR-ready indicators
+    }
+
+    COMPLETION_THRESHOLD = 5  # Sum of signals needed to consider complete
+
+    def detect_completion(self, agent: AgentInfo) -> CompletionStatus:
+        """
+        Determine if agent work is complete.
+
+        Returns:
+            CompletionStatus with confidence score and signals detected
+        """
+        signals = []
+        score = 0
+
+        # Signal 1: Explicit completion marker
+        if self._has_completion_marker(agent.branch):
+            signals.append("explicit_marker")
+            score += self.COMPLETION_SIGNALS["explicit_marker"]
+
+        # Signal 2: Tests pass
+        if self._tests_pass(agent.branch):
+            signals.append("tests_pass")
+            score += self.COMPLETION_SIGNALS["tests_pass"]
+
+        # Signal 3: No WIP commits
+        if not self._has_wip_commits(agent.branch):
+            signals.append("no_wip_commits")
+            score += self.COMPLETION_SIGNALS["no_wip_commits"]
+
+        # Signal 4: Inactivity threshold
+        if self._inactive_for(agent, hours=4):
+            signals.append("inactivity")
+            score += self.COMPLETION_SIGNALS["inactivity"]
+
+        # Signal 5: PR-ready indicators (clean history, good commit messages)
+        if self._is_pr_ready(agent.branch):
+            signals.append("pr_ready_marker")
+            score += self.COMPLETION_SIGNALS["pr_ready_marker"]
+
+        return CompletionStatus(
+            is_complete=score >= self.COMPLETION_THRESHOLD,
+            confidence=min(score / 10.0, 1.0),
+            signals=signals,
+            score=score
+        )
+
+    def _has_completion_marker(self, branch: str) -> bool:
+        """Check for explicit completion signals."""
+        # Option A: .claude-complete file exists
+        # Option B: Last commit message contains [COMPLETE] or [DONE]
+        # Option C: Branch has specific tag
+        pass
+
+    def _has_wip_commits(self, branch: str) -> bool:
+        """Check if recent commits are WIP."""
+        wip_patterns = ["WIP", "wip", "fixup!", "squash!", "FIXME", "TODO"]
+        # Check last 3 commits
+        pass
+
+@dataclass
+class CompletionStatus:
+    """Result of completion detection."""
+    is_complete: bool
+    confidence: float  # 0.0 to 1.0
+    signals: List[str]
+    score: int
+```
+
+**Completion Signal Options for Agents:**
+
+| Signal Type | How Agent Triggers It | Reliability |
+|-------------|----------------------|-------------|
+| Explicit marker | Create `.claude-complete` file | HIGH |
+| Commit message | Include `[COMPLETE]` in final commit | HIGH |
+| Inactivity | Stop pushing commits | MEDIUM |
+| Tests pass | Ensure all tests pass | MEDIUM |
+| No WIP | Don't use WIP/fixup commits | LOW |
+
+**Recommended Agent Behavior:**
+
+Agents should be instructed to signal completion explicitly:
+```
+When you have finished implementing the feature:
+1. Ensure all tests pass
+2. Create a final commit with "[COMPLETE]" in the message
+3. Or create a .claude-complete file with summary of work done
 ```
 
 ---
@@ -632,6 +1082,235 @@ def cluster_conflicts(agents: List[AgentInfo]) -> List[ConflictCluster]:
     5. Order clusters by dependencies
     """
     pass
+```
+
+### 6.4 Scalability for 50+ Agents (from review feedback)
+
+**Problem:** Naive pairwise merge-tree checks scale O(n²) for n agents.
+
+**Solution: Pre-clustering by Repository Zones**
+
+```python
+# SCALABILITY CONSTANTS
+MAX_CONCURRENT_CLUSTERING = 10  # Max agents to cluster simultaneously
+CLUSTERING_BATCH_SIZE = 20      # Process in batches
+PRIORITY_QUEUE_ENABLED = True   # Prioritize high-risk or blocking conflicts
+
+class ScalableClusterer:
+    """Optimized clustering for large agent counts."""
+
+    def pre_cluster_by_zone(self, agents: List[AgentInfo]) -> Dict[str, List[AgentInfo]]:
+        """
+        Pre-cluster agents by repository zone BEFORE pairwise analysis.
+        Reduces O(n²) to O(n²/k²) where k is number of zones.
+
+        Zone examples:
+        - Monorepo packages: packages/auth/**, packages/api/**
+        - Domain areas: src/auth/**, src/db/**, src/api/**
+        - Module boundaries: defined in CODEOWNERS or config
+        """
+        zones = defaultdict(list)
+
+        for agent in agents:
+            # Determine zone from modified files
+            primary_zone = self._infer_zone(agent.derived_changes["files_modified"])
+            zones[primary_zone].append(agent)
+
+        return zones
+
+    def cluster_with_limits(self,
+                            agents: List[AgentInfo],
+                            max_batch: int = CLUSTERING_BATCH_SIZE) -> List[ConflictCluster]:
+        """
+        Cluster with concurrency limits and batching.
+        """
+        # Pre-cluster by zone first
+        zones = self.pre_cluster_by_zone(agents)
+
+        all_clusters = []
+
+        # Process each zone independently (parallelizable)
+        for zone_name, zone_agents in zones.items():
+            if len(zone_agents) <= max_batch:
+                # Small zone: cluster normally
+                clusters = cluster_conflicts(zone_agents)
+            else:
+                # Large zone: batch processing with priority queue
+                clusters = self._batch_cluster(zone_agents, max_batch)
+
+            all_clusters.extend(clusters)
+
+        # Final pass: check for cross-zone conflicts
+        cross_zone = self._find_cross_zone_conflicts(all_clusters)
+        all_clusters.extend(cross_zone)
+
+        return all_clusters
+
+    def _batch_cluster(self,
+                       agents: List[AgentInfo],
+                       batch_size: int) -> List[ConflictCluster]:
+        """Process large agent groups in batches with priority queue."""
+        # Sort by risk/priority
+        sorted_agents = sorted(agents, key=lambda a: a.risk_score, reverse=True)
+
+        clusters = []
+        processed = set()
+
+        for i in range(0, len(sorted_agents), batch_size):
+            batch = sorted_agents[i:i + batch_size]
+            batch_clusters = cluster_conflicts(batch)
+            clusters.extend(batch_clusters)
+
+        return clusters
+```
+
+**Concurrency Controls:**
+
+```yaml
+# In coordinator config
+clustering:
+  max_concurrent_agents: 50          # Hard limit
+  batch_size: 20                     # Process in batches
+  priority_queue: true               # High-risk first
+  zone_parallelism: 4                # Parallel zone processing
+  timeout_per_cluster_minutes: 30    # Fail-safe timeout
+```
+
+### 6.5 Graph-Based Clustering (from ChatGPT o3 review)
+
+**Problem:** Even with zone pre-clustering, pairwise merge-tree diffs are expensive.
+
+**Solution: File-Agent Bipartite Graph**
+
+Instead of N² pairwise comparisons, build a graph where:
+- Nodes = file paths
+- Edges = which agent modifies which file
+
+Connected components = conflict clusters. Complexity: O(N × average_files_per_agent).
+
+```python
+from collections import defaultdict
+from typing import Set, List, Dict
+
+class GraphBasedClusterer:
+    """
+    Build file-agent graph for O(N * files) clustering.
+    Avoids expensive pairwise git merge-tree checks.
+    """
+
+    def cluster_via_graph(self, agents: List[AgentInfo]) -> List[ConflictCluster]:
+        """
+        Build bipartite graph and find connected components.
+
+        Algorithm:
+        1. For each agent, get list of modified files
+        2. Build graph: file → set of agents that modify it
+        3. Find connected components (agents that share files)
+        4. Each component = one conflict cluster
+        """
+        # Build file → agents mapping
+        file_to_agents: Dict[str, Set[str]] = defaultdict(set)
+        agent_to_files: Dict[str, Set[str]] = {}
+
+        for agent in agents:
+            files = set(agent.derived_changes.get("files_modified", []))
+            agent_to_files[agent.agent_id] = files
+            for file in files:
+                file_to_agents[file].append(agent.agent_id)
+
+        # Find connected components via union-find
+        parent = {a.agent_id: a.agent_id for a in agents}
+
+        def find(x):
+            if parent[x] != x:
+                parent[x] = find(parent[x])
+            return parent[x]
+
+        def union(x, y):
+            px, py = find(x), find(y)
+            if px != py:
+                parent[px] = py
+
+        # Union agents that share any file
+        for file, agent_ids in file_to_agents.items():
+            agent_list = list(agent_ids)
+            for i in range(1, len(agent_list)):
+                union(agent_list[0], agent_list[i])
+
+        # Group by component
+        components: Dict[str, List[AgentInfo]] = defaultdict(list)
+        for agent in agents:
+            root = find(agent.agent_id)
+            components[root].append(agent)
+
+        # Convert to ConflictClusters
+        clusters = []
+        for root, cluster_agents in components.items():
+            if len(cluster_agents) == 1:
+                # Single agent = no conflict, skip clustering
+                continue
+
+            # Find shared files for this cluster
+            shared_files = set()
+            for agent in cluster_agents:
+                for file in agent_to_files[agent.agent_id]:
+                    if len(file_to_agents[file]) > 1:
+                        shared_files.add(file)
+
+            clusters.append(ConflictCluster(
+                cluster_id=f"cluster-{root[:8]}",
+                cluster_type="file_overlap",
+                agent_ids=[a.agent_id for a in cluster_agents],
+                shared_files=list(shared_files),
+                estimated_resolution_time=self._estimate_time(cluster_agents)
+            ))
+
+        return clusters
+
+    def _estimate_time(self, agents: List[AgentInfo]) -> str:
+        """Estimate resolution time based on cluster size and complexity."""
+        total_files = sum(len(a.derived_changes.get("files_modified", [])) for a in agents)
+        if len(agents) <= 2 and total_files <= 10:
+            return "fast"
+        elif len(agents) <= 5 and total_files <= 50:
+            return "medium"
+        else:
+            return "slow"
+```
+
+**Hybrid Approach (Best of Both):**
+
+```python
+class HybridClusterer:
+    """
+    Combine graph-based clustering with git merge-tree validation.
+
+    1. Fast pass: Graph-based clustering (O(N × files))
+    2. Validation: Only run merge-tree on flagged clusters
+    """
+
+    def cluster(self, agents: List[AgentInfo]) -> List[ConflictCluster]:
+        # Step 1: Fast graph-based clustering
+        graph_clusters = GraphBasedClusterer().cluster_via_graph(agents)
+
+        # Step 2: For each cluster, validate with actual git merge
+        validated_clusters = []
+        for cluster in graph_clusters:
+            # Only do expensive merge-tree check if cluster is complex
+            if cluster.estimated_resolution_time == "slow":
+                # Split large clusters based on actual merge conflicts
+                sub_clusters = self._validate_with_merge_tree(cluster)
+                validated_clusters.extend(sub_clusters)
+            else:
+                validated_clusters.append(cluster)
+
+        return validated_clusters
+
+    def _validate_with_merge_tree(self, cluster: ConflictCluster) -> List[ConflictCluster]:
+        """Use git merge-tree to validate/refine cluster."""
+        # Check if files actually have textual conflicts
+        # May split cluster if some agents don't actually conflict
+        pass
 ```
 
 ---
@@ -880,7 +1559,195 @@ class DependencyResolver:
         pass
 ```
 
-### 7.3 Feature Porting (When User Picks Winner)
+### 7.3 Pipeline Enhancements (from review feedback)
+
+**A) Fail-Fast Guards:**
+
+```python
+class PipelineGuards:
+    """Guards to fail fast and avoid wasted computation."""
+
+    def check_before_candidate_generation(self,
+                                           context: ConflictContext,
+                                           intents: IntentAnalysis) -> Optional[FailFastResult]:
+        """
+        Check if we should bail out before expensive candidate generation.
+        """
+        # Guard 1: No viable path detected
+        if intents.relationship == "incompatible" and intents.confidence > 0.9:
+            return FailFastResult(
+                reason="no_viable_merge",
+                action="escalate",
+                message="Intents are fundamentally incompatible - needs human decision"
+            )
+
+        # Guard 2: Too many files changed
+        if len(context.all_modified_files) > 500:
+            return FailFastResult(
+                reason="too_large",
+                action="escalate",
+                message="Change set too large for automated resolution"
+            )
+
+        # Guard 3: Critical files with low confidence
+        if context.has_critical_files and intents.confidence < 0.7:
+            return FailFastResult(
+                reason="critical_low_confidence",
+                action="escalate",
+                message="Critical files modified with uncertain intent"
+            )
+
+        return None  # Continue pipeline
+```
+
+**B) Conditional Fourth Strategy: "Minimal Merge"**
+
+```python
+# Add to candidate generation strategies
+CANDIDATE_STRATEGIES = {
+    "agent1_primary": "Keep Agent 1's architecture, adapt Agent 2's features",
+    "agent2_primary": "Keep Agent 2's architecture, adapt Agent 1's features",
+    "convention_primary": "Match existing repo patterns",
+    "minimal_merge": "Only merge shared intent, defer contested changes",  # NEW
+}
+
+def should_use_minimal_merge(conflict: ConflictClassification) -> bool:
+    """
+    Use minimal merge when semantic overlap is high but
+    neither architecture is clearly better.
+    """
+    return (
+        conflict.conflict_type == ConflictType.ARCHITECTURAL and
+        conflict.severity in [ConflictSeverity.HIGH, ConflictSeverity.CRITICAL] and
+        len(conflict.conflicting_symbols) > 10  # High overlap
+    )
+
+class MinimalMergeStrategy:
+    """
+    Conservative merge that only includes uncontested changes.
+    Contested changes are deferred for human review.
+    """
+
+    def generate(self, context: ConflictContext) -> ResolutionCandidate:
+        # Find uncontested changes (only one agent touched)
+        uncontested = self._find_uncontested_files(context)
+
+        # Merge only those
+        candidate = self._merge_files(uncontested)
+
+        # Mark contested changes for manual review
+        candidate.deferred_changes = context.all_modified_files - uncontested
+        candidate.requires_followup = True
+
+        return candidate
+```
+
+**C) Enhanced Flaky Test Handling:**
+
+```python
+class FlakyTestHandler:
+    """Advanced flaky test detection and handling."""
+
+    def __init__(self):
+        self.flaky_db = FlakyTestDatabase()  # Persisted flaky test history
+        self.retry_budget = 3  # Max retries per test
+
+    def run_with_flaky_handling(self,
+                                 tests: List[str],
+                                 candidate: ResolutionCandidate) -> TestResult:
+        """Run tests with intelligent flaky handling."""
+        results = {}
+        deterministic_seed = hash(candidate.candidate_id)  # Reproducible
+
+        for test in tests:
+            flaky_score = self.flaky_db.get_flakiness(test)
+
+            if flaky_score > 0.5:  # Known flaky
+                # Run multiple times with same seed
+                outcomes = []
+                for i in range(self.retry_budget):
+                    outcome = run_test(test, seed=deterministic_seed + i)
+                    outcomes.append(outcome)
+
+                # Majority vote
+                if outcomes.count("pass") > outcomes.count("fail"):
+                    results[test] = TestOutcome.PASS_FLAKY
+                else:
+                    results[test] = TestOutcome.FAIL_FLAKY
+            else:
+                # Normal test
+                results[test] = run_test(test, seed=deterministic_seed)
+
+        return TestResult(
+            outcomes=results,
+            flaky_tests=[t for t, r in results.items() if "FLAKY" in str(r)],
+            quarantined=self.flaky_db.get_quarantined_tests()
+        )
+
+    def update_flakiness(self, test: str, passed: bool, context: str):
+        """Update flakiness score based on outcome."""
+        self.flaky_db.record_outcome(test, passed, context)
+```
+
+**D) Intent Cross-Checking Against Diff Signals:**
+
+```python
+class IntentValidator:
+    """Cross-check LLM intent extraction against concrete signals."""
+
+    def validate_intent(self,
+                        extracted_intent: ExtractedIntent,
+                        diff_signals: DiffSignals) -> IntentValidation:
+        """
+        Compare LLM-extracted intent against diff-derived signals.
+        Reduces risk of intent mis-routing.
+        """
+        confidence_adjustments = []
+
+        # Check 1: Do modified filenames match intent keywords?
+        filename_match = self._check_filename_match(
+            extracted_intent.keywords,
+            diff_signals.modified_files
+        )
+        if not filename_match:
+            confidence_adjustments.append(("filename_mismatch", -0.2))
+
+        # Check 2: Do code symbols match intent?
+        symbol_match = self._check_symbol_match(
+            extracted_intent.domain,
+            diff_signals.new_symbols
+        )
+        if not symbol_match:
+            confidence_adjustments.append(("symbol_mismatch", -0.15))
+
+        # Check 3: Does commit message align?
+        if diff_signals.commit_message:
+            message_match = self._check_message_alignment(
+                extracted_intent.summary,
+                diff_signals.commit_message
+            )
+            if not message_match:
+                confidence_adjustments.append(("message_mismatch", -0.1))
+
+        # Adjust confidence
+        final_confidence = extracted_intent.confidence
+        for reason, adjustment in confidence_adjustments:
+            final_confidence += adjustment
+
+        # If confidence drops too low, flag for human review
+        needs_human_review = final_confidence < 0.6
+
+        return IntentValidation(
+            original_confidence=extracted_intent.confidence,
+            adjusted_confidence=final_confidence,
+            adjustments=confidence_adjustments,
+            needs_human_review=needs_human_review
+        )
+```
+
+---
+
+### 7.4 Feature Porting (When User Picks Winner)
 
 **CRITICAL: Don't orphan the losing feature**
 
@@ -1090,30 +1957,71 @@ class EscalationHandler:
             )
 ```
 
-### 8.4 Escalation Timeout Policy
+### 8.4 Escalation Timeout Policy (Enhanced from review feedback)
+
+**Policy-Based Timeouts:**
 
 ```python
+# Different timeouts for different urgency levels
+ESCALATION_TIMEOUT_POLICY = {
+    "critical": {
+        "reminder_hours": 4,
+        "timeout_hours": 24,
+        "auto_select": False,  # Never auto-select critical
+        "notify_channels": ["github", "slack", "email"],
+    },
+    "high": {
+        "reminder_hours": 12,
+        "timeout_hours": 48,
+        "auto_select": False,
+        "notify_channels": ["github", "slack"],
+    },
+    "standard": {
+        "reminder_hours": 24,
+        "timeout_hours": 72,
+        "auto_select": True,
+        "notify_channels": ["github"],
+    },
+    "low": {
+        "reminder_hours": 48,
+        "timeout_hours": 168,  # 1 week
+        "auto_select": True,
+        "notify_channels": ["github"],
+    },
+}
+
 class EscalationTimeout:
-    """Handle escalation timeouts."""
+    """Handle escalation timeouts with policy-based SLAs."""
+
+    def get_timeout_policy(self, escalation: Escalation) -> dict:
+        """Determine timeout policy based on escalation characteristics."""
+        if escalation.has_risk_flag("security") or escalation.has_risk_flag("payment"):
+            return ESCALATION_TIMEOUT_POLICY["critical"]
+        elif escalation.has_risk_flag("auth") or escalation.has_risk_flag("db_migration"):
+            return ESCALATION_TIMEOUT_POLICY["high"]
+        elif escalation.severity == ConflictSeverity.HIGH:
+            return ESCALATION_TIMEOUT_POLICY["standard"]
+        else:
+            return ESCALATION_TIMEOUT_POLICY["low"]
 
     def check_timeouts(self):
         """Check for escalations that need attention."""
 
         for escalation in self.get_pending_escalations():
+            policy = self.get_timeout_policy(escalation)
             age_hours = escalation.age_in_hours()
 
-            # Reminder at 24 hours
-            if age_hours >= 24 and not escalation.reminder_sent:
-                self.send_reminder(escalation)
+            # Reminder at policy-defined time
+            if age_hours >= policy["reminder_hours"] and not escalation.reminder_sent:
+                self.send_reminder(escalation, policy["notify_channels"])
 
-            # Auto-select at 72 hours (configurable)
-            if age_hours >= 72:
-                if escalation.is_high_risk():
-                    # High risk: keep waiting, send urgent reminder
-                    self.send_urgent_reminder(escalation)
-                else:
-                    # Low risk: auto-select recommendation
+            # Timeout at policy-defined time
+            if age_hours >= policy["timeout_hours"]:
+                if policy["auto_select"]:
                     self.auto_select_recommendation(escalation)
+                else:
+                    # Escalate to team channel for urgent attention
+                    self.send_urgent_escalation(escalation)
 
     def auto_select_recommendation(self, escalation: Escalation):
         """
@@ -1124,8 +2032,21 @@ class EscalationTimeout:
         - Add "auto-selected" label
         - Include revert instructions
         - Notify user
+        - Log to audit trail
         """
         pass
+
+    def handle_non_responsive_user(self, escalation: Escalation):
+        """
+        For users who never respond, escalate to default policy.
+        """
+        if escalation.reminder_count >= 3:
+            # After 3 reminders, notify team channel
+            self.notify_team_channel(
+                f"Escalation {escalation.id} has no response after "
+                f"{escalation.reminder_count} reminders. "
+                f"Auto-selecting recommendation per policy."
+            )
 ```
 
 ---
@@ -1248,6 +2169,526 @@ class PRDExecutor:
 
         # Final PR
         self.create_final_pr()
+```
+
+### 9.4 Rollback Strategy (from design review)
+
+**CRITICAL: What if a merged PR breaks production?**
+
+The system needs a clear rollback path, not just forward progress.
+
+```python
+class RollbackManager:
+    """
+    Handle rollbacks when merged PRs cause issues.
+
+    Key capabilities:
+    - Track which commits came from which agent
+    - Support selective revert of individual agent contributions
+    - Maintain "known good" checkpoints
+    """
+
+    def __init__(self):
+        self.checkpoints = CheckpointStore()
+        self.agent_commit_map = AgentCommitMap()
+
+    def create_checkpoint(self, branch: str, description: str) -> Checkpoint:
+        """
+        Create a known-good checkpoint before risky operations.
+
+        Called:
+        - Before merging any resolution
+        - After successful test suite
+        - At PRD wave boundaries
+        """
+        return Checkpoint(
+            sha=get_current_sha(branch),
+            branch=branch,
+            created_at=datetime.utcnow(),
+            description=description,
+            tests_passed=True
+        )
+
+    def rollback_to_checkpoint(self, checkpoint: Checkpoint) -> RollbackResult:
+        """
+        Rollback to a known-good checkpoint.
+
+        Steps:
+        1. Create backup of current state
+        2. Reset to checkpoint SHA
+        3. Force push (with safety checks)
+        4. Notify affected agents
+        """
+        pass
+
+    def rollback_agent_contribution(self,
+                                     agent_id: str,
+                                     preserve_others: bool = True) -> RollbackResult:
+        """
+        Selectively revert one agent's work while preserving others.
+
+        Useful when:
+        - One agent's code causes issues
+        - Need to re-do one feature without losing others
+        """
+        # Get all commits from this agent
+        agent_commits = self.agent_commit_map.get_commits(agent_id)
+
+        if preserve_others:
+            # Revert only agent's commits (may create conflicts)
+            return self._selective_revert(agent_commits)
+        else:
+            # Full rollback to before agent's first commit
+            return self._rollback_to_before(agent_commits[0])
+
+    def identify_breaking_agent(self, failure: TestFailure) -> Optional[str]:
+        """
+        Use git bisect-like approach to identify which agent's
+        contribution caused a failure.
+        """
+        # Binary search through merge order
+        pass
+
+@dataclass
+class Checkpoint:
+    """A known-good state we can rollback to."""
+    sha: str
+    branch: str
+    created_at: datetime
+    description: str
+    tests_passed: bool
+    agent_ids_included: List[str] = field(default_factory=list)
+
+@dataclass
+class AgentCommitMap:
+    """Track which commits came from which agent."""
+    # Maps commit SHA -> agent_id
+    commit_to_agent: Dict[str, str] = field(default_factory=dict)
+
+    def record_merge(self, agent_id: str, commits: List[str]):
+        """Record commits from an agent merge."""
+        for commit in commits:
+            self.commit_to_agent[commit] = agent_id
+```
+
+**Rollback Triggers:**
+
+| Trigger | Action | Automation Level |
+|---------|--------|------------------|
+| Tests fail after merge | Auto-rollback to last checkpoint | AUTOMATIC |
+| Production error detected | Alert + manual rollback option | MANUAL |
+| User requests rollback | Provide rollback UI | MANUAL |
+| CI/CD pipeline fails | Block merge, no rollback needed | AUTOMATIC |
+
+**Checkpoint Strategy:**
+
+```yaml
+# .claude/config.yaml
+rollback:
+  # When to create checkpoints
+  checkpoint_triggers:
+    - before_any_merge
+    - after_successful_tests
+    - at_wave_boundaries
+    - before_auto_merge_to_main
+
+  # How many checkpoints to keep
+  max_checkpoints: 20
+  checkpoint_retention_days: 30
+
+  # Auto-rollback settings
+  auto_rollback:
+    enabled: true
+    triggers:
+      - test_failure
+      - build_failure
+    notify_on_rollback: true
+```
+
+### 9.5 Edge Cases Handling (from design review)
+
+**Edge Case 1: Agent A depends on Agent B's incomplete work**
+
+```python
+class DependencyConflictDetector:
+    """Detect when one agent mocked/stubbed another's incomplete API."""
+
+    def detect_mock_mismatch(self,
+                              agent_a: AgentInfo,
+                              agent_b: AgentInfo) -> Optional[MockMismatch]:
+        """
+        Scenario: Agent A needs Agent B's API, but B isn't done.
+        A mocks it. B finishes with different API signature.
+
+        Detection:
+        1. Find mocks/stubs in A's code
+        2. Find actual implementations in B's code
+        3. Compare signatures
+        """
+        a_mocks = self._extract_mocks(agent_a.branch)
+        b_implementations = self._extract_implementations(agent_b.branch)
+
+        mismatches = []
+        for mock in a_mocks:
+            impl = b_implementations.get(mock.target)
+            if impl and not self._signatures_match(mock, impl):
+                mismatches.append(MockMismatch(
+                    mock=mock,
+                    implementation=impl,
+                    agent_a=agent_a.agent_id,
+                    agent_b=agent_b.agent_id
+                ))
+
+        return mismatches if mismatches else None
+```
+
+**Edge Case 2: Same name, different location (semantic duplicate)**
+
+```python
+class SemanticDuplicateDetector:
+    """
+    Detect when two agents create same-named symbols in different locations.
+    Git merges cleanly but runtime breaks (duplicate function).
+    """
+
+    def detect_duplicates(self, merged_branch: str) -> List[SemanticDuplicate]:
+        """
+        Scenario: Agent A adds getUserId() at line 50.
+        Agent B adds getUserId() at line 200.
+        Git says "clean merge". Runtime: duplicate function error.
+        """
+        # Parse AST of merged code
+        # Find all symbol definitions
+        # Check for duplicates
+        pass
+```
+
+**Edge Case 3: Circular resolution dependencies**
+
+```python
+class CircularDependencyDetector:
+    """
+    Detect when resolution order creates circular dependency.
+
+    Scenario: Resolving A+B requires knowing C+D result.
+    But resolving C+D requires knowing A+B result.
+    """
+
+    def detect_circular_dependencies(self,
+                                      clusters: List[ConflictCluster]) -> List[Cycle]:
+        """Build resolution dependency graph and find cycles."""
+        graph = self._build_resolution_graph(clusters)
+        return self._find_cycles(graph)
+
+    def break_cycle(self, cycle: Cycle) -> ResolutionOrder:
+        """
+        Break circular dependency by:
+        1. Finding lowest-risk cluster to resolve first
+        2. Using "provisional" resolution
+        3. Re-validating after all resolved
+        """
+        pass
+```
+
+**Edge Case 4: All candidates fail validation**
+
+```python
+class AllCandidatesFailedHandler:
+    """Handle the case when no resolution candidate passes validation."""
+
+    def handle_all_failed(self,
+                          conflict: ConflictContext,
+                          candidates: List[ResolutionCandidate],
+                          failures: List[ValidationFailure]) -> Resolution:
+        """
+        When all candidates fail:
+        1. Analyze failure patterns
+        2. Try "minimal merge" (only uncontested changes)
+        3. If still fails, escalate with detailed diagnostics
+        """
+        # Analyze what's failing
+        common_failures = self._find_common_failures(failures)
+
+        # Try minimal merge
+        minimal = self._generate_minimal_candidate(conflict)
+        if self._validate(minimal):
+            return Resolution(
+                candidate=minimal,
+                type="minimal_fallback",
+                warning="Used minimal merge - some changes deferred"
+            )
+
+        # Escalate with detailed info
+        return Resolution(
+            candidate=None,
+            type="escalate",
+            escalation=Escalation(
+                reason="all_candidates_failed",
+                details=self._format_failure_details(failures),
+                suggested_action="manual_resolution"
+            )
+        )
+```
+
+### 9.6 Merge Queue for Main Branch (from Gemini review)
+
+**Problem:** Race condition where main branch updates while resolution is in progress.
+
+The design identifies this race but the solution is vague. In a highly active repo, constant rebase-and-revalidate can cause "livelock" - the coordinator never completes before main changes again.
+
+**Solution: Serialized Merge Queue**
+
+```python
+class MergeQueue:
+    """
+    Serialize final merges to main branch.
+
+    Instead of directly merging to main (race-prone), resolutions
+    are placed in a queue. A separate, single-threaded worker
+    processes the queue one at a time.
+    """
+
+    def __init__(self):
+        self.queue: List[QueuedMerge] = []
+        self.lock = threading.Lock()
+        self.processing = False
+
+    def enqueue(self, resolution: Resolution, branch: str) -> QueueEntry:
+        """Add validated resolution to merge queue."""
+        entry = QueueEntry(
+            id=generate_id(),
+            resolution=resolution,
+            branch=branch,
+            enqueued_at=datetime.utcnow(),
+            status="pending"
+        )
+
+        with self.lock:
+            self.queue.append(entry)
+            self._notify_queue_update()
+
+        return entry
+
+    def process_queue(self):
+        """
+        Process queue entries one at a time.
+
+        Run as a separate workflow or cron job.
+        Single-threaded to prevent race conditions.
+        """
+        while True:
+            entry = self._get_next_pending()
+            if not entry:
+                time.sleep(5)  # Poll interval
+                continue
+
+            try:
+                entry.status = "processing"
+
+                # Fast-forward check - is main still at expected base?
+                if not self._can_fast_forward(entry):
+                    # Rebase and revalidate
+                    if not self._rebase_and_validate(entry):
+                        entry.status = "needs_rebase"
+                        continue
+
+                # Perform the merge
+                self._merge_to_main(entry)
+                entry.status = "merged"
+
+            except Exception as e:
+                entry.status = "failed"
+                entry.error = str(e)
+                self._notify_failure(entry)
+
+    def _can_fast_forward(self, entry: QueueEntry) -> bool:
+        """Check if merge would be a fast-forward (no conflicts)."""
+        current_main = git_rev_parse("main")
+        return entry.resolution.base_sha == current_main
+
+    def _rebase_and_validate(self, entry: QueueEntry) -> bool:
+        """Rebase resolution onto current main and revalidate."""
+        # Rebase
+        if not git_rebase(entry.branch, "main"):
+            return False
+
+        # Run quick validation (tests already passed before queuing)
+        return self._quick_validate(entry.branch)
+
+@dataclass
+class QueueEntry:
+    """An entry in the merge queue."""
+    id: str
+    resolution: Resolution
+    branch: str
+    enqueued_at: datetime
+    status: str  # pending, processing, merged, failed, needs_rebase
+    error: Optional[str] = None
+    processed_at: Optional[datetime] = None
+```
+
+**GitHub Actions Merge Queue Workflow:**
+
+```yaml
+# .github/workflows/merge-queue.yml
+name: Merge Queue Processor
+
+on:
+  schedule:
+    - cron: '* * * * *'  # Every minute
+  workflow_dispatch:
+
+concurrency:
+  group: merge-queue-${{ github.repository }}
+  cancel-in-progress: false  # Never cancel - single processor
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Process Merge Queue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python -m orchestrator.merge_queue process --single
+```
+
+### 9.7 Kill Switch (from Gemini/ChatGPT o3 reviews)
+
+**Problem:** No mechanism for admins to immediately halt the coordination system.
+
+If the coordinator goes rogue (infinite loop, bad resolutions, cost overrun), there's no clearly defined way to stop it.
+
+**Solution: Multi-Level Kill Switch**
+
+```python
+class KillSwitch:
+    """
+    Emergency stop mechanism for the coordination system.
+
+    Levels:
+    1. PAUSE - Stop processing new work, complete in-progress
+    2. STOP - Cancel in-progress work, archive branches
+    3. EMERGENCY - Immediate halt, may leave inconsistent state
+    """
+
+    KILL_SWITCH_FILE = ".claude/KILL_SWITCH"
+    KILL_SWITCH_LABEL = "stop-claude"
+
+    @classmethod
+    def check_kill_switch(cls) -> Optional[KillSwitchStatus]:
+        """Check if kill switch is engaged. Call at start of every operation."""
+        # Check 1: File-based kill switch
+        if Path(cls.KILL_SWITCH_FILE).exists():
+            content = Path(cls.KILL_SWITCH_FILE).read_text()
+            return KillSwitchStatus(
+                engaged=True,
+                level=content.strip().upper() or "PAUSE",
+                source="file"
+            )
+
+        # Check 2: GitHub issue/PR with kill switch label
+        if cls._has_kill_switch_label():
+            return KillSwitchStatus(
+                engaged=True,
+                level="STOP",
+                source="github_label"
+            )
+
+        # Check 3: Environment variable
+        if os.getenv("CLAUDE_KILL_SWITCH"):
+            return KillSwitchStatus(
+                engaged=True,
+                level=os.getenv("CLAUDE_KILL_SWITCH_LEVEL", "PAUSE"),
+                source="env"
+            )
+
+        return None
+
+    @classmethod
+    def _has_kill_switch_label(cls) -> bool:
+        """Check for kill switch label on any open issue/PR."""
+        # gh api repos/:owner/:repo/issues?labels=stop-claude
+        pass
+
+    @classmethod
+    def engage(cls, level: str, reason: str):
+        """Engage the kill switch."""
+        Path(cls.KILL_SWITCH_FILE).write_text(f"{level}\n{reason}\n{datetime.utcnow()}")
+        logging.critical(f"Kill switch engaged: {level} - {reason}")
+
+        # Create GitHub issue for visibility
+        cls._create_kill_switch_issue(level, reason)
+
+    @classmethod
+    def disengage(cls, operator: str):
+        """Disengage the kill switch (requires explicit action)."""
+        if Path(cls.KILL_SWITCH_FILE).exists():
+            Path(cls.KILL_SWITCH_FILE).unlink()
+
+        logging.info(f"Kill switch disengaged by {operator}")
+        cls._close_kill_switch_issue(operator)
+
+@dataclass
+class KillSwitchStatus:
+    """Current kill switch status."""
+    engaged: bool
+    level: str  # PAUSE, STOP, EMERGENCY
+    source: str  # file, github_label, env
+    message: Optional[str] = None
+```
+
+**Kill Switch Actions by Level:**
+
+| Level | In-Progress Work | New Work | Branches | Recovery |
+|-------|-----------------|----------|----------|----------|
+| PAUSE | Complete | Reject | Keep | Automatic when disengaged |
+| STOP | Cancel gracefully | Reject | Archive to `claude-archive/**` | Manual review required |
+| EMERGENCY | Immediate kill | Reject | Keep as-is | Manual cleanup required |
+
+**Integration with Coordinator:**
+
+```python
+class Coordinator:
+    def run(self):
+        # Check kill switch at start
+        kill_status = KillSwitch.check_kill_switch()
+        if kill_status:
+            logging.warning(f"Kill switch engaged: {kill_status}")
+            if kill_status.level == "PAUSE":
+                return {"status": "paused", "reason": kill_status.message}
+            elif kill_status.level == "STOP":
+                self._archive_in_progress_work()
+                return {"status": "stopped", "reason": kill_status.message}
+            else:  # EMERGENCY
+                sys.exit(1)
+
+        # Normal operation...
+        for step in self.pipeline:
+            # Check kill switch before each step
+            if KillSwitch.check_kill_switch():
+                self._handle_mid_operation_kill()
+                return
+            step.execute()
+```
+
+**CLI Commands:**
+
+```bash
+# Engage kill switch
+./orchestrator kill-switch engage --level=PAUSE --reason="Cost overrun"
+./orchestrator kill-switch engage --level=STOP --reason="Bad resolutions detected"
+
+# Check status
+./orchestrator kill-switch status
+
+# Disengage (requires confirmation)
+./orchestrator kill-switch disengage --operator="admin@example.com" --confirm
 ```
 
 ---
@@ -2029,6 +3470,169 @@ class ConfigAutoDetector:
         return config
 ```
 
+### 12.3 Operational Configuration (from review feedback)
+
+**Observability & Metrics:**
+
+```yaml
+# .claude/config.yaml (continued)
+
+# ============================================================================
+# OBSERVABILITY (from review feedback)
+# ============================================================================
+observability:
+  # Enable metrics collection
+  metrics_enabled: true
+
+  # Per-stage timing metrics
+  stage_metrics:
+    - stage: conflict_detection
+      timeout_minutes: 10
+      alert_threshold_minutes: 5
+    - stage: intent_extraction
+      timeout_minutes: 5
+      alert_threshold_minutes: 3
+    - stage: candidate_generation
+      timeout_minutes: 15
+      alert_threshold_minutes: 10
+    - stage: validation
+      timeout_minutes: 30
+      alert_threshold_minutes: 20
+    - stage: delivery
+      timeout_minutes: 5
+      alert_threshold_minutes: 2
+
+  # Export metrics to (optional)
+  export:
+    prometheus: false
+    statsd: false
+    cloudwatch: false
+
+# ============================================================================
+# COST CONTROLS (from review feedback)
+# ============================================================================
+cost_controls:
+  # Rate limits on agent operations
+  max_agents_per_hour: 50
+  max_resolution_attempts_per_day: 100
+
+  # LLM cost controls
+  max_tokens_per_resolution: 50000
+  prefer_cheaper_models: true  # Use haiku for simple tasks
+
+  # Test budget (prevent runaway test suites)
+  max_test_time_per_candidate_minutes: 10
+  skip_full_suite_if_targeted_passes: true
+
+# ============================================================================
+# CONCURRENCY CONTROLS (from review feedback)
+# ============================================================================
+concurrency:
+  # Coordinator race condition handling
+  use_github_environment_locks: true
+  lock_environment_name: "claude-coordinator"
+
+  # Prevent multiple coordinators running
+  coordinator_lock:
+    type: "github_concurrency"  # or "file_lock", "redis_lock"
+    timeout_minutes: 60
+    cancel_in_progress: false
+
+  # Agent branch protection
+  agent_branch_rules:
+    max_branches_per_agent: 5
+    stale_branch_cleanup_hours: 168  # 1 week
+
+# ============================================================================
+# AUDIT & TRACEABILITY (from review feedback)
+# ============================================================================
+audit:
+  # Link PRs to agent branches and manifests
+  include_agent_links_in_pr: true
+
+  # Audit log retention
+  log_retention_days: 90
+
+  # What to log
+  log_events:
+    - agent_registered
+    - conflict_detected
+    - resolution_started
+    - candidate_generated
+    - validation_passed
+    - validation_failed
+    - escalation_created
+    - escalation_resolved
+    - pr_created
+    - pr_merged
+```
+
+**Coordinator Concurrency Guard:**
+
+```python
+class CoordinatorLock:
+    """
+    Prevent multiple coordinator instances from running simultaneously.
+    Uses GitHub environment protection rules or external locking.
+    """
+
+    def __init__(self, config: dict):
+        self.lock_type = config.get("type", "github_concurrency")
+        self.timeout = config.get("timeout_minutes", 60)
+
+    async def acquire(self) -> bool:
+        """Acquire coordinator lock. Returns False if another instance is running."""
+        if self.lock_type == "github_concurrency":
+            # GitHub handles this via concurrency: group in workflow
+            return True
+        elif self.lock_type == "file_lock":
+            return self._acquire_file_lock()
+        elif self.lock_type == "redis_lock":
+            return await self._acquire_redis_lock()
+
+    async def release(self):
+        """Release coordinator lock."""
+        pass
+
+    def _check_for_race(self, main_sha_at_start: str, main_sha_now: str) -> bool:
+        """Check if main branch moved during resolution."""
+        return main_sha_at_start != main_sha_now
+```
+
+**Stage Metrics Collector:**
+
+```python
+class StageMetrics:
+    """Collect and export per-stage metrics."""
+
+    def __init__(self, config: dict):
+        self.enabled = config.get("metrics_enabled", True)
+        self.stage_configs = {s["stage"]: s for s in config.get("stage_metrics", [])}
+
+    @contextmanager
+    def track_stage(self, stage_name: str):
+        """Context manager to track stage duration."""
+        start_time = time.time()
+        try:
+            yield
+        finally:
+            duration = time.time() - start_time
+            self._record_metric(stage_name, duration)
+            self._check_timeout(stage_name, duration)
+
+    def _record_metric(self, stage: str, duration: float):
+        """Record metric for export."""
+        # Export to configured backends (prometheus, statsd, etc.)
+        pass
+
+    def _check_timeout(self, stage: str, duration: float):
+        """Check if stage exceeded timeout and alert if needed."""
+        config = self.stage_configs.get(stage, {})
+        timeout = config.get("timeout_minutes", 60) * 60
+        if duration > timeout:
+            self._alert_timeout(stage, duration, timeout)
+```
+
 ---
 
 ## 13. GitHub Actions Workflows
@@ -2580,6 +4184,1010 @@ class TestCoordinatorE2E:
 # └── manifests/
 #     ├── complete/             # Well-formed manifests
 #     └── incomplete/           # Edge case manifests
+```
+
+---
+
+## 17. Additional Features (from design review)
+
+### 17.1 Dry Run Mode
+
+**Purpose:** Build trust and enable testing without making actual changes.
+
+```python
+class DryRunCoordinator:
+    """
+    Run the full resolution pipeline without making any changes.
+
+    Benefits:
+    - Test configuration before enabling auto-merge
+    - Debug resolution logic
+    - Preview what would happen
+    - Build user confidence
+    """
+
+    def dry_run(self, agents: List[AgentInfo]) -> DryRunReport:
+        """
+        Execute full pipeline in dry-run mode.
+
+        Returns:
+        - What conflicts would be detected
+        - Which resolution strategy would be selected
+        - What the merged code would look like
+        - What PR would be created
+        - NO actual changes made
+        """
+        report = DryRunReport()
+
+        # Stage 0: Detect conflicts (read-only)
+        report.conflicts = self.detect_conflicts(agents)
+
+        # Stage 1-5: Resolution pipeline (in-memory only)
+        for conflict in report.conflicts:
+            resolution = self.resolve_in_memory(conflict)
+            report.resolutions.append(resolution)
+
+        # Stage 6: What PR would look like
+        report.pr_preview = self.generate_pr_preview(report.resolutions)
+
+        # Confidence assessment
+        report.overall_confidence = self.calculate_confidence(report)
+
+        return report
+
+@dataclass
+class DryRunReport:
+    """Report from dry-run execution."""
+    conflicts: List[ConflictClassification]
+    resolutions: List[ResolutionPreview]
+    pr_preview: PRPreview
+    overall_confidence: float
+    warnings: List[str]
+    would_escalate: bool
+    estimated_time_seconds: int
+```
+
+**CLI Usage:**
+
+```bash
+# Dry run before enabling auto-merge
+./orchestrator coordinate --dry-run
+
+# Output:
+# DRY RUN RESULTS
+# ===============
+# Detected: 3 conflicts
+# - auth vs checkout: TEXTUAL (auto-resolvable)
+# - products vs orders: SEMANTIC (would generate 3 candidates)
+# - admin vs config: NO CONFLICT (fast-path)
+#
+# Would create PR: "Merge 4 agent features"
+# Confidence: 85%
+# Estimated time: 45 seconds
+#
+# No changes made. Run without --dry-run to execute.
+```
+
+### 17.2 Resolution Confidence in PRs
+
+**Purpose:** Help human reviewers focus attention where it matters.
+
+```python
+class PRConfidenceAnnotator:
+    """Add confidence scores to PR descriptions and code comments."""
+
+    def annotate_pr(self, pr: PullRequest, resolution: Resolution) -> PullRequest:
+        """
+        Add confidence metadata to PR.
+
+        Includes:
+        - Overall resolution confidence
+        - Per-file confidence (which files need more scrutiny)
+        - Intent extraction confidence
+        - Risk flags
+        """
+        confidence_section = f"""
+## Resolution Confidence
+
+| Metric | Score | Notes |
+|--------|-------|-------|
+| Overall | {resolution.confidence:.0%} | {self._confidence_note(resolution.confidence)} |
+| Intent Extraction | {resolution.intent_confidence:.0%} | {resolution.intent_notes} |
+| Candidate Selection | {resolution.candidate_confidence:.0%} | Strategy: {resolution.strategy} |
+| Test Coverage | {resolution.test_confidence:.0%} | {resolution.test_notes} |
+
+### Files Needing Extra Review
+
+{self._format_low_confidence_files(resolution)}
+
+### Risk Flags
+
+{self._format_risk_flags(resolution)}
+"""
+        pr.body += confidence_section
+        return pr
+
+    def add_code_comments(self, pr: PullRequest, resolution: Resolution):
+        """Add inline comments on low-confidence sections."""
+        for file_result in resolution.file_results:
+            if file_result.confidence < 0.7:
+                self._add_review_comment(
+                    pr, file_result.path, file_result.line,
+                    f"⚠️ Low confidence ({file_result.confidence:.0%}): {file_result.reason}"
+                )
+```
+
+### 17.3 Veto Files Configuration
+
+**Purpose:** Ensure high-risk files always get human review.
+
+```yaml
+# .claude/config.yaml
+
+# Files that should NEVER be auto-resolved
+veto_files:
+  # Security-sensitive
+  - "src/core/security/**"
+  - "src/auth/**"
+  - "**/middleware/auth*"
+
+  # Database migrations (dangerous to auto-merge)
+  - "migrations/**"
+  - "**/*.sql"
+  - "**/schema.*"
+
+  # Configuration
+  - ".env*"
+  - "config/production.*"
+
+  # Payment/billing
+  - "**/payment/**"
+  - "**/billing/**"
+  - "**/stripe/**"
+
+# Files that trigger extra validation
+high_scrutiny_files:
+  - "package.json"
+  - "requirements.txt"
+  - "Dockerfile"
+  - ".github/workflows/**"
+```
+
+```python
+class VetoFileChecker:
+    """Check if any modified files are in the veto list."""
+
+    def check_veto(self, files: List[str], config: dict) -> VetoResult:
+        """
+        Check if resolution should be blocked due to veto files.
+
+        Returns:
+        - is_vetoed: Whether auto-resolution is blocked
+        - veto_files: Which files triggered the veto
+        - action: What to do (escalate, require_human_review)
+        """
+        veto_patterns = config.get("veto_files", [])
+        vetoed = []
+
+        for file in files:
+            for pattern in veto_patterns:
+                if fnmatch(file, pattern):
+                    vetoed.append((file, pattern))
+
+        if vetoed:
+            return VetoResult(
+                is_vetoed=True,
+                veto_files=vetoed,
+                action="require_human_review",
+                message=f"{len(vetoed)} files require human review"
+            )
+
+        return VetoResult(is_vetoed=False)
+```
+
+### 17.4 Conflict Prevention Feedback
+
+**Purpose:** Help agents learn to avoid future conflicts.
+
+```python
+class ConflictPreventionFeedback:
+    """
+    After resolution, send feedback to agents about how to
+    avoid similar conflicts in the future.
+    """
+
+    def generate_feedback(self,
+                          resolution: Resolution,
+                          agents: List[AgentInfo]) -> List[AgentFeedback]:
+        """
+        Generate actionable feedback for each agent.
+
+        Examples:
+        - "Your auth changes conflicted with checkout. Consider using shared session module."
+        - "Multiple agents added to package.json. Use dependency coordination API."
+        - "You and Agent B both created getUserId(). Check existing utilities first."
+        """
+        feedback = []
+
+        for agent in agents:
+            agent_feedback = AgentFeedback(agent_id=agent.agent_id)
+
+            # Analyze what this agent contributed to the conflict
+            contribution = self._analyze_contribution(agent, resolution)
+
+            # Generate specific advice
+            if contribution.type == "duplicate_code":
+                agent_feedback.add(
+                    f"You created {contribution.symbol} which already exists in "
+                    f"{contribution.existing_location}. Check existing code first."
+                )
+
+            if contribution.type == "dependency_conflict":
+                agent_feedback.add(
+                    f"Your package.json changes conflicted. For shared dependencies, "
+                    f"consider using the shared-deps API or coordinate with other agents."
+                )
+
+            if contribution.type == "interface_mismatch":
+                agent_feedback.add(
+                    f"Your mock of {contribution.interface} didn't match the actual "
+                    f"implementation. Check interface definitions before mocking."
+                )
+
+            feedback.append(agent_feedback)
+
+        return feedback
+
+    def store_feedback_for_learning(self, feedback: List[AgentFeedback]):
+        """Store feedback patterns for future agent guidance."""
+        # Add to pattern memory for proactive guidance
+        pass
+```
+
+### 17.5 Local Development Mode
+
+**Purpose:** Enable testing without GitHub Actions.
+
+```python
+class LocalDevelopmentMode:
+    """
+    Run the coordinator locally for development/testing.
+
+    Features:
+    - Mock GitHub API
+    - Local webhook receiver
+    - Test fixtures for common scenarios
+    - Fast iteration without pushing to GitHub
+    """
+
+    def __init__(self, config: dict):
+        self.github = MockGitHubAPI()
+        self.webhook_server = LocalWebhookServer()
+        self.fixture_loader = FixtureLoader()
+
+    def start(self):
+        """Start local development environment."""
+        # Start mock GitHub API server
+        self.github.start(port=8080)
+
+        # Start webhook receiver
+        self.webhook_server.start(port=8081)
+
+        print("Local development mode started")
+        print("  Mock GitHub API: http://localhost:8080")
+        print("  Webhook receiver: http://localhost:8081")
+        print("")
+        print("To simulate agent push:")
+        print("  curl -X POST localhost:8081/webhook -d '{\"branch\": \"claude/test\"}'")
+
+    def load_scenario(self, scenario_name: str):
+        """Load a test scenario from fixtures."""
+        scenario = self.fixture_loader.load(scenario_name)
+        self.github.setup_branches(scenario.branches)
+        self.github.setup_manifests(scenario.manifests)
+        print(f"Loaded scenario: {scenario_name}")
+
+    def run_coordinator(self):
+        """Run coordinator against mock environment."""
+        coordinator = Coordinator(
+            github=self.github,
+            config=self.config
+        )
+        return coordinator.run()
+```
+
+**CLI Usage:**
+
+```bash
+# Start local dev environment
+./orchestrator local-dev start
+
+# Load a test scenario
+./orchestrator local-dev load-scenario two-agents-textual-conflict
+
+# Run coordinator
+./orchestrator local-dev run
+
+# Simulate agent push
+./orchestrator local-dev simulate-push --branch claude/test-feature
+```
+
+### 17.6 Monitoring & Alerting
+
+**Purpose:** Operational visibility and proactive issue detection.
+
+```yaml
+# .claude/config.yaml
+
+monitoring:
+  # Metrics to track
+  metrics:
+    - resolution_time_seconds
+    - conflicts_detected_total
+    - auto_resolved_total
+    - escalations_total
+    - rollbacks_total
+    - validation_failures_total
+
+  # Alerting thresholds
+  alerts:
+    # Critical - immediate attention needed
+    critical:
+      - condition: "rollbacks_total > 3 in 1h"
+        message: "High rollback rate - system may be misconfigured"
+        channels: ["slack", "pagerduty"]
+
+      - condition: "validation_failures_total > 10 in 1h"
+        message: "High validation failure rate"
+        channels: ["slack", "pagerduty"]
+
+    # Warning - investigate soon
+    warning:
+      - condition: "resolution_time_seconds > 300"
+        message: "Resolution taking longer than 5 minutes"
+        channels: ["slack"]
+
+      - condition: "escalations_total > 5 in 24h"
+        message: "High escalation rate - review auto-resolution settings"
+        channels: ["slack"]
+
+    # Info - for visibility
+    info:
+      - condition: "resolution_completed"
+        message: "Resolution completed successfully"
+        channels: ["slack"]
+
+  # Export to monitoring systems
+  exporters:
+    prometheus:
+      enabled: true
+      port: 9090
+
+    datadog:
+      enabled: false
+      api_key: "${DATADOG_API_KEY}"
+```
+
+```python
+class AlertManager:
+    """Send alerts based on monitoring conditions."""
+
+    def check_and_alert(self, metrics: Metrics):
+        """Check metrics against alert thresholds and send alerts."""
+        for alert in self.config.alerts.critical:
+            if self._evaluate_condition(alert.condition, metrics):
+                self._send_alert(
+                    level="critical",
+                    message=alert.message,
+                    channels=alert.channels,
+                    metrics=metrics
+                )
+
+    def _send_alert(self, level: str, message: str,
+                    channels: List[str], metrics: Metrics):
+        """Send alert to configured channels."""
+        for channel in channels:
+            if channel == "slack":
+                self._send_slack_alert(level, message, metrics)
+            elif channel == "pagerduty":
+                self._send_pagerduty_alert(level, message, metrics)
+            elif channel == "email":
+                self._send_email_alert(level, message, metrics)
+```
+
+---
+
+## 18. Operational Resilience (from AI reviews)
+
+### 18.1 Idempotency and Retries (from Grok 4.1 review)
+
+**Problem:** GitHub Actions can fail mid-execution. Without idempotency, retries may corrupt state.
+
+**Solution: Operation IDs and Checkpointing**
+
+```python
+import hashlib
+from contextlib import contextmanager
+
+class IdempotentOperation:
+    """
+    Wrapper for idempotent operations with retry support.
+
+    Each operation has a unique ID derived from its inputs.
+    If the same operation is retried, it returns cached result.
+    """
+
+    def __init__(self, storage: OperationStorage):
+        self.storage = storage
+
+    def compute_operation_id(self, operation: str, inputs: dict) -> str:
+        """Compute deterministic operation ID from inputs."""
+        canonical = json.dumps(inputs, sort_keys=True)
+        return hashlib.sha256(f"{operation}:{canonical}".encode()).hexdigest()[:16]
+
+    @contextmanager
+    def idempotent(self, operation: str, inputs: dict):
+        """
+        Context manager for idempotent operations.
+
+        Usage:
+            with coordinator.idempotent("resolve_conflict", {"cluster_id": "abc"}) as op:
+                if op.already_done:
+                    return op.cached_result
+                # Do work...
+                op.complete(result)
+        """
+        op_id = self.compute_operation_id(operation, inputs)
+
+        # Check if already completed
+        existing = self.storage.get_operation(op_id)
+        if existing and existing.status == "completed":
+            yield IdempotentContext(
+                operation_id=op_id,
+                already_done=True,
+                cached_result=existing.result
+            )
+            return
+
+        # Start operation
+        self.storage.start_operation(op_id, operation, inputs)
+
+        ctx = IdempotentContext(operation_id=op_id, already_done=False)
+        try:
+            yield ctx
+            if ctx.result is not None:
+                self.storage.complete_operation(op_id, ctx.result)
+        except Exception as e:
+            self.storage.fail_operation(op_id, str(e))
+            raise
+
+@dataclass
+class IdempotentContext:
+    """Context for idempotent operation execution."""
+    operation_id: str
+    already_done: bool
+    cached_result: Any = None
+    result: Any = None
+
+    def complete(self, result: Any):
+        """Mark operation as complete with result."""
+        self.result = result
+
+class OperationStorage:
+    """Persist operation state for idempotency."""
+
+    def __init__(self):
+        # Use GitHub Actions cache or external store
+        self.cache_key_prefix = "coordinator-ops"
+
+    def get_operation(self, op_id: str) -> Optional[OperationRecord]:
+        """Retrieve operation state."""
+        # Try GitHub cache first
+        cache_file = Path(f"/tmp/ops/{op_id}.json")
+        if cache_file.exists():
+            return OperationRecord.from_json(cache_file.read_text())
+        return None
+
+    def start_operation(self, op_id: str, operation: str, inputs: dict):
+        """Record operation start."""
+        record = OperationRecord(
+            id=op_id,
+            operation=operation,
+            inputs=inputs,
+            status="in_progress",
+            started_at=datetime.utcnow()
+        )
+        self._save(op_id, record)
+
+    def complete_operation(self, op_id: str, result: Any):
+        """Record operation completion."""
+        record = self.get_operation(op_id)
+        record.status = "completed"
+        record.result = result
+        record.completed_at = datetime.utcnow()
+        self._save(op_id, record)
+```
+
+**Exponential Backoff for Retries:**
+
+```python
+class RetryPolicy:
+    """Configurable retry policy with exponential backoff."""
+
+    def __init__(self,
+                 max_retries: int = 3,
+                 base_delay_seconds: float = 1.0,
+                 max_delay_seconds: float = 60.0,
+                 exponential_base: float = 2.0):
+        self.max_retries = max_retries
+        self.base_delay = base_delay_seconds
+        self.max_delay = max_delay_seconds
+        self.exponential_base = exponential_base
+
+    def execute_with_retry(self, func: Callable, *args, **kwargs) -> Any:
+        """Execute function with retry on failure."""
+        last_error = None
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                return func(*args, **kwargs)
+            except RetryableError as e:
+                last_error = e
+                if attempt < self.max_retries:
+                    delay = min(
+                        self.base_delay * (self.exponential_base ** attempt),
+                        self.max_delay
+                    )
+                    # Add jitter to prevent thundering herd
+                    delay *= (0.5 + random.random())
+                    time.sleep(delay)
+                    logging.warning(f"Retry {attempt + 1}/{self.max_retries}: {e}")
+
+        raise MaxRetriesExceeded(f"Failed after {self.max_retries} retries") from last_error
+```
+
+### 18.2 State Management for PRD Mode (from Gemini review)
+
+**Problem:** Coordinator is largely stateless. For long-running PRD execution, this is insufficient.
+
+**Solution: Persistent State Machine**
+
+```python
+from enum import Enum
+from dataclasses import dataclass, field
+import json
+
+class PRDState(Enum):
+    """States for PRD execution state machine."""
+    INITIALIZING = "initializing"
+    DECOMPOSING = "decomposing"
+    SPAWNING_AGENTS = "spawning_agents"
+    MONITORING = "monitoring"
+    RESOLVING = "resolving"
+    DELIVERING = "delivering"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    PAUSED = "paused"
+
+@dataclass
+class PRDExecutionState:
+    """Persistent state for PRD execution."""
+    prd_id: str
+    state: PRDState
+    created_at: datetime
+
+    # Task tracking
+    total_tasks: int = 0
+    completed_tasks: int = 0
+    failed_tasks: int = 0
+
+    # Agent tracking
+    active_agents: List[str] = field(default_factory=list)
+    completed_agents: List[str] = field(default_factory=list)
+
+    # Wave tracking
+    current_wave: int = 0
+    waves_completed: List[int] = field(default_factory=list)
+
+    # Artifacts
+    checkpoints: List[str] = field(default_factory=list)
+    prs_created: List[str] = field(default_factory=list)
+
+    # Error tracking
+    errors: List[dict] = field(default_factory=list)
+    last_error: Optional[str] = None
+
+    # Timestamps
+    last_updated: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+class PRDStateMachine:
+    """
+    Manage PRD execution state with persistence.
+
+    Survives coordinator restarts and GitHub Actions timeouts.
+    """
+
+    STATE_FILE = ".claude/prd_state.json"
+
+    def __init__(self, prd_id: str):
+        self.prd_id = prd_id
+        self.state = self._load_or_create_state()
+
+    def _load_or_create_state(self) -> PRDExecutionState:
+        """Load existing state or create new."""
+        state_file = Path(self.STATE_FILE)
+        if state_file.exists():
+            data = json.loads(state_file.read_text())
+            if data.get("prd_id") == self.prd_id:
+                return PRDExecutionState(**data)
+
+        return PRDExecutionState(
+            prd_id=self.prd_id,
+            state=PRDState.INITIALIZING,
+            created_at=datetime.utcnow()
+        )
+
+    def transition(self, new_state: PRDState, **updates):
+        """Transition to new state with updates."""
+        old_state = self.state.state
+        self.state.state = new_state
+        self.state.last_updated = datetime.utcnow()
+
+        for key, value in updates.items():
+            if hasattr(self.state, key):
+                setattr(self.state, key, value)
+
+        self._save_state()
+        logging.info(f"PRD state transition: {old_state} -> {new_state}")
+
+    def record_agent_complete(self, agent_id: str):
+        """Record agent completion."""
+        if agent_id in self.state.active_agents:
+            self.state.active_agents.remove(agent_id)
+        if agent_id not in self.state.completed_agents:
+            self.state.completed_agents.append(agent_id)
+        self.state.completed_tasks += 1
+        self._save_state()
+
+    def record_error(self, error: str, context: dict):
+        """Record an error for debugging."""
+        self.state.errors.append({
+            "error": error,
+            "context": context,
+            "timestamp": datetime.utcnow().isoformat()
+        })
+        self.state.last_error = error
+        self._save_state()
+
+    def can_resume(self) -> bool:
+        """Check if execution can be resumed from current state."""
+        return self.state.state not in [
+            PRDState.COMPLETED,
+            PRDState.FAILED
+        ]
+
+    def get_resume_point(self) -> dict:
+        """Get information needed to resume execution."""
+        return {
+            "state": self.state.state,
+            "current_wave": self.state.current_wave,
+            "pending_agents": [
+                a for a in self.state.active_agents
+                if a not in self.state.completed_agents
+            ],
+            "last_checkpoint": self.state.checkpoints[-1] if self.state.checkpoints else None
+        }
+
+    def _save_state(self):
+        """Persist state to file and GitHub artifact."""
+        Path(self.STATE_FILE).parent.mkdir(parents=True, exist_ok=True)
+        Path(self.STATE_FILE).write_text(
+            json.dumps(asdict(self.state), default=str, indent=2)
+        )
+```
+
+### 18.3 Cost Management and Circuit Breakers (from Grok 4.1 review)
+
+**Problem:** LLM calls + tests + git ops can explode costs at 50 agents (~$10-100/PR).
+
+**Solution: Budget Tracking and Circuit Breakers**
+
+```python
+@dataclass
+class CostBudget:
+    """Track and limit costs per execution."""
+    max_llm_tokens: int = 1_000_000      # ~$10 at Claude pricing
+    max_build_minutes: int = 100          # GitHub Actions minutes
+    max_api_calls: int = 1000             # GitHub API calls
+    max_resolution_attempts: int = 10     # Per conflict
+
+    # Current usage
+    llm_tokens_used: int = 0
+    build_minutes_used: int = 0
+    api_calls_used: int = 0
+    resolution_attempts: Dict[str, int] = field(default_factory=dict)
+
+class CostController:
+    """Monitor and enforce cost limits."""
+
+    def __init__(self, budget: CostBudget):
+        self.budget = budget
+        self.circuit_breaker_open = False
+
+    def record_llm_usage(self, tokens: int):
+        """Record LLM token usage."""
+        self.budget.llm_tokens_used += tokens
+        self._check_limits()
+
+    def record_build_time(self, minutes: float):
+        """Record build/test time."""
+        self.budget.build_minutes_used += minutes
+        self._check_limits()
+
+    def can_proceed(self, operation: str) -> CostCheckResult:
+        """Check if operation should proceed given current costs."""
+        if self.circuit_breaker_open:
+            return CostCheckResult(
+                allowed=False,
+                reason="circuit_breaker_open",
+                message="Cost limits exceeded - circuit breaker engaged"
+            )
+
+        # Check specific limits
+        if operation == "llm_call":
+            remaining = self.budget.max_llm_tokens - self.budget.llm_tokens_used
+            if remaining < 10000:  # Need at least 10k tokens
+                return CostCheckResult(
+                    allowed=False,
+                    reason="llm_budget_exceeded",
+                    remaining=remaining
+                )
+
+        return CostCheckResult(allowed=True)
+
+    def _check_limits(self):
+        """Check if any limits exceeded and engage circuit breaker."""
+        if self.budget.llm_tokens_used > self.budget.max_llm_tokens:
+            self._engage_circuit_breaker("LLM token budget exceeded")
+
+        if self.budget.build_minutes_used > self.budget.max_build_minutes:
+            self._engage_circuit_breaker("Build minutes budget exceeded")
+
+    def _engage_circuit_breaker(self, reason: str):
+        """Stop all operations when limits exceeded."""
+        self.circuit_breaker_open = True
+        logging.critical(f"Circuit breaker engaged: {reason}")
+
+        # Notify admin
+        self._send_alert(
+            level="critical",
+            message=f"Coordinator circuit breaker: {reason}",
+            budget_status=asdict(self.budget)
+        )
+
+    def get_cost_estimate(self, operation: str) -> CostEstimate:
+        """Estimate cost of an operation before executing."""
+        estimates = {
+            "resolve_cluster_small": CostEstimate(llm_tokens=50000, build_minutes=5),
+            "resolve_cluster_medium": CostEstimate(llm_tokens=200000, build_minutes=15),
+            "resolve_cluster_large": CostEstimate(llm_tokens=500000, build_minutes=30),
+            "create_pr": CostEstimate(llm_tokens=10000, build_minutes=1),
+        }
+        return estimates.get(operation, CostEstimate(llm_tokens=0, build_minutes=0))
+```
+
+**Configuration:**
+
+```yaml
+# .claude/config.yaml
+cost_management:
+  budgets:
+    per_resolution:
+      max_llm_tokens: 100000
+      max_build_minutes: 10
+      max_candidates: 5
+
+    per_prd:
+      max_llm_tokens: 2000000
+      max_build_minutes: 200
+      max_agents: 50
+
+  circuit_breakers:
+    enabled: true
+    auto_reset_after_hours: 24
+
+  alerts:
+    warn_at_percentage: 80
+    critical_at_percentage: 95
+```
+
+### 18.4 Flight Recorder for Debugging (from Gemini review)
+
+**Problem:** When complex merges go wrong, debugging is nearly impossible without detailed traces.
+
+**Solution: Comprehensive Flight Recorder**
+
+```python
+import logging
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from typing import Any, List
+import json
+
+@dataclass
+class FlightRecorderEntry:
+    """A single entry in the flight recorder."""
+    timestamp: datetime
+    category: str  # llm, git, conflict, validation, decision
+    operation: str
+    inputs: dict
+    outputs: Optional[dict] = None
+    duration_ms: Optional[int] = None
+    error: Optional[str] = None
+
+class FlightRecorder:
+    """
+    Detailed logging of all coordinator operations for debugging.
+
+    Think of it as an airplane's black box - records everything
+    needed to understand what happened when things go wrong.
+    """
+
+    def __init__(self, resolution_id: str):
+        self.resolution_id = resolution_id
+        self.entries: List[FlightRecorderEntry] = []
+        self.start_time = datetime.utcnow()
+
+    @contextmanager
+    def record(self, category: str, operation: str, inputs: dict):
+        """Record an operation with timing."""
+        start = datetime.utcnow()
+        entry = FlightRecorderEntry(
+            timestamp=start,
+            category=category,
+            operation=operation,
+            inputs=self._sanitize_inputs(inputs)
+        )
+
+        try:
+            result = {"outputs": None}
+            yield result
+            entry.outputs = result.get("outputs")
+        except Exception as e:
+            entry.error = str(e)
+            raise
+        finally:
+            entry.duration_ms = int((datetime.utcnow() - start).total_seconds() * 1000)
+            self.entries.append(entry)
+
+    def record_llm_call(self, prompt: str, response: str, model: str, tokens: int):
+        """Record LLM interaction."""
+        self.entries.append(FlightRecorderEntry(
+            timestamp=datetime.utcnow(),
+            category="llm",
+            operation="call",
+            inputs={
+                "model": model,
+                "prompt_preview": prompt[:500] + "..." if len(prompt) > 500 else prompt,
+                "prompt_tokens": len(prompt.split())
+            },
+            outputs={
+                "response_preview": response[:500] + "..." if len(response) > 500 else response,
+                "total_tokens": tokens
+            }
+        ))
+
+    def record_git_operation(self, operation: str, args: List[str], result: str, success: bool):
+        """Record git operation."""
+        self.entries.append(FlightRecorderEntry(
+            timestamp=datetime.utcnow(),
+            category="git",
+            operation=operation,
+            inputs={"args": args},
+            outputs={"result": result[:1000], "success": success}
+        ))
+
+    def record_decision(self, decision_type: str, options: List[str],
+                        chosen: str, reason: str, confidence: float):
+        """Record an automated decision."""
+        self.entries.append(FlightRecorderEntry(
+            timestamp=datetime.utcnow(),
+            category="decision",
+            operation=decision_type,
+            inputs={"options": options},
+            outputs={
+                "chosen": chosen,
+                "reason": reason,
+                "confidence": confidence
+            }
+        ))
+
+    def export(self) -> dict:
+        """Export flight recorder data."""
+        return {
+            "resolution_id": self.resolution_id,
+            "started_at": self.start_time.isoformat(),
+            "ended_at": datetime.utcnow().isoformat(),
+            "total_entries": len(self.entries),
+            "entries": [self._entry_to_dict(e) for e in self.entries],
+            "summary": self._generate_summary()
+        }
+
+    def save_to_artifact(self):
+        """Save as GitHub Action artifact."""
+        artifact_path = Path(f"/tmp/flight-recorder-{self.resolution_id}.json")
+        artifact_path.write_text(json.dumps(self.export(), indent=2, default=str))
+        return artifact_path
+
+    def _generate_summary(self) -> dict:
+        """Generate summary statistics."""
+        by_category = {}
+        for entry in self.entries:
+            if entry.category not in by_category:
+                by_category[entry.category] = {"count": 0, "errors": 0, "total_ms": 0}
+            by_category[entry.category]["count"] += 1
+            if entry.error:
+                by_category[entry.category]["errors"] += 1
+            if entry.duration_ms:
+                by_category[entry.category]["total_ms"] += entry.duration_ms
+
+        return {
+            "total_operations": len(self.entries),
+            "total_errors": sum(1 for e in self.entries if e.error),
+            "by_category": by_category
+        }
+
+    def _sanitize_inputs(self, inputs: dict) -> dict:
+        """Remove sensitive data from inputs before recording."""
+        sanitized = {}
+        for key, value in inputs.items():
+            if any(s in key.lower() for s in ["secret", "token", "password", "key"]):
+                sanitized[key] = "[REDACTED]"
+            elif isinstance(value, str) and len(value) > 10000:
+                sanitized[key] = value[:1000] + f"... [truncated, {len(value)} chars]"
+            else:
+                sanitized[key] = value
+        return sanitized
+```
+
+**Integration with Coordinator:**
+
+```python
+class Coordinator:
+    def __init__(self):
+        self.flight_recorder = None
+
+    def resolve_conflict(self, conflict: ConflictContext):
+        self.flight_recorder = FlightRecorder(conflict.conflict_id)
+
+        try:
+            with self.flight_recorder.record("pipeline", "stage_0_detection", {}):
+                # Stage 0 work...
+                pass
+
+            with self.flight_recorder.record("pipeline", "stage_1_context", {}):
+                # Stage 1 work...
+                pass
+
+            # etc.
+
+        finally:
+            # Always save flight recorder, even on failure
+            artifact = self.flight_recorder.save_to_artifact()
+            logging.info(f"Flight recorder saved: {artifact}")
+```
+
+**Querying Flight Recorder Data:**
+
+```bash
+# Download and analyze flight recorder
+gh run download --name flight-recorder-conflict-abc123
+
+# Parse and query with jq
+cat flight-recorder-*.json | jq '.entries[] | select(.category == "decision")'
+cat flight-recorder-*.json | jq '.entries[] | select(.error != null)'
+cat flight-recorder-*.json | jq '.summary.by_category'
 ```
 
 ---
