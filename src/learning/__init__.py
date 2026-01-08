@@ -20,6 +20,7 @@ from .pattern_schema import (
 )
 from .pattern_database import PatternDatabase
 from .pattern_hasher import PatternHasher
+from .pattern_memory import ConflictPatternMemory, ResolutionSuggestion
 
 __all__ = [
     # Enums
@@ -33,6 +34,9 @@ __all__ = [
     "PatternDatabase",
     # Hasher
     "PatternHasher",
+    # Memory
+    "ConflictPatternMemory",
+    "ResolutionSuggestion",
     # Constants
     "ACTIVE_THRESHOLD",
     "SUGGESTING_THRESHOLD",
