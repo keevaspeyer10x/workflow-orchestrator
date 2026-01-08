@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from .base import WorkerBackendBase, WorkerHandle, WorkerStatus
+from ..backends.base import WorkerBackendBase, WorkerHandle, WorkerStatus
 from ..schema import JobMessage, WorkerBackend, TaskResult
 
 logger = logging.getLogger(__name__)

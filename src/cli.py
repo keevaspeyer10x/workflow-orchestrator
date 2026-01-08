@@ -2118,57 +2118,203 @@ def cmd_prd_check_squad(args):
 
 
 def cmd_prd_spawn(args):
-    """Spawn Claude Squad sessions for PRD tasks."""
+    """Spawn Claude Squad sessions for PRD tasks using smart scheduling."""
     import yaml
-    from src.prd.squad_adapter import ClaudeSquadAdapter, CapabilityError
-    from src.prd.backend_selector import BackendSelector, ExecutionMode
+    from src.prd import PRDExecutor, PRDConfig, PRDDocument, PRDTask
 
     working_dir = Path(args.dir or '.')
 
-    # Check which backend to use
-    selector = BackendSelector.detect(working_dir)
-    mode = selector.select(
-        task_count=args.count or 1,
-        interactive=not args.batch,
-        prefer_remote=args.batch
-    )
-
-    if mode == ExecutionMode.MANUAL:
-        print("No execution backend available")
-        print("Install Claude Squad: https://github.com/smtg-ai/claude-squad")
-        sys.exit(1)
-
-    if mode == ExecutionMode.BATCH:
-        print("Batch mode selected - use 'orchestrator prd start' for GitHub Actions execution")
-        sys.exit(1)
-
-    # Interactive mode with Claude Squad
-    try:
-        adapter = ClaudeSquadAdapter(working_dir)
-    except CapabilityError as e:
-        print(f"Error: {e}")
-        sys.exit(1)
-
-    # If a PRD file is provided, spawn from it
-    if args.prd_file:
-        with open(args.prd_file) as f:
-            prd_data = yaml.safe_load(f)
-
-        tasks = []
-        for task in prd_data.get('tasks', [])[:args.count] if args.count else prd_data.get('tasks', []):
-            tasks.append({
-                'task_id': task['id'],
-                'prompt': task.get('description', ''),
-                'branch': f"claude/{task['id']}"
-            })
-
-        sessions = adapter.spawn_batch(tasks)
-        print(f"Spawned {len(sessions)} session(s)")
-        for s in sessions:
-            print(f"  {s.task_id}: {s.session_name} ({s.status})")
-    else:
+    if not args.prd_file:
         print("Error: --prd-file required to spawn sessions")
         sys.exit(1)
+
+    # Load PRD
+    try:
+        with open(args.prd_file) as f:
+            prd_data = yaml.safe_load(f)
+    except Exception as e:
+        print(f"Error loading PRD file: {e}")
+        sys.exit(1)
+
+    # Convert to PRDDocument
+    tasks = []
+    for task_data in prd_data.get('tasks', []):
+        task = PRDTask(
+            id=task_data['id'],
+            description=task_data.get('description', ''),
+            dependencies=task_data.get('dependencies', []),
+            metadata=task_data.get('metadata'),
+        )
+        tasks.append(task)
+
+    prd = PRDDocument(
+        id=prd_data.get('id', 'prd-001'),
+        title=prd_data.get('title', 'Untitled PRD'),
+        tasks=tasks,
+    )
+
+    # Create executor and spawn
+    config = PRDConfig(enabled=True)
+    executor = PRDExecutor(config, working_dir)
+
+    force_tasks = [args.force] if args.force else None
+
+    result = executor.spawn(
+        prd=prd,
+        explain=args.explain,
+        dry_run=args.dry_run,
+        force_tasks=force_tasks,
+    )
+
+    # Display results
+    if args.explain and result.explanation:
+        print(result.explanation)
+        return
+
+    if args.dry_run:
+        print(f"[DRY RUN] Would spawn {result.spawned_count} task(s) in wave {result.wave_number}")
+        if result.task_ids:
+            print(f"Tasks: {', '.join(result.task_ids)}")
+        return
+
+    if result.error:
+        print(f"Error: {result.error}")
+        if result.explanation:
+            print(result.explanation)
+        sys.exit(1)
+
+    if result.spawned_count == 0:
+        print(result.explanation or "No tasks to spawn")
+        return
+
+    print(f"Spawned {result.spawned_count} task(s) in wave {result.wave_number}")
+    for task_id, session_id in zip(result.task_ids, result.session_ids):
+        print(f"  {task_id}: {session_id}")
+
+
+def cmd_prd_merge(args):
+    """Merge a completed task into the integration branch."""
+    import yaml
+    from src.prd import PRDExecutor, PRDConfig, PRDDocument, PRDTask, TaskStatus
+
+    working_dir = Path(args.dir or '.')
+
+    if not args.prd_file:
+        print("Error: --prd-file required")
+        sys.exit(1)
+
+    # Load PRD
+    try:
+        with open(args.prd_file) as f:
+            prd_data = yaml.safe_load(f)
+    except Exception as e:
+        print(f"Error loading PRD file: {e}")
+        sys.exit(1)
+
+    # Convert to PRDDocument
+    tasks = []
+    for task_data in prd_data.get('tasks', []):
+        task = PRDTask(
+            id=task_data['id'],
+            description=task_data.get('description', ''),
+            dependencies=task_data.get('dependencies', []),
+            metadata=task_data.get('metadata'),
+        )
+        # Mark tasks as running if they have sessions (simplified - real impl would load state)
+        if task_data.get('status') == 'running':
+            task.status = TaskStatus.RUNNING
+            task.branch = task_data.get('branch', f"claude/{task.id}")
+            task.agent_id = task_data.get('session_id')
+        tasks.append(task)
+
+    prd = PRDDocument(
+        id=prd_data.get('id', 'prd-001'),
+        title=prd_data.get('title', 'Untitled PRD'),
+        tasks=tasks,
+    )
+
+    # Create executor and merge
+    config = PRDConfig(enabled=True)
+    executor = PRDExecutor(config, working_dir)
+
+    result = executor.merge(
+        prd=prd,
+        task_id=args.task_id,
+        dry_run=args.dry_run,
+    )
+
+    # Display results
+    if args.dry_run:
+        print(f"[DRY RUN] {result.explanation}")
+        return
+
+    if not result.success:
+        print(f"Merge failed: {result.error}")
+        sys.exit(1)
+
+    print(f"Merged task {result.task_id}")
+    print(f"  Branch: {result.branch}")
+    if result.commit_sha:
+        print(f"  Commit: {result.commit_sha}")
+    if result.conflicts_resolved > 0:
+        print(f"  Conflicts auto-resolved: {result.conflicts_resolved}")
+
+
+def cmd_prd_sync(args):
+    """Sync: merge completed tasks and spawn the next wave."""
+    import yaml
+    from src.prd import PRDExecutor, PRDConfig, PRDDocument, PRDTask
+
+    working_dir = Path(args.dir or '.')
+
+    if not args.prd_file:
+        print("Error: --prd-file required")
+        sys.exit(1)
+
+    # Load PRD
+    try:
+        with open(args.prd_file) as f:
+            prd_data = yaml.safe_load(f)
+    except Exception as e:
+        print(f"Error loading PRD file: {e}")
+        sys.exit(1)
+
+    # Convert to PRDDocument
+    tasks = []
+    for task_data in prd_data.get('tasks', []):
+        task = PRDTask(
+            id=task_data['id'],
+            description=task_data.get('description', ''),
+            dependencies=task_data.get('dependencies', []),
+            metadata=task_data.get('metadata'),
+        )
+        tasks.append(task)
+
+    prd = PRDDocument(
+        id=prd_data.get('id', 'prd-001'),
+        title=prd_data.get('title', 'Untitled PRD'),
+        tasks=tasks,
+    )
+
+    # Create executor and sync
+    config = PRDConfig(enabled=True)
+    executor = PRDExecutor(config, working_dir)
+
+    result = executor.sync(
+        prd=prd,
+        dry_run=args.dry_run,
+    )
+
+    # Display results
+    if args.dry_run:
+        print(f"[DRY RUN] Would merge {result.merged_count} task(s), spawn {result.spawned_count} task(s)")
+        return
+
+    print(f"Merged: {result.merged_count} task(s)")
+    print(f"Spawned: {result.spawned_count} task(s)")
+
+    if result.spawn_result and result.spawn_result.task_ids:
+        print(f"New sessions: {', '.join(result.spawn_result.task_ids)}")
 
 
 def cmd_prd_sessions(args):
@@ -2273,7 +2419,7 @@ def cmd_prd_start(args):
     import yaml
     import json
     from src.prd import PRDExecutor, PRDConfig, PRDDocument, PRDTask, WorkerBackend
-    from src.prd.backends.sequential import is_inside_claude_code
+    from src.prd._deprecated.sequential import is_inside_claude_code
 
     working_dir = Path(args.dir or '.')
     prd_path = Path(args.prd_file)
@@ -2970,12 +3116,28 @@ Examples:
     prd_check_squad.set_defaults(func=cmd_prd_check_squad)
 
     # prd spawn
-    prd_spawn = prd_subparsers.add_parser('spawn', help='Spawn Claude Squad sessions for tasks')
-    prd_spawn.add_argument('--prd-file', help='Path to PRD YAML file')
-    prd_spawn.add_argument('--count', type=int, help='Maximum number of tasks to spawn')
-    prd_spawn.add_argument('--batch', action='store_true', help='Prefer batch (GitHub Actions) mode')
+    prd_spawn = prd_subparsers.add_parser('spawn', help='Spawn next wave of tasks via Claude Squad')
+    prd_spawn.add_argument('--prd-file', required=True, help='Path to PRD YAML file')
+    prd_spawn.add_argument('--explain', action='store_true', help='Show wave groupings without spawning')
+    prd_spawn.add_argument('--dry-run', action='store_true', help='Show what would be spawned without acting')
+    prd_spawn.add_argument('--force', metavar='TASK_ID', help='Force spawn specific task (bypasses scheduler)')
     prd_spawn.add_argument('-d', '--dir', help='Working directory')
     prd_spawn.set_defaults(func=cmd_prd_spawn)
+
+    # prd merge
+    prd_merge = prd_subparsers.add_parser('merge', help='Merge a completed task into integration branch')
+    prd_merge.add_argument('task_id', help='Task ID to merge')
+    prd_merge.add_argument('--prd-file', required=True, help='Path to PRD YAML file')
+    prd_merge.add_argument('--dry-run', action='store_true', help='Show what would be merged without acting')
+    prd_merge.add_argument('-d', '--dir', help='Working directory')
+    prd_merge.set_defaults(func=cmd_prd_merge)
+
+    # prd sync
+    prd_sync = prd_subparsers.add_parser('sync', help='Merge completed tasks and spawn next wave')
+    prd_sync.add_argument('--prd-file', required=True, help='Path to PRD YAML file')
+    prd_sync.add_argument('--dry-run', action='store_true', help='Show what would happen without acting')
+    prd_sync.add_argument('-d', '--dir', help='Working directory')
+    prd_sync.set_defaults(func=cmd_prd_sync)
 
     # prd sessions
     prd_sessions = prd_subparsers.add_parser('sessions', help='List active Claude Squad sessions')

@@ -1,125 +1,159 @@
-# PRD-001: Claude Squad Integration - Implementation Plan
+# PRD-001 Phase 2: Claude Squad Integration - Smart Spawning Model
 
-## Executive Summary
+## Overview
 
-Integrate Workflow Orchestrator with [Claude Squad](https://github.com/smtg-ai/claude-squad) to enable:
-- Managing multiple concurrent Claude Code sessions
-- Persistent session state across orchestrator restarts
-- Hybrid execution (interactive local + batch remote)
-- Simplified backend architecture (5 files removed)
+Complete the Claude Squad integration with a simplified, CLI-driven workflow:
+- **Parallel execution** via Claude Squad (10+ agents in tmux sessions)
+- **Sequential merging** (user controls when to merge each task)
+- **Smart spawning** (schedule tasks to minimize conflicts)
+- **Zero human review** (system auto-resolves conflicts)
+
+## External AI Reviews (2026-01-09)
+
+Reviewed by: Gemini 2.0, GPT-4o, Grok 3
+
+| Reviewer | Assessment | Key Concern |
+|----------|------------|-------------|
+| Gemini | Sound | Prediction accuracy, learning mechanism unclear |
+| GPT-4o | Needs Work | Sequential bottleneck, loss of batch capability |
+| Grok | Needs Work | User friction, backend flexibility |
+
+### Improvements Added Based on Reviews
+
+1. **Transparency flags**: `--explain` and `--dry-run` for spawn/merge
+2. **Manual override**: `--force` flag to bypass scheduler predictions
+3. **Preserve backends**: Move to `_deprecated/` instead of deleting
+4. **Idle warnings**: Show task idle time in `prd status`
+5. **Fallback mechanism**: When predictions fail, allow manual control
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         CLI Commands                             │
+│  spawn → sessions → attach → merge → sync                       │
+├─────────────────────────────────────────────────────────────────┤
+│                     SpawnScheduler                               │
+│  - Predict file overlap from task descriptions                  │
+│  - Cluster non-conflicting tasks into waves                     │
+│  - Spawn wave 1 first, wave 2 after wave 1 merges               │
+├─────────────────────────────────────────────────────────────────┤
+│                   ClaudeSquadAdapter                             │
+│  - Spawn tmux sessions (one per task)                           │
+│  - SessionRegistry (persistent state)                            │
+│  - Capability detection                                          │
+├─────────────────────────────────────────────────────────────────┤
+│                   BackendSelector                                │
+│  - INTERACTIVE: Claude Squad                                     │
+│  - MANUAL: Generate prompts for Claude Code Web                  │
+├─────────────────────────────────────────────────────────────────┤
+│                  Resolution Pipeline                             │
+│  - Auto-resolve conflicts on merge                               │
+│  - Ask minimal questions when uncertain                          │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Workflow
+
+```bash
+# 1. Spawn ready tasks (respects dependencies + smart overlap scheduling)
+orchestrator prd spawn
+
+# 2. Work on sessions (attach to any, work in parallel)
+orchestrator prd sessions          # List all
+orchestrator prd attach task-1     # Jump into terminal
+
+# 3. Merge when ready (one at a time, auto-resolve conflicts)
+orchestrator prd merge task-1      # Merge into integration branch
+
+# 4. Sync: merge completed, spawn next wave
+orchestrator prd sync              # Convenience: merge all done + spawn next
+```
+
+## Implementation Tasks
+
+### Task 1: Create SpawnScheduler
+Refactor wave_resolver.py → spawn_scheduler.py
+
+**Preserve from clusterer.py:**
+- `_build_file_adjacency()` - detect file overlap
+- `_build_domain_adjacency()` - detect domain overlap
+- `_infer_domains()` - keyword-based domain detection
+- `_find_connected_components()` - cluster non-conflicting tasks
+- `order_by_dependency()` - topological sort
+
+**New logic:**
+- `predict_files(task)` - predict files from task description
+- `schedule_waves(tasks)` - group tasks into spawn waves
+- `get_next_wave()` - return tasks safe to spawn now
+
+### Task 2: Update executor.py
+Simplify to CLI-driven model:
+
+**Remove:**
+- Async execution loop
+- WorkerPool integration
+- Automatic completion detection
+
+**Add:**
+- `spawn()` - spawn next wave via ClaudeSquadAdapter
+- `merge(task_id)` - merge one task via resolution pipeline
+- `sync()` - merge all completed + spawn next wave
+
+### Task 3: Deprecate old backends (preserve, don't delete)
+
+| File | Action |
+|------|--------|
+| `src/prd/worker_pool.py` | Move to `_deprecated/` |
+| `src/prd/backends/local.py` | Move to `_deprecated/` |
+| `src/prd/backends/modal_worker.py` | Move to `_deprecated/` |
+| `src/prd/backends/render.py` | Move to `_deprecated/` |
+| `src/prd/backends/sequential.py` | Move to `_deprecated/` |
+| `src/prd/backends/github_actions.py` | Move to `_deprecated/` |
+| `src/prd/wave_resolver.py` | Refactor to spawn_scheduler.py |
+
+**Keep active:**
+- `src/prd/backends/manual.py` - for Claude Code Web
+- `src/prd/backends/base.py` - base class still needed
+
+### Task 4: Update CLI commands
+
+| Command | Description |
+|---------|-------------|
+| `prd spawn` | Spawn next wave of tasks |
+| `prd spawn --explain` | Show wave groupings without spawning |
+| `prd spawn --force <task>` | Bypass scheduler, spawn specific task |
+| `prd sessions` | List active sessions |
+| `prd attach <task>` | Attach to session terminal |
+| `prd merge <task>` | Merge one task into integration |
+| `prd merge --dry-run <task>` | Show what would be merged/resolved |
+| `prd sync` | Merge completed + spawn next |
+| `prd status` | Show PRD progress with idle times |
+
+### Task 5: Update tests
+- Add tests for SpawnScheduler
+- Update executor tests
+- Remove tests for deprecated backends
+
+### Task 6: Update documentation
+- Update IMPLEMENTATION-TRACKER.md (Phase 7 complete, Phase 6 updated)
+- Update ROADMAP.md
+- Update CLAUDE.md with new commands
 
 ## Risk Assessment
 
-| Risk | Probability | Impact | Mitigation |
-|------|-------------|--------|------------|
-| Claude Squad CLI changes | Medium | High | Capability detection, version pinning, fallback strategies |
-| tmux not available on system | Low | Medium | Clear error messages, manual fallback mode |
-| Session state desync | Medium | Medium | Reconciliation on every operation, orphan detection |
-| Machine reboot mid-task | Low | High | Persistent registry, automatic orphan cleanup |
-| Session name collision | Low | Low | Unique prefix (wfo-), task ID sanitization |
-| File lock contention | Low | Low | filelock library handles gracefully |
-| Subprocess timeouts | Medium | Low | Configurable timeout, graceful error handling |
-
-## Dependencies
-
-**Required:**
-- `filelock` - File-based locking for registry
-- Claude Squad CLI installed (user responsibility)
-
-**Optional:**
-- GitHub Actions - For batch/remote execution
-- tmux - Required by Claude Squad
-
-## Implementation Order
-
-### Phase 1: Core Components
-
-#### 1.1 src/prd/session_registry.py (DONE)
-- Persistent session storage in `.claude/squad_sessions.json`
-- File locking via `filelock` for thread safety
-- Session reconciliation with Claude Squad state
-- Automatic cleanup of old sessions (>7 days)
-- Status tracking: pending, running, completed, terminated, orphaned
-
-#### 1.2 src/prd/squad_capabilities.py (DONE)
-- Detect Claude Squad installation via `--version`
-- Parse `--help` for command/flag support
-- Validate minimum required capabilities
-- Fail fast if incompatible
-- Support alternative flag names (--dir/--directory)
-
-#### 1.3 src/prd/squad_adapter.py (DONE)
-- Main adapter using registry and capabilities
-- Session name sanitization (alphanumeric only)
-- Idempotent spawn operations (safe to retry)
-- Robust output parsing with 3 fallback strategies
-- Explicit session termination on completion
-
-#### 1.4 src/prd/backend_selector.py (DONE)
-- Hybrid mode selection (interactive/batch/manual)
-- Auto-detect available backends
-- Priority: Claude Squad > GitHub Actions > Manual
-
-### Phase 2: CLI Commands
-
-#### 2.1 Commands to Add
-```bash
-orchestrator prd check-squad    # Check compatibility
-orchestrator prd spawn          # Spawn sessions for tasks
-orchestrator prd sessions       # List active sessions
-orchestrator prd attach <id>    # Attach to session
-orchestrator prd done <id>      # Mark complete
-orchestrator prd cleanup        # Clean orphaned sessions
-```
-
-### Phase 3: Integration
-
-#### 3.1 Update executor.py
-- Replace WorkerPool with BackendSelector
-- Use ClaudeSquadAdapter for interactive mode
-- Retain GitHubActionsBackend for batch mode
-
-### Phase 4: Cleanup
-
-#### 4.1 Files to Remove
-- `src/prd/worker_pool.py` - Replaced by BackendSelector
-- `src/prd/backends/local.py` - Claude Squad replaces local spawning
-- `src/prd/backends/modal_worker.py` - Not needed (cloud)
-- `src/prd/backends/render.py` - Not needed (cloud)
-- `src/prd/backends/sequential.py` - Claude Squad handles this
-
-#### 4.2 Files to Retain
-- `src/prd/backends/github_actions.py` - For batch mode
-- `src/prd/backends/manual.py` - Fallback
-- `src/prd/backends/base.py` - Interface
-
-### Phase 5: Testing
-
-#### 5.1 Test Files
-- `tests/prd/test_session_registry.py` (DONE)
-- `tests/prd/test_squad_capabilities.py` (DONE)
-- `tests/prd/test_squad_adapter.py` (DONE)
-- `tests/prd/test_backend_selector.py` (TODO)
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| File prediction inaccurate | Medium | Low | Conservative clustering, learn over time |
+| Merge conflicts unresolvable | Low | Medium | Resolution pipeline + ask user |
+| Session state lost | Low | Medium | Persistent SessionRegistry |
+| Claude Squad not installed | Medium | Low | Clear error, manual fallback |
 
 ## Success Criteria
 
-1. [ ] Claude Squad spawns sessions with one command
-2. [ ] Sessions survive orchestrator restart
-3. [ ] Orphaned sessions detected and cleaned up
-4. [ ] Completed work integrates with existing merge flow
-5. [ ] 5 deprecated backend files removed
-6. [ ] All tests pass
-7. [ ] Clear error if Claude Squad not installed
-
-## Workflow Issues Identified
-
-**Issue: Plan verification expects docs/plan.md**
-- The orchestrator's PLAN phase verification expects a `docs/plan.md` file
-- This isn't documented in CLAUDE.md or workflow.yaml
-- **Recommendation:** Add to ROADMAP - make plan file path configurable or document requirement
-
-## References
-
-- Design: `docs/designs/claude_squad_integration_detailed.md`
-- AI Reviews: GPT-5.2, Gemini 2.5 Pro, Grok 4
-- Claude Squad: https://github.com/smtg-ai/claude-squad
+1. [ ] 10 parallel Claude Squad sessions spawn with one command
+2. [ ] Smart spawning groups non-conflicting tasks
+3. [ ] One-at-a-time merge with auto-resolution works
+4. [ ] 6 deprecated backend files removed
+5. [ ] All tests pass
+6. [ ] CLI workflow: spawn → work → merge → sync

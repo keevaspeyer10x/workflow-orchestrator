@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch, MagicMock
 import os
 
 from src.prd.schema import PRDConfig, WorkerBackend, PRDTask, JobMessage
-from src.prd.worker_pool import WorkerPool
+from src.prd._deprecated.worker_pool import WorkerPool  # Deprecated - testing legacy code
 from src.prd.backends.base import WorkerBackendBase, WorkerStatus, WorkerHandle
 
 
@@ -129,14 +129,14 @@ class TestLocalBackend:
 
     def test_is_available(self):
         """Local backend should always be available."""
-        from src.prd.backends.local import LocalBackend
+        from src.prd._deprecated.local import LocalBackend
 
         backend = LocalBackend()
         assert backend.is_available()
 
     def test_max_parallel_respects_config(self):
         """Max parallel should respect config."""
-        from src.prd.backends.local import LocalBackend
+        from src.prd._deprecated.local import LocalBackend
 
         backend = LocalBackend(max_parallel=8)
         assert backend.max_parallel() == 8
@@ -171,7 +171,7 @@ class TestModalBackend:
 
     def test_not_available_without_token(self):
         """Modal should not be available without token."""
-        from src.prd.backends.modal_worker import ModalBackend
+        from src.prd._deprecated.modal_worker import ModalBackend
 
         with patch.dict(os.environ, {}, clear=True):
             backend = ModalBackend()
@@ -179,7 +179,7 @@ class TestModalBackend:
 
     def test_available_with_token_and_package(self):
         """Modal should be available with token AND package installed."""
-        from src.prd.backends.modal_worker import ModalBackend
+        from src.prd._deprecated.modal_worker import ModalBackend
 
         with patch.dict(os.environ, {"MODAL_TOKEN_ID": "test", "MODAL_TOKEN_SECRET": "test"}):
             backend = ModalBackend()
@@ -196,7 +196,7 @@ class TestRenderBackend:
 
     def test_not_available_without_key(self):
         """Render should not be available without API key."""
-        from src.prd.backends.render import RenderBackend
+        from src.prd._deprecated.render import RenderBackend
 
         with patch.dict(os.environ, {}, clear=True):
             backend = RenderBackend()
@@ -204,7 +204,7 @@ class TestRenderBackend:
 
     def test_available_with_key(self):
         """Render should be available with API key."""
-        from src.prd.backends.render import RenderBackend
+        from src.prd._deprecated.render import RenderBackend
 
         with patch.dict(os.environ, {"RENDER_API_KEY": "test-key"}):
             backend = RenderBackend()

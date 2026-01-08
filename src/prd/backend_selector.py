@@ -46,7 +46,7 @@ class BackendSelector:
         Create a BackendSelector with auto-detected availability.
         """
         from .squad_capabilities import CapabilityDetector
-        from .backends.github_actions import GitHubActionsBackend
+        from ._deprecated.github_actions import GitHubActionsBackend
 
         # Check Claude Squad
         squad_available = False

@@ -43,10 +43,11 @@ from .schema import (
 )
 
 from .queue import FileJobQueue
-from .worker_pool import WorkerPool
+from ._deprecated.worker_pool import WorkerPool  # Deprecated - use ClaudeSquadAdapter
 from .integration import IntegrationBranchManager, MergeRecord, CheckpointPR
 from .wave_resolver import WaveResolver, WaveResolutionResult
-from .executor import PRDExecutor, PRDExecutionResult
+from .spawn_scheduler import SpawnScheduler, SpawnWave, ScheduleResult, TaskOverlapPrediction
+from .executor import PRDExecutor, PRDExecutionResult, SpawnResult, MergeResult, SyncResult
 
 # Claude Squad Integration (PRD-001)
 from .session_registry import SessionRegistry, SessionRecord
@@ -88,9 +89,17 @@ __all__ = [
     # Wave resolution
     "WaveResolver",
     "WaveResolutionResult",
+    # Spawn scheduling (PRD-001 Phase 2)
+    "SpawnScheduler",
+    "SpawnWave",
+    "ScheduleResult",
+    "TaskOverlapPrediction",
     # Executor
     "PRDExecutor",
     "PRDExecutionResult",
+    "SpawnResult",
+    "MergeResult",
+    "SyncResult",
     # Claude Squad Integration (PRD-001)
     "SessionRegistry",
     "SessionRecord",

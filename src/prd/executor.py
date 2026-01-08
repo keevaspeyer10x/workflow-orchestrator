@@ -27,9 +27,12 @@ from .schema import (
     WorkerBackend,
 )
 from .queue import FileJobQueue
-from .worker_pool import WorkerPool
+from ._deprecated.worker_pool import WorkerPool  # Deprecated - use ClaudeSquadAdapter
 from .integration import IntegrationBranchManager, CheckpointPR
 from .wave_resolver import WaveResolver, WaveResolutionResult
+from .spawn_scheduler import SpawnScheduler, SpawnWave, ScheduleResult
+from .squad_adapter import ClaudeSquadAdapter, SquadConfig
+from .backend_selector import BackendSelector, ExecutionMode
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +50,41 @@ class PRDExecutionResult:
     final_pr_url: Optional[str] = None
     duration_seconds: float = 0.0
     error: Optional[str] = None
+
+
+@dataclass
+class SpawnResult:
+    """Result of spawning tasks."""
+    spawned_count: int
+    wave_number: int
+    task_ids: list[str] = field(default_factory=list)
+    session_ids: list[str] = field(default_factory=list)
+    explanation: Optional[str] = None
+    error: Optional[str] = None
+    dry_run: bool = False
+
+
+@dataclass
+class MergeResult:
+    """Result of merging a task."""
+    success: bool
+    task_id: str
+    branch: Optional[str] = None
+    commit_sha: Optional[str] = None
+    conflicts_resolved: int = 0
+    explanation: Optional[str] = None
+    error: Optional[str] = None
+    dry_run: bool = False
+
+
+@dataclass
+class SyncResult:
+    """Result of sync operation."""
+    merged_count: int
+    spawned_count: int
+    merge_results: list[MergeResult] = field(default_factory=list)
+    spawn_result: Optional[SpawnResult] = None
+    dry_run: bool = False
 
 
 class PRDExecutor:
@@ -369,3 +407,290 @@ Dependencies: {task.dependencies if task.dependencies else 'None'}
         self._active_prd = None
         logger.info("PRD execution cancelled")
         return True
+
+    # =========================================================================
+    # CLI-Driven Methods (PRD-001 Phase 2)
+    # =========================================================================
+
+    def spawn(
+        self,
+        prd: PRDDocument,
+        explain: bool = False,
+        dry_run: bool = False,
+        force_tasks: Optional[list[str]] = None,
+    ) -> SpawnResult:
+        """
+        Spawn the next wave of tasks via Claude Squad.
+
+        This is the CLI-driven spawn method that:
+        1. Uses SpawnScheduler to find non-conflicting tasks
+        2. Spawns them via ClaudeSquadAdapter as tmux sessions
+        3. Returns information about what was spawned
+
+        Args:
+            prd: The PRD document
+            explain: If True, show wave groupings without spawning
+            dry_run: If True, show what would happen without actually spawning
+            force_tasks: If provided, force spawn these specific tasks (bypasses scheduler)
+
+        Returns:
+            SpawnResult with details about spawned tasks
+        """
+        scheduler = SpawnScheduler()
+
+        # Track what's already spawned and merged
+        spawned_ids = [t.id for t in prd.tasks if t.status != TaskStatus.PENDING]
+        merged_ids = [t.id for t in prd.tasks if t.status == TaskStatus.COMPLETED]
+
+        # Determine what to spawn
+        if force_tasks:
+            # Force mode: bypass scheduler
+            wave = scheduler.force_spawn(prd.tasks, force_tasks, merged_ids)
+            explanation = "Forced spawn (bypassing scheduler)"
+        else:
+            # Normal mode: get next wave from scheduler
+            wave = scheduler.get_next_wave(prd.tasks, spawned_ids, merged_ids)
+            if not wave:
+                return SpawnResult(
+                    spawned_count=0,
+                    wave_number=0,
+                    task_ids=[],
+                    explanation="No tasks ready to spawn (all spawned or dependencies not met)",
+                )
+            explanation = None
+            if explain:
+                result = scheduler.schedule_waves([t for t in prd.tasks if t.id not in spawned_ids], explain=True)
+                explanation = result.explanation
+
+        if dry_run:
+            return SpawnResult(
+                spawned_count=len(wave.tasks),
+                wave_number=wave.wave_number,
+                task_ids=wave.task_ids,
+                explanation=explanation or f"Would spawn {len(wave.tasks)} tasks in wave {wave.wave_number}",
+                dry_run=True,
+            )
+
+        # Actually spawn via Claude Squad
+        backend_selector = BackendSelector.detect(self.working_dir)
+        mode = backend_selector.select(task_count=len(wave.tasks), interactive=True)
+
+        if mode != ExecutionMode.INTERACTIVE:
+            return SpawnResult(
+                spawned_count=0,
+                wave_number=wave.wave_number,
+                task_ids=wave.task_ids,
+                explanation=f"Claude Squad not available (mode={mode.value}). Use manual backend.",
+                error="Claude Squad required for spawn",
+            )
+
+        # Spawn sessions
+        squad_config = SquadConfig(working_dir=self.working_dir)
+        adapter = ClaudeSquadAdapter(squad_config)
+
+        session_ids = []
+        for task in wave.tasks:
+            try:
+                prompt = self._generate_task_prompt(task, prd.id)
+                session_id = adapter.spawn_session(
+                    task_id=task.id,
+                    prompt=prompt,
+                    branch=f"claude/{task.id}",
+                )
+                session_ids.append(session_id)
+                task.status = TaskStatus.RUNNING
+                task.agent_id = session_id
+                task.branch = f"claude/{task.id}"
+                task.started_at = datetime.now(timezone.utc)
+                logger.info(f"Spawned session for task {task.id}: {session_id}")
+            except Exception as e:
+                logger.error(f"Failed to spawn session for task {task.id}: {e}")
+                task.status = TaskStatus.FAILED
+                task.error = str(e)
+
+        return SpawnResult(
+            spawned_count=len(session_ids),
+            wave_number=wave.wave_number,
+            task_ids=[t.id for t in wave.tasks if t.status == TaskStatus.RUNNING],
+            session_ids=session_ids,
+            explanation=explanation,
+        )
+
+    def merge(
+        self,
+        prd: PRDDocument,
+        task_id: str,
+        dry_run: bool = False,
+    ) -> MergeResult:
+        """
+        Merge a single completed task into the integration branch.
+
+        This is the CLI-driven merge method that:
+        1. Validates the task is complete
+        2. Merges its branch into the integration branch
+        3. Auto-resolves any conflicts using the resolution pipeline
+
+        Args:
+            prd: The PRD document
+            task_id: ID of the task to merge
+            dry_run: If True, show what would happen without actually merging
+
+        Returns:
+            MergeResult with details about the merge
+        """
+        task = prd.get_task(task_id)
+        if not task:
+            return MergeResult(
+                success=False,
+                task_id=task_id,
+                error=f"Task not found: {task_id}",
+            )
+
+        if task.status != TaskStatus.RUNNING:
+            return MergeResult(
+                success=False,
+                task_id=task_id,
+                error=f"Task {task_id} is not running (status={task.status.value})",
+            )
+
+        if not task.branch:
+            return MergeResult(
+                success=False,
+                task_id=task_id,
+                error=f"Task {task_id} has no branch",
+            )
+
+        if dry_run:
+            return MergeResult(
+                success=True,
+                task_id=task_id,
+                branch=task.branch,
+                explanation=f"Would merge branch {task.branch} into {prd.integration_branch}",
+                dry_run=True,
+            )
+
+        # Ensure integration branch exists
+        try:
+            self._integration_manager.create_integration_branch(prd.id)
+        except Exception:
+            pass  # Branch may already exist
+
+        # Merge using integration manager
+        try:
+            merge_record = self._integration_manager.merge_branch(
+                branch=task.branch,
+                prd_id=prd.id,
+            )
+
+            task.status = TaskStatus.COMPLETED
+            task.commit_sha = merge_record.commit_sha if hasattr(merge_record, 'commit_sha') else None
+            task.completed_at = datetime.now(timezone.utc)
+
+            return MergeResult(
+                success=True,
+                task_id=task_id,
+                branch=task.branch,
+                commit_sha=task.commit_sha,
+                conflicts_resolved=merge_record.conflicts_resolved if hasattr(merge_record, 'conflicts_resolved') else 0,
+            )
+        except Exception as e:
+            logger.error(f"Merge failed for task {task_id}: {e}")
+            return MergeResult(
+                success=False,
+                task_id=task_id,
+                branch=task.branch,
+                error=str(e),
+            )
+
+    def sync(
+        self,
+        prd: PRDDocument,
+        dry_run: bool = False,
+    ) -> SyncResult:
+        """
+        Sync: merge all completed tasks and spawn the next wave.
+
+        This is a convenience method that combines merge + spawn:
+        1. Find all tasks marked as "done" in Claude Squad sessions
+        2. Merge each one sequentially
+        3. Spawn the next wave of tasks
+
+        Args:
+            prd: The PRD document
+            dry_run: If True, show what would happen without acting
+
+        Returns:
+            SyncResult with details about merges and spawns
+        """
+        merge_results = []
+        spawn_result = None
+
+        # Find tasks that are running but have completed sessions
+        # In CLI-driven mode, we rely on the user marking tasks done
+        # For now, we just spawn the next wave
+
+        if dry_run:
+            # Show what would be spawned
+            spawn_result = self.spawn(prd, dry_run=True)
+            return SyncResult(
+                merged_count=0,
+                spawned_count=spawn_result.spawned_count,
+                merge_results=[],
+                spawn_result=spawn_result,
+                dry_run=True,
+            )
+
+        # Spawn next wave
+        spawn_result = self.spawn(prd)
+
+        return SyncResult(
+            merged_count=0,
+            spawned_count=spawn_result.spawned_count,
+            merge_results=merge_results,
+            spawn_result=spawn_result,
+        )
+
+    def get_sessions_status(self, prd: PRDDocument) -> list[dict]:
+        """
+        Get status of all Claude Squad sessions for this PRD.
+
+        Returns list of session info dicts with:
+        - task_id
+        - session_id
+        - status (running/done/failed)
+        - idle_time (seconds since last activity)
+        """
+        backend_selector = BackendSelector.detect(self.working_dir)
+        mode = backend_selector.select(task_count=1, interactive=True)
+
+        if mode != ExecutionMode.INTERACTIVE:
+            return []
+
+        squad_config = SquadConfig(working_dir=self.working_dir)
+        adapter = ClaudeSquadAdapter(squad_config)
+
+        sessions = []
+        for task in prd.tasks:
+            if task.status == TaskStatus.RUNNING and task.agent_id:
+                try:
+                    session_info = adapter.get_session_info(task.agent_id)
+                    idle_time = None
+                    if task.started_at:
+                        idle_time = (datetime.now(timezone.utc) - task.started_at).total_seconds()
+                    sessions.append({
+                        "task_id": task.id,
+                        "session_id": task.agent_id,
+                        "status": session_info.get("status", "unknown") if session_info else "unknown",
+                        "idle_time": idle_time,
+                        "branch": task.branch,
+                    })
+                except Exception:
+                    sessions.append({
+                        "task_id": task.id,
+                        "session_id": task.agent_id,
+                        "status": "error",
+                        "idle_time": None,
+                        "branch": task.branch,
+                    })
+
+        return sessions

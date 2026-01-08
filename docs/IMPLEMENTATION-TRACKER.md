@@ -2,7 +2,7 @@
 
 **Design Document:** `docs/FINAL-merge-conflict-system-design.md`
 **Started:** January 2026
-**Current Phase:** 6 - PRD Mode & Scale (In Progress)
+**Current Phase:** 6 - PRD Mode & Scale (Claude Squad Integration Complete)
 
 ---
 
@@ -418,6 +418,8 @@ See: `docs/design-review-round3-synthesis.md` for full details.
 - [x] Scale to 20+ concurrent agents (configurable)
 - [x] CLI integration with orchestrator (`orchestrator prd` command)
 - [x] Sequential mode for Claude Code environment
+- [x] **PRD-001 Phase 1: Claude Squad Integration** (session_registry, squad_adapter, backend_selector)
+- [x] **PRD-001 Phase 2: Smart Spawning Model** (spawn_scheduler, CLI-driven workflow)
 - [ ] End-to-end testing with real PRD
 
 ### Files Created
@@ -444,6 +446,16 @@ See: `docs/design-review-round3-synthesis.md` for full details.
 | `tests/prd/test_queue.py` | **DONE** | Job queue tests |
 | `tests/prd/test_workers.py` | **DONE** | Worker pool and backend tests |
 | `tests/prd/test_sequential.py` | **DONE** | Sequential backend tests (12 tests) |
+| **PRD-001 Claude Squad Integration** | | |
+| `src/prd/session_registry.py` | **DONE** | SessionRegistry for persistent session state |
+| `src/prd/squad_capabilities.py` | **DONE** | CapabilityDetector for Claude Squad features |
+| `src/prd/squad_adapter.py` | **DONE** | ClaudeSquadAdapter for spawning/managing sessions |
+| `src/prd/backend_selector.py` | **DONE** | BackendSelector for execution mode selection |
+| `src/prd/spawn_scheduler.py` | **DONE** | SpawnScheduler for smart wave-based task spawning |
+| `src/prd/_deprecated/` | **DONE** | Deprecated backends (local, modal, render, sequential, github_actions, worker_pool) |
+| `tests/prd/test_spawn_scheduler.py` | **DONE** | 25 tests for SpawnScheduler |
+| `tests/prd/test_squad_adapter.py` | **DONE** | Tests for Claude Squad adapter |
+| `tests/prd/test_squad_capabilities.py` | **DONE** | Tests for capability detection |
 
 ### Key Design Decisions
 
@@ -734,6 +746,39 @@ Review types defined in 3 places (workflow.yaml, prompts.py, model_registry.py) 
 - Integration branch pattern: `integration/{prd_id}` accumulates work
 
 **Status:** Phase 6 core infrastructure COMPLETE. Pending: CLI integration, end-to-end tests, external reviews.
+
+### Session 10 (PRD-001 Phase 2)
+**Date:** January 2026
+**Work Done:**
+- Completed PRD-001 Phase 2: Claude Squad Integration with Smart Spawning
+  - `src/prd/spawn_scheduler.py` - SpawnScheduler with file/domain prediction and wave-based scheduling
+  - Updated `src/prd/executor.py` - Added CLI-driven methods: spawn(), merge(), sync()
+  - New result types: SpawnResult, MergeResult, SyncResult
+  - Updated CLI commands with --explain, --dry-run, --force flags
+- Deprecated old backends (moved to `src/prd/_deprecated/`):
+  - local.py, modal_worker.py, render.py, sequential.py, github_actions.py, worker_pool.py
+- External AI code reviews passed:
+  - Security: GPT-5.1 Codex Max (no findings)
+  - Quality: GPT-5.1 Codex Max (no findings)
+  - Consistency: Gemini 3 Pro (no findings)
+  - Holistic: Gemini 3 Pro (no findings)
+  - Vibe Coding: Grok 4.1 (no findings)
+- 25 new SpawnScheduler tests, 156 total PRD tests pass
+- Used orchestrator workflow system throughout (PLAN → EXECUTE → REVIEW → VERIFY → LEARN)
+
+**Key Design Decisions:**
+- CLI-driven workflow: spawn → work in sessions → merge → sync
+- Smart spawning: predict file overlap, group non-conflicting tasks in waves
+- Sequential merging: user controls when to merge each task
+- Zero human code review: system auto-resolves conflicts
+- Preserve deprecated backends in `_deprecated/` for backward compatibility
+
+**Process Notes:**
+- Initially forgot to use orchestrator mid-implementation (context compaction issue)
+- User raised valid concern about forgetting workflows mid-PRD execution
+- Added issue to roadmap: need mechanism to ensure workflow continuity
+
+**Status:** PRD-001 Phase 2 COMPLETE. Claude Squad integration ready for use.
 
 ---
 

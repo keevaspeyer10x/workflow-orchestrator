@@ -12,14 +12,14 @@ import logging
 import os
 from typing import Optional
 
-from .schema import PRDConfig, WorkerBackend, JobMessage
-from .backends.base import WorkerBackendBase, WorkerHandle, WorkerStatus
-from .backends.local import LocalBackend
-from .backends.manual import ManualBackend
-from .backends.modal_worker import ModalBackend
-from .backends.render import RenderBackend
-from .backends.github_actions import GitHubActionsBackend
-from .backends.sequential import SequentialBackend, is_inside_claude_code
+from ..schema import PRDConfig, WorkerBackend, JobMessage
+from ..backends.base import WorkerBackendBase, WorkerHandle, WorkerStatus
+from .local import LocalBackend
+from ..backends.manual import ManualBackend
+from .modal_worker import ModalBackend
+from .render import RenderBackend
+from .github_actions import GitHubActionsBackend
+from .sequential import SequentialBackend, is_inside_claude_code
 
 logger = logging.getLogger(__name__)
 

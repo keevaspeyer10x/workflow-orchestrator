@@ -137,6 +137,7 @@ class PRDTask:
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     error: Optional[str] = None
+    metadata: Optional[dict[str, Any]] = None  # Additional task info (e.g., expected files)
 
     def is_ready(self, completed_tasks: set[str]) -> bool:
         """Check if this task is ready to execute (all dependencies met)."""
