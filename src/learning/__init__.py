@@ -18,6 +18,7 @@ from .pattern_schema import (
     SUGGESTING_THRESHOLD,
     DEPRECATION_FAILURE_COUNT,
 )
+from .pattern_database import PatternDatabase
 
 __all__ = [
     # Enums
@@ -27,6 +28,8 @@ __all__ = [
     "ConflictPattern",
     "PatternMatch",
     "ResolutionOutcome",
+    # Database
+    "PatternDatabase",
     # Constants
     "ACTIVE_THRESHOLD",
     "SUGGESTING_THRESHOLD",
