@@ -6,6 +6,7 @@ to improve future resolution suggestions.
 
 Components:
 - pattern_schema: Data models for conflict patterns (ConflictPattern, PatternMatch, ResolutionOutcome)
+- strategy_schema: Data models for strategy tracking (StrategyStats, StrategyContext, StrategyRecommendation)
 """
 
 from .pattern_schema import (
@@ -21,12 +22,20 @@ from .pattern_schema import (
 from .pattern_database import PatternDatabase
 from .pattern_hasher import PatternHasher
 from .pattern_memory import ConflictPatternMemory, ResolutionSuggestion
+from .strategy_schema import (
+    ResolutionStrategy,
+    ContextType,
+    StrategyStats,
+    StrategyContext,
+    StrategyRecommendation,
+    DEFAULT_STRATEGY_ORDER,
+)
 
 __all__ = [
-    # Enums
+    # Pattern Enums
     "PatternState",
     "ValidationResult",
-    # Data models
+    # Pattern Data models
     "ConflictPattern",
     "PatternMatch",
     "ResolutionOutcome",
@@ -37,8 +46,17 @@ __all__ = [
     # Memory
     "ConflictPatternMemory",
     "ResolutionSuggestion",
-    # Constants
+    # Pattern Constants
     "ACTIVE_THRESHOLD",
     "SUGGESTING_THRESHOLD",
     "DEPRECATION_FAILURE_COUNT",
+    # Strategy Enums
+    "ResolutionStrategy",
+    "ContextType",
+    # Strategy Data models
+    "StrategyStats",
+    "StrategyContext",
+    "StrategyRecommendation",
+    # Strategy Constants
+    "DEFAULT_STRATEGY_ORDER",
 ]
