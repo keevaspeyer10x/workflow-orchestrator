@@ -517,7 +517,7 @@ task-7-feedback-schema ───────────────────
 
 ### Checklist
 
-- [ ] Pattern memory schema (`src/learning/pattern_schema.py`)
+- [x] Pattern memory schema (`src/learning/pattern_schema.py`)
 - [ ] Pattern database (`src/learning/pattern_database.py`)
 - [ ] Pattern hasher (`src/learning/pattern_hasher.py`)
 - [ ] Pattern memory integration (`src/learning/pattern_memory.py`)
