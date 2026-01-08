@@ -1,4 +1,11 @@
 creation_rules:
+  # Manus environment secrets
+  - path_regex: \.manus/secrets\.yaml$
+    age: age14ng54a52gud0c596xp4vjxzw43hgkpus896j3tunyxejw3h3tvzq8l7jyk
+  - path_regex: \.manus/secrets\.enc\.yaml$
+    age: age14ng54a52gud0c596xp4vjxzw43hgkpus896j3tunyxejw3h3tvzq8l7jyk
+
+  # General secrets (non-manus paths)
   - path_regex: .*secrets\.yaml$
     age: age1cs94hvz4rkj5em26wpx6eff8cu5gkjulw0c2d6dcp4szedq2qy2qgmq3ts
   - path_regex: .*\.enc\.yaml$

@@ -81,7 +81,8 @@ class ChecklistItemDef(BaseModel):
     skip_conditions: list[str] = Field(default_factory=list)
     verification: VerificationConfig = Field(default_factory=VerificationConfig)
     agent: Optional[str] = None  # Which agent should handle this (e.g., "manus", "claude_code")
-
+    notes: list[str] = Field(default_factory=list)  # Operating notes for this item
+    
     @field_validator('id')
     @classmethod
     def id_must_be_valid(cls, v):
@@ -112,6 +113,7 @@ class PhaseDef(BaseModel):
     executor: Optional[str] = None  # Which executor to use (e.g., "manus", "claude_code")
     items: list[ChecklistItemDef] = Field(default_factory=list)
     exit_gate: Optional[str] = None  # e.g., "human_approval", "all_tests_pass"
+    notes: list[str] = Field(default_factory=list)  # Operating notes for this phase
     
     @field_validator('id')
     @classmethod
@@ -171,6 +173,7 @@ class ItemState(BaseModel):
     notes: Optional[str] = None
     verification_result: Optional[dict] = None
     retry_count: int = 0
+    files_modified: Optional[list[str]] = None  # WF-006: Track files modified during item completion
 
 
 class PhaseState(BaseModel):
@@ -198,6 +201,8 @@ class WorkflowState(BaseModel):
     metadata: dict = Field(default_factory=dict)
     # Version-locked workflow definition - stored at workflow start to prevent schema drift
     workflow_definition: Optional[dict] = None
+    # Task-specific constraints (Feature 4)
+    constraints: list[str] = Field(default_factory=list)
     
     def get_current_phase(self) -> Optional[PhaseState]:
         """Get the current phase state."""

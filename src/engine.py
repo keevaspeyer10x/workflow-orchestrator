@@ -237,22 +237,84 @@ class WorkflowEngine:
     # ========================================================================
     # Workflow Lifecycle
     # ========================================================================
-    
-    def start_workflow(self, yaml_path: str, task_description: str, project: Optional[str] = None) -> WorkflowState:
-        """Start a new workflow instance."""
+
+    def archive_existing_docs(self, task_slug: str) -> list[str]:
+        """
+        Archive existing workflow documents before starting a new workflow.
+
+        Moves docs/plan.md, docs/risk_analysis.md, and tests/test_cases.md
+        to docs/archive/ with dated filenames.
+
+        Args:
+            task_slug: Slugified task description for filename
+
+        Returns:
+            List of archived file paths
+        """
+        from .utils import slugify
+
+        docs_to_archive = [
+            ("docs/plan.md", "plan"),
+            ("docs/risk_analysis.md", "risk"),
+            ("tests/test_cases.md", "test_cases"),
+        ]
+        archive_dir = self.working_dir / "docs" / "archive"
+
+        archived = []
+        date_str = datetime.now().strftime("%Y-%m-%d")
+
+        for doc_path, suffix in docs_to_archive:
+            src = self.working_dir / doc_path
+            if src.exists():
+                # Ensure archive directory exists
+                archive_dir.mkdir(parents=True, exist_ok=True)
+
+                # Generate unique filename
+                dst = archive_dir / f"{date_str}_{task_slug}_{suffix}.md"
+                counter = 1
+                while dst.exists():
+                    dst = archive_dir / f"{date_str}_{task_slug}_{suffix}_{counter}.md"
+                    counter += 1
+
+                # Move file to archive
+                src.rename(dst)
+                archived.append(str(dst))
+                logger.info(f"Archived {doc_path} to {dst}")
+
+        return archived
+
+    def start_workflow(self, yaml_path: str, task_description: str, project: Optional[str] = None, constraints: Optional[list[str]] = None, no_archive: bool = False) -> WorkflowState:
+        """Start a new workflow instance.
+
+        Args:
+            yaml_path: Path to the workflow YAML definition
+            task_description: Description of the task
+            project: Optional project name
+            constraints: Optional list of task-specific constraints (Feature 4)
+            no_archive: If True, skip archiving existing workflow documents (WF-004)
+        """
         # Load the workflow definition
         yaml_path_resolved = Path(yaml_path).resolve()
         self.load_workflow_def(str(yaml_path_resolved))
-        
+
         # Validate workflow has at least one phase
         if not self.workflow_def.phases:
             raise ValueError("Workflow definition must have at least one phase")
-        
+
         # Check if there's already an active workflow
         existing = self.load_state()
         if existing and existing.status == WorkflowStatus.ACTIVE:
             raise ValueError(f"Active workflow already exists: {existing.workflow_id}. Complete or abandon it first.")
-        
+
+        # Archive existing workflow documents (WF-004)
+        archived_files = []
+        if not no_archive:
+            from .utils import slugify
+            task_slug = slugify(task_description, max_length=30)
+            archived_files = self.archive_existing_docs(task_slug)
+            if archived_files:
+                logger.info(f"Archived {len(archived_files)} workflow document(s)")
+
         # Create new state
         workflow_id = f"wf_{uuid.uuid4().hex[:8]}"
         first_phase = self.workflow_def.phases[0]
@@ -284,6 +346,7 @@ class WorkflowEngine:
             current_phase_id=first_phase.id,
             phases=phases,
             workflow_definition=workflow_def_dict,  # Version-locked definition
+            constraints=constraints or [],  # Feature 4: Task constraints
             metadata={
                 "workflow_yaml_path": str(yaml_path_resolved),
                 "workflow_yaml_checksum": yaml_checksum
@@ -534,7 +597,98 @@ class WorkflowEngine:
         ))
         
         return True, f"Item {item_id} skipped"
-    
+
+    # ========================================================================
+    # Skip Visibility Methods (CORE-010)
+    # ========================================================================
+
+    def get_skipped_items(self, phase_id: str) -> list[Tuple[str, str]]:
+        """
+        Get list of skipped items for a specific phase.
+
+        Args:
+            phase_id: The phase ID to query
+
+        Returns:
+            List of (item_id, skip_reason) tuples for skipped items
+        """
+        if not self.state:
+            return []
+
+        phase = self.state.phases.get(phase_id)
+        if not phase:
+            return []
+
+        return [
+            (item_id, item.skip_reason or "No reason provided")
+            for item_id, item in phase.items.items()
+            if item.status == ItemStatus.SKIPPED
+        ]
+
+    def get_all_skipped_items(self) -> dict[str, list[Tuple[str, str]]]:
+        """
+        Get all skipped items grouped by phase.
+
+        Returns:
+            Dict mapping phase_id to list of (item_id, skip_reason) tuples
+        """
+        if not self.state:
+            return {}
+
+        result = {}
+        for phase_id in self.state.phases:
+            skipped = self.get_skipped_items(phase_id)
+            if skipped:
+                result[phase_id] = skipped
+        return result
+
+    def get_item_definition(self, item_id: str):
+        """
+        Get the workflow definition for an item by ID.
+
+        Args:
+            item_id: The item ID to find
+
+        Returns:
+            ChecklistItemDef if found, None otherwise
+        """
+        if not self.workflow_def:
+            return None
+
+        for phase in self.workflow_def.phases:
+            for item in phase.items:
+                if item.id == item_id:
+                    return item
+        return None
+
+    # ========================================================================
+    # Workflow Summary Methods (CORE-011)
+    # ========================================================================
+
+    def get_workflow_summary(self) -> dict:
+        """
+        Get summary of items per phase.
+
+        Returns:
+            Dict mapping phase_id to dict with 'completed', 'skipped', 'total' counts
+        """
+        if not self.state:
+            return {}
+
+        summary = {}
+        for phase_id, phase in self.state.phases.items():
+            completed = sum(1 for i in phase.items.values()
+                          if i.status == ItemStatus.COMPLETED)
+            skipped = sum(1 for i in phase.items.values()
+                         if i.status == ItemStatus.SKIPPED)
+            total = len(phase.items)
+            summary[phase_id] = {
+                'completed': completed,
+                'skipped': skipped,
+                'total': total
+            }
+        return summary
+
     def approve_item(self, item_id: str, notes: Optional[str] = None) -> Tuple[bool, str]:
         """Approve a manual gate item."""
         item_def, item_state, error = self._validate_item_in_current_phase(item_id)
@@ -694,8 +848,10 @@ class WorkflowEngine:
         result = {"type": verification.type.value, "timestamp": datetime.now(timezone.utc).isoformat()}
         
         if verification.type == VerificationType.FILE_EXISTS:
+            # Substitute template variables in path
+            file_path = self._substitute_template(verification.path)
             # Path traversal protection - use is_relative_to for proper security
-            path = (self.working_dir / verification.path).resolve()
+            path = (self.working_dir / file_path).resolve()
             try:
                 # Python 3.9+ - proper path containment check
                 if not path.is_relative_to(self.working_dir.resolve()):
@@ -805,7 +961,8 @@ class WorkflowEngine:
                     "skippable": item_def.skippable,
                     "status": item_state.status.value if item_state else "unknown",
                     "verification_type": item_def.verification.type.value,
-                    "skip_reason": item_state.skip_reason if item_state else None
+                    "skip_reason": item_state.skip_reason if item_state else None,
+                    "notes": item_def.notes if item_def.notes else []  # Feature 3: Operating notes
                 })
         
         # Count progress
@@ -849,9 +1006,25 @@ class WorkflowEngine:
             f"Task: {status['task']}",
             f"Phase: {status['current_phase']['id']} - {status['current_phase']['name']}",
             f"Progress: {status['current_phase']['progress']}",
-            "",
-            "Checklist:"
         ]
+        
+        # Display constraints if present (Feature 4)
+        if self.state.constraints:
+            lines.append("")
+            lines.append("Constraints:")
+            for constraint in self.state.constraints:
+                lines.append(f"  - {constraint}")
+        
+        # Display phase notes if present (Feature 3)
+        phase_def = self.workflow_def.get_phase(self.state.current_phase_id)
+        if phase_def and phase_def.notes:
+            lines.append("")
+            lines.append("Phase Notes:")
+            for note in phase_def.notes:
+                lines.append(f"  {self._format_note(note)}")
+        
+        lines.append("")
+        lines.append("Checklist:")
         
         next_pending_item = None
         for item in status['checklist']:
@@ -865,6 +1038,12 @@ class WorkflowEngine:
             lines.append(f"  {marker} [{req}] {item['id']} — {item['name']}")
             if item['skip_reason']:
                 lines.append(f"       └─ Skipped: {item['skip_reason']}")
+            
+            # Display item notes if present (Feature 3)
+            item_notes = item.get('notes', [])
+            if item_notes:
+                for note in item_notes:
+                    lines.append(f"       └─ {self._format_note(note)}")
             
             # Track first pending item for next action
             if not next_pending_item and status_val in ["pending", "failed"]:
@@ -892,6 +1071,33 @@ class WorkflowEngine:
         lines.append("=" * 60)
         
         return "\n".join(lines)
+    
+    def _format_note(self, note: str) -> str:
+        """
+        Format a note with optional emoji rendering for categorized notes.
+        
+        Supports bracket prefixes:
+        - [tip] → 💡
+        - [caution] → ⚠️
+        - [learning] → 📚
+        - [context] → 📋
+        - [important] → ❗
+        """
+        emoji_map = {
+            '[tip]': '💡',
+            '[caution]': '⚠️',
+            '[learning]': '📚',
+            '[context]': '📋',
+            '[important]': '❗',
+            '[warning]': '⚠️',
+            '[note]': '📝',
+        }
+        
+        for prefix, emoji in emoji_map.items():
+            if note.lower().startswith(prefix):
+                return f"{emoji} {note[len(prefix):].strip()}"
+        
+        return note
     
     def get_all_phases(self) -> list[dict]:
         """Get all phases from the workflow definition (for dashboard)."""
