@@ -1,0 +1,14 @@
+{
+  "job_id": "job-6c811a95",
+  "task_id": "task-7-feedback-schema",
+  "prd_id": "phase7-learning-optimization",
+  "prompt": "# PRD Task: task-7-feedback-schema\n\n## Description\nCreate agent feedback models in src/learning/feedback_schema.py\n\nModels:\n- AgentFeedback: Feedback from an agent about a resolution\n- FeedbackType: enum (CONFLICT_HINT, PATTERN_SUGGESTION, etc.)\n- GuidanceMessage: Proactive guidance to send to agents\n\nFeedback includes:\n- What worked/didn't work\n- Suggested improvements\n- Context about the conflict\n\nWrite tests in tests/learning/test_feedback_schema.py\n\n\n## Branch\nCreate your work on branch: `claude/task-7-feedback-schema-{worker_id}`\n\n## Requirements\n1. Implement the feature/fix described above\n2. Write tests for your changes\n3. Ensure all tests pass\n4. Commit with clear messages\n\n## When Complete\n- Commit all changes\n- Push your branch\n- The orchestrator will handle merging\n\n## PRD Context\nThis task is part of PRD: phase7-learning-optimization\nDependencies: None\n",
+  "status": "pending",
+  "created_at": "2026-01-08T10:17:06.683702+00:00",
+  "started_at": null,
+  "completed_at": null,
+  "result": null,
+  "error": null,
+  "worker_id": null,
+  "backend": null
+}

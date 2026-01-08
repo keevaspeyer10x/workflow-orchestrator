@@ -1,0 +1,14 @@
+{
+  "job_id": "job-a68e7c16",
+  "task_id": "task-1-pattern-schema",
+  "prd_id": "phase7-learning-optimization",
+  "prompt": "# PRD Task: task-1-pattern-schema\n\n## Description\nCreate the data models for conflict pattern memory in src/learning/pattern_schema.py\n\nModels to create:\n- ConflictPattern: Records a conflict pattern with hash, type, files, resolution\n- PatternMatch: Result of matching a conflict to known patterns\n- ResolutionOutcome: Success/failure record for a pattern application\n\nKey fields for ConflictPattern:\n- pattern_hash: str (computed from conflict characteristics)\n- conflict_type: str (textual, semantic, dependency, etc.)\n- files_involved: list[str]\n- intent_categories: list[str]\n- resolution_strategy: str (agent1_primary, merge, etc.)\n- success_rate: float (0.0 to 1.0)\n- last_used: datetime\n- use_count: int\n\nWrite tests in tests/learning/test_pattern_schema.py\n\n\n## Branch\nCreate your work on branch: `claude/task-1-pattern-schema-{worker_id}`\n\n## Requirements\n1. Implement the feature/fix described above\n2. Write tests for your changes\n3. Ensure all tests pass\n4. Commit with clear messages\n\n## When Complete\n- Commit all changes\n- Push your branch\n- The orchestrator will handle merging\n\n## PRD Context\nThis task is part of PRD: phase7-learning-optimization\nDependencies: None\n",
+  "status": "pending",
+  "created_at": "2026-01-08T10:17:06.672559+00:00",
+  "started_at": null,
+  "completed_at": null,
+  "result": null,
+  "error": null,
+  "worker_id": null,
+  "backend": null
+}

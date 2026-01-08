@@ -1,0 +1,68 @@
+{
+  "timestamp": "2026-01-08T18:38:42.276998",
+  "branch": "main",
+  "files_changed": [
+    ".claude/review-config.yaml",
+    "src/review/models.py"
+  ],
+  "files_added": [],
+  "files_deleted": [],
+  "tier_used": "standard",
+  "models_used": [
+    "claude-self",
+    "gpt-5.2-max"
+  ],
+  "issues_count": 5,
+  "blocking_issues_count": 0,
+  "consensus_issues_count": 0,
+  "overall_confidence": 1.0,
+  "proceed_recommended": true,
+  "summary": "Review completed using standard tier. Models: claude-self, gpt-5.2-max Found 5 issues (0 critical, 2 high). Overall confidence: 100% Recommendation: PROCEED",
+  "issues": [
+    {
+      "id": "issue-1767857922.270994",
+      "severity": "high",
+      "category": "security",
+      "title": "All OpenAI/xAI requests are now implicitly routed through OpenRouter (data egress/compliance risk)",
+      "description": "The model mappings were changed to hard-map OpenAI and xAI model IDs to `openrouter/...` Litellm model strings (e.g., `openai/gpt-5.2-pro` -> `openrouter/openai/gpt-5.2-pro`). This implicitly sends prompts/code diffs to OpenRouter instead of the vendor-native endpoints. That is a security/compliance concern (third-party data processor), and it can be a correctness/availability issue if an `OPENROUTER_API_KEY` is not configured or if OpenRouter is blocked in some environments. Previously, environment variables allowed swapping providers (or using direct OpenAI); that flexibility is removed.",
+      "file_path": "src/review/models.py",
+      "consensus_count": 1
+    },
+    {
+      "id": "issue-1767857922.271044",
+      "severity": "high",
+      "category": "bug",
+      "title": "Removed env-based model overrides may break deployments relying on REVIEW_MODEL_*",
+      "description": "Previously `MODEL_MAPPINGS` read environment variables like `REVIEW_MODEL_OPENAI`, `REVIEW_MODEL_CODEX`, `REVIEW_MODEL_GROK`. The new mappings hard-code OpenRouter strings and no longer respect those overrides. Any deployment that relied on these env vars for routing, pinning, or emergency fallback will silently stop working as intended.",
+      "file_path": "src/review/models.py",
+      "consensus_count": 1
+    },
+    {
+      "id": "issue-1767857922.271059",
+      "severity": "medium",
+      "category": "bug",
+      "title": "NO_TEMPERATURE_MODELS check is brittle (exact-string match only)",
+      "description": "Temperature suppression is based on `if litellm_model not in self.NO_TEMPERATURE_MODELS`. This will fail if the model string varies (aliases, version suffixes, region variants, or if config passes a raw model like `gpt-5.1-codex-max` without the `openrouter/` prefix). In those cases, `temperature` will be sent and may cause runtime errors (the exact issue this change is trying to avoid).",
+      "file_path": "src/review/models.py",
+      "consensus_count": 1
+    },
+    {
+      "id": "issue-1767857922.271069",
+      "severity": "medium",
+      "category": "edge_case",
+      "title": "Mappings include potentially non-existent OpenRouter model IDs (gpt-5, gpt-5.2) without verification",
+      "description": "Comments state \u201cVERIFIED MODELS (Jan 2026)\u201d and list `openai/gpt-5.2-pro` and codex, but the mapping also routes `openai/gpt-5.2` -> `openrouter/openai/gpt-5.2` and `openai/gpt-5` -> `openrouter/openai/gpt-5`. If these IDs are not actually available on OpenRouter, calls will fail at runtime. This is especially risky for any fallback logic that might select these shorter IDs.",
+      "file_path": "src/review/models.py",
+      "consensus_count": 1
+    },
+    {
+      "id": "issue-1767857922.271078",
+      "severity": "low",
+      "category": "maintainability",
+      "title": "YAML model IDs and Python mapping can drift without validation",
+      "description": "The code comments say the YAML is the canonical source, but the Python file also embeds a separate \u201cVERIFIED MODELS\u201d list and hard-coded mappings/notes. This can drift over time, causing subtle mismatches between configured model IDs and what the runtime actually calls (especially as providers rename models).",
+      "file_path": "src/review/models.py",
+      "consensus_count": 1
+    }
+  ]
+}

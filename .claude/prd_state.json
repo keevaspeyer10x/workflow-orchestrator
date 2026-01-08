@@ -1,0 +1,100 @@
+{
+  "prd_id": "phase7-learning-optimization",
+  "prd_title": "Phase 7: Learning & Optimization System",
+  "prd_file": "/home/keeva/workflow-orchestrator/examples/phase7_prd.yaml",
+  "tasks": [
+    {
+      "id": "task-1-pattern-schema",
+      "description": "Create the data models for conflict pattern memory in src/learning/pattern_schema.py\n\nModels to create:\n- ConflictPattern: Records a conflict pattern with hash, type, files, resolution\n- PatternMatch: Result of matching a conflict to known patterns\n- ResolutionOutcome: Success/failure record for a pattern application\n\nKey fields for ConflictPattern:\n- pattern_hash: str (computed from conflict characteristics)\n- conflict_type: str (textual, semantic, dependency, etc.)\n- files_involved: list[str]\n- intent_categories: list[str]\n- resolution_strategy: str (agent1_primary, merge, etc.)\n- success_rate: float (0.0 to 1.0)\n- last_used: datetime\n- use_count: int\n\nWrite tests in tests/learning/test_pattern_schema.py\n",
+      "dependencies": [],
+      "status": "completed"
+    },
+    {
+      "id": "task-2-pattern-database",
+      "description": "Create PatternDatabase class in src/learning/pattern_database.py\n\nImplements file-based storage for conflict patterns:\n- store(pattern: ConflictPattern) -> None\n- lookup(pattern_hash: str) -> Optional[ConflictPattern]\n- find_similar(conflict: ConflictContext, threshold: float) -> list[PatternMatch]\n- update_outcome(pattern_hash: str, success: bool) -> None\n- prune_stale(days: int) -> int  # Remove unused patterns\n\nStorage: JSON files in .claude/patterns/ directory\n\nWrite tests in tests/learning/test_pattern_database.py\n",
+      "dependencies": [
+        "task-1-pattern-schema"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "task-3-pattern-hasher",
+      "description": "Create pattern hashing logic in src/learning/pattern_hasher.py\n\nCompute a hash that identifies \"similar\" conflicts:\n- compute_hash(conflict: ConflictContext) -> str\n- compute_similarity(hash1: str, hash2: str) -> float\n\nHash factors (from design doc):\n- Normalized file paths (remove unique identifiers)\n- Conflict type\n- Intent categories (extracted intents)\n- Code structure patterns (AST-based if available)\n\nThe hash should be fuzzy - similar conflicts should have similar hashes.\nUse locality-sensitive hashing or similar technique.\n\nWrite tests in tests/learning/test_pattern_hasher.py\n",
+      "dependencies": [
+        "task-1-pattern-schema"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "task-4-pattern-memory",
+      "description": "Create ConflictPatternMemory class in src/learning/pattern_memory.py\n\nThis is the main interface (like git rerere for agents):\n- record_resolution(conflict, resolution, outcome) -> None\n- suggest_resolution(conflict) -> Optional[Resolution]\n- get_success_rate(pattern_hash) -> float\n\nIntegration points:\n- Called by ResolutionPipeline after resolution attempt\n- Consulted before generating new candidates\n\nWrite tests in tests/learning/test_pattern_memory.py\n",
+      "dependencies": [
+        "task-2-pattern-database",
+        "task-3-pattern-hasher"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "task-5-strategy-schema",
+      "description": "Create strategy tracking models in src/learning/strategy_schema.py\n\nModels:\n- StrategyStats: Win rate, use count, avg duration per strategy\n- StrategyContext: When/where a strategy works best\n- StrategyRecommendation: Suggested strategy with confidence\n\nStrategies to track:\n- agent1_primary, agent2_primary, merge, fresh_synthesis\n- Per-language/framework breakdowns\n\nWrite tests in tests/learning/test_strategy_schema.py\n",
+      "dependencies": [],
+      "status": "completed"
+    },
+    {
+      "id": "task-6-strategy-tracker",
+      "description": "Create StrategyTracker class in src/learning/strategy_tracker.py\n\nTrack which resolution strategies work best:\n- record_attempt(strategy, context, success, duration) -> None\n- get_stats(strategy: str) -> StrategyStats\n- recommend(context: ConflictContext) -> StrategyRecommendation\n- get_all_stats() -> dict[str, StrategyStats]\n\nStorage: JSON file at .claude/strategy_stats.json\n\nWrite tests in tests/learning/test_strategy_tracker.py\n",
+      "dependencies": [
+        "task-5-strategy-schema"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "task-7-feedback-schema",
+      "description": "Create agent feedback models in src/learning/feedback_schema.py\n\nModels:\n- AgentFeedback: Feedback from an agent about a resolution\n- FeedbackType: enum (CONFLICT_HINT, PATTERN_SUGGESTION, etc.)\n- GuidanceMessage: Proactive guidance to send to agents\n\nFeedback includes:\n- What worked/didn't work\n- Suggested improvements\n- Context about the conflict\n\nWrite tests in tests/learning/test_feedback_schema.py\n",
+      "dependencies": [],
+      "status": "completed"
+    },
+    {
+      "id": "task-8-feedback-loop",
+      "description": "Create FeedbackLoop class in src/learning/feedback_loop.py\n\nBidirectional communication with agents:\n- collect_feedback(agent_id, feedback: AgentFeedback) -> None\n- generate_guidance(agent_id, task_context) -> list[GuidanceMessage]\n- get_agent_history(agent_id) -> list[AgentFeedback]\n\nGuidance includes:\n- \"Similar conflict resolved with X strategy\"\n- \"Avoid Y approach, failed 3 times\"\n- \"Watch for Z pattern in this codebase\"\n\nWrite tests in tests/learning/test_feedback_loop.py\n",
+      "dependencies": [
+        "task-7-feedback-schema",
+        "task-4-pattern-memory",
+        "task-6-strategy-tracker"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "task-9-learning-integration",
+      "description": "Integrate learning components with existing systems.\n\nUpdate src/learning/__init__.py to export new classes.\n\nIntegration points:\n1. ResolutionPipeline (src/resolution/pipeline.py):\n   - Consult PatternMemory before generating candidates\n   - Record outcomes after resolution\n\n2. PRDExecutor (src/prd/executor.py):\n   - Send guidance to agents before task start\n   - Collect feedback after task completion\n\n3. WaveResolver (src/prd/wave_resolver.py):\n   - Use StrategyTracker to pick best strategy\n\nWrite integration tests in tests/learning/test_integration.py\n",
+      "dependencies": [
+        "task-4-pattern-memory",
+        "task-6-strategy-tracker",
+        "task-8-feedback-loop"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "task-10-performance",
+      "description": "Optimize learning system performance.\n\nOptimizations:\n1. Pattern lookup caching (LRU cache for frequent patterns)\n2. Async pattern storage (don't block resolution on I/O)\n3. Batch feedback processing\n4. Index patterns by conflict type for faster lookup\n\nAdd performance tests in tests/learning/test_performance.py\nTarget: Pattern lookup < 10ms, storage < 50ms\n",
+      "dependencies": [
+        "task-9-learning-integration"
+      ],
+      "status": "completed"
+    }
+  ],
+  "current_task": null,
+  "completed_tasks": [
+    "task-1-pattern-schema",
+    "task-2-pattern-database",
+    "task-3-pattern-hasher",
+    "task-4-pattern-memory",
+    "task-5-strategy-schema",
+    "task-6-strategy-tracker",
+    "task-7-feedback-schema",
+    "task-8-feedback-loop",
+    "task-9-learning-integration",
+    "task-10-performance"
+  ],
+  "checkpoint_interval": 3
+}

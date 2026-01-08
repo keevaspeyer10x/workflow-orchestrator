@@ -1,0 +1,14 @@
+{
+  "job_id": "job-aa94d534",
+  "task_id": "task-5-strategy-schema",
+  "prd_id": "phase7-learning-optimization",
+  "prompt": "# PRD Task: task-5-strategy-schema\n\n## Description\nCreate strategy tracking models in src/learning/strategy_schema.py\n\nModels:\n- StrategyStats: Win rate, use count, avg duration per strategy\n- StrategyContext: When/where a strategy works best\n- StrategyRecommendation: Suggested strategy with confidence\n\nStrategies to track:\n- agent1_primary, agent2_primary, merge, fresh_synthesis\n- Per-language/framework breakdowns\n\nWrite tests in tests/learning/test_strategy_schema.py\n\n\n## Branch\nCreate your work on branch: `claude/task-5-strategy-schema-{worker_id}`\n\n## Requirements\n1. Implement the feature/fix described above\n2. Write tests for your changes\n3. Ensure all tests pass\n4. Commit with clear messages\n\n## When Complete\n- Commit all changes\n- Push your branch\n- The orchestrator will handle merging\n\n## PRD Context\nThis task is part of PRD: phase7-learning-optimization\nDependencies: None\n",
+  "status": "pending",
+  "created_at": "2026-01-08T10:17:06.681531+00:00",
+  "started_at": null,
+  "completed_at": null,
+  "result": null,
+  "error": null,
+  "worker_id": null,
+  "backend": null
+}

@@ -1787,6 +1787,205 @@ During WF-005-009 implementation, agent presented clarifying questions but immed
 
 ---
 
+### WF-022: PRD Execution Continuity After Context Compaction
+**Status:** Planned
+**Complexity:** High
+**Priority:** Critical
+**Source:** PRD-001 Phase 2 Session - User concern about forgetting merge flows
+**Description:** Ensure PRD execution state and merge workflows survive context compaction and can be resumed safely.
+
+**Problem Solved:**
+During PRD-001 Phase 2 implementation, context compaction caused the AI to forget the active orchestrator workflow. The same could happen during PRD execution, leading to:
+1. **Orphaned Claude Squad sessions** - Agents running with no one to merge their work
+2. **Half-merged integration branch** - Some tasks merged, others forgotten
+3. **Lost PRD state** - Which tasks are done, which pending, which have conflicts
+4. **Wasted compute** - Sessions running indefinitely without completion
+
+**Current State:**
+- `session_registry.json` persists session state (but not consulted on context restore)
+- `.prd_state.json` persists PRD execution state (but not auto-injected)
+- `orchestrator status` and `prd status` can show state (but require manual invocation)
+
+**Desired Behavior:**
+1. **Auto-inject PRD state** on context restore:
+   ```
+   ACTIVE PRD EXECUTION DETECTED
+   ─────────────────────────────
+   PRD: prd-001 (5/10 tasks complete)
+   Active sessions: 3 (task-6, task-7, task-8)
+   Integration branch: integration/prd-001
+
+   You MUST run `prd status` to see full state before taking any action.
+   ```
+
+2. **Warn on idle sessions**:
+   - Track last activity time per session
+   - Warn if session idle > 1 hour
+   - Suggest `prd merge <task>` or `prd attach <task>`
+
+3. **Resume capability**:
+   - `prd resume` command to restore context from state files
+   - Show what was in progress, what needs attention
+   - Suggest next actions based on state
+
+4. **State file validation**:
+   - Detect inconsistencies (session says "done" but task not merged)
+   - Warn about stale state (last updated > 24h ago)
+   - Suggest cleanup actions
+
+**Implementation:**
+```python
+# Hook for context restore (in CLAUDE.md or hooks)
+def on_context_restore():
+    prd_state = load_prd_state()
+    if prd_state and prd_state.is_active:
+        print_prd_warning(prd_state)
+        inject_prd_context(prd_state)
+
+# In src/prd/executor.py
+class PRDExecutor:
+    def get_resume_context(self) -> str:
+        """Generate context for resuming after compaction."""
+        return f"""
+        PRD: {self.prd.id}
+        Tasks: {self._format_task_summary()}
+        Sessions: {self._format_session_summary()}
+        Next action: {self._suggest_next_action()}
+        """
+```
+
+**Files:** `.claude/hooks/`, `src/prd/executor.py`, `CLAUDE.md`
+
+**Tasks:**
+- [ ] Add `on_context_restore` hook that checks for active PRD
+- [ ] Inject PRD state into context on restore
+- [ ] Add `prd resume` command
+- [ ] Add idle session warnings to `prd status`
+- [ ] Add state validation with inconsistency detection
+- [ ] Document PRD continuity behavior in CLAUDE.md
+- [ ] Test context compaction with active PRD
+
+**Risk if Not Implemented:**
+PRD execution with Claude Squad relies on AI memory to coordinate merge timing. If context compacts mid-execution, sessions continue but merging stops. This could leave integration branches in broken states or waste significant compute on orphaned sessions.
+
+---
+
+### PRD-003: Unified Orchestrator with Automatic Parallelization
+**Status:** Planned
+**Complexity:** High
+**Priority:** High
+**Source:** PRD-001 Phase 2 Session - User request for integrated system
+**Depends On:** PRD-001 Phase 2 (Claude Squad integration)
+
+**Description:** Integrate the PRD multi-agent execution model directly into the orchestrator workflow, allowing automatic task parallelization when complexity is detected.
+
+**Problem Solved:**
+Currently users must choose between:
+1. `orchestrator start` - Single-agent workflow (PLAN→EXECUTE→REVIEW→VERIFY→LEARN)
+2. `prd spawn/merge/sync` - Multi-agent parallel execution
+
+This creates cognitive overhead and requires users to know upfront whether a task is complex. The unified system would auto-detect complexity and offer parallelization.
+
+**Desired Behavior:**
+
+```
+orchestrator start "Build authentication system" [--parallel | --no-parallel]
+                              │
+                              ▼
+                    ┌─────────────────┐
+                    │   PLAN PHASE    │
+                    │                 │
+                    │ Assess task     │
+                    │ complexity...   │
+                    └────────┬────────┘
+                             │
+              ┌──────────────┴──────────────┐
+              │                             │
+     Complex (or --parallel)        Simple (or --no-parallel)
+              │                             │
+              ▼                             ▼
+    "Break into sub-tasks?"         Single-agent execution
+    [Shows suggested breakdown]     (current behavior)
+              │
+              ▼
+    Spawn parallel agents via Claude Squad
+    Each sub-agent runs own orchestrator workflow
+    Parent coordinates spawn/merge
+              │
+              ▼
+    Aggregate REVIEW & LEARN phases
+```
+
+**CLI Interface:**
+
+```bash
+# Auto-detect complexity (prompt if complex)
+orchestrator start "Build auth system"
+
+# Force parallel execution
+orchestrator start "Build auth system" --parallel
+
+# Force single-agent (skip complexity check)
+orchestrator start "Build auth system" --no-parallel
+
+# Specify max parallel agents
+orchestrator start "Build auth system" --parallel --max-agents 4
+```
+
+**Implementation Phases:**
+
+**Phase 1: Complexity Detection**
+- Analyze task description for complexity signals
+- Count implied sub-tasks (e.g., "and", lists, multiple features)
+- Check for domain spread (auth + API + UI = complex)
+- Suggest breakdown when complexity detected
+
+**Phase 2: Sub-Task Generation**
+- AI-assisted task decomposition
+- Generate PRD-style task list with dependencies
+- User approval of breakdown before spawning
+
+**Phase 3: Parallel Execution**
+- Spawn Claude Squad sessions for each sub-task
+- Each session runs full orchestrator workflow (PLAN→LEARN)
+- Parent tracks progress across all sub-agents
+- SpawnScheduler prevents conflicting tasks from running simultaneously
+
+**Phase 4: Aggregation**
+- Merge completed sub-agent work via existing `prd merge`
+- Aggregate REVIEW results from all sub-agents
+- Combine LEARN phase learnings
+- Final integration review on merged code
+
+**Key Benefits:**
+1. **Single entry point** - Users don't need to know about PRD vs orchestrator
+2. **Automatic complexity detection** - System suggests parallelization when helpful
+3. **User control** - Can override with `--parallel` / `--no-parallel` flags
+4. **Consistent quality** - Each sub-task still gets full PLAN→REVIEW→LEARN cycle
+5. **Simpler mental model** - "Start a task, system handles the rest"
+
+**Files to Create/Modify:**
+- `src/complexity_analyzer.py` (new) - Task complexity detection
+- `src/task_decomposer.py` (new) - AI-assisted task breakdown
+- `src/cli.py` - Add `--parallel`, `--no-parallel`, `--max-agents` flags
+- `src/engine.py` - Integrate parallel execution path
+- `src/prd/executor.py` - Add sub-agent orchestrator workflow injection
+
+**Tasks:**
+- [ ] Design complexity scoring algorithm
+- [ ] Implement complexity detection in PLAN phase
+- [ ] Add sub-task generation with user approval
+- [ ] Integrate SpawnScheduler into orchestrator flow
+- [ ] Update task prompts to run full orchestrator workflow (done in Phase 2)
+- [ ] Implement progress tracking across sub-agents
+- [ ] Add aggregation logic for REVIEW and LEARN phases
+- [ ] Add CLI flags (`--parallel`, `--no-parallel`, `--max-agents`)
+- [ ] Add tests for complexity detection
+- [ ] Add tests for task decomposition
+- [ ] Document unified workflow in CLAUDE.md
+
+---
+
 ### WF-016: Integrate Learning System with Git Merge Conflicts
 **Status:** Planned
 **Complexity:** Medium

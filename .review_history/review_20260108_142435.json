@@ -1,0 +1,27 @@
+{
+  "timestamp": "2026-01-08T14:24:35.101531",
+  "branch": "claude/merge-conflict-management-Txo6p",
+  "files_changed": [
+    "docs/IMPLEMENTATION-TRACKER.md",
+    "src/resolution/candidate.py",
+    "src/resolution/context.py",
+    "src/resolution/pipeline.py",
+    "src/resolution/validator.py"
+  ],
+  "files_added": [
+    "scripts/pre_commit_review.py"
+  ],
+  "files_deleted": [],
+  "tier_used": "comprehensive",
+  "models_used": [
+    "claude-self",
+    "gemini-2.5-pro"
+  ],
+  "issues_count": 0,
+  "blocking_issues_count": 0,
+  "consensus_issues_count": 0,
+  "overall_confidence": 0.5,
+  "proceed_recommended": false,
+  "summary": "Review completed using comprehensive tier. Models: claude-self, gemini-2.5-pro No issues found. Overall confidence: 50% Recommendation: ADDRESS ISSUES FIRST",
+  "issues": []
+}
