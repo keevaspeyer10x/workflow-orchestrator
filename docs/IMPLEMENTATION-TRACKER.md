@@ -481,10 +481,39 @@ This serves as both the Phase 7 implementation AND the end-to-end test for Phase
 
 ```bash
 # In a new chat session with fresh context:
-orchestrator prd start examples/phase7_prd.yaml --backend local
+orchestrator prd start examples/phase7_prd.yaml --backend local --checkpoint-interval 3
 ```
 
 The PRD file (`examples/phase7_prd.yaml`) contains 10 tasks with proper dependencies.
+
+### Testing Goals (Dogfooding)
+
+Since this is a test of the PRD system, intentionally exercise multiple code paths:
+
+| Feature | How to Test |
+|---------|-------------|
+| **Checkpoint PRs** | Use `--checkpoint-interval 3` to trigger checkpoints frequently |
+| **Wave-based merging** | Tasks 2 & 3 can run in parallel (both depend on task-1) |
+| **Cancel/resume** | Intentionally cancel mid-execution with Ctrl+C, then resume |
+| **Different backends** | If local has issues, try `--backend manual` or `--backend modal` |
+| **Conflict resolution** | If two agents touch similar files, observe wave resolver |
+
+**Report any PRD system bugs encountered during execution.**
+
+### Task Dependency Graph
+
+```
+task-1-pattern-schema ─┬─► task-2-pattern-database ─┬─► task-4-pattern-memory ─┐
+                       └─► task-3-pattern-hasher ───┘                          │
+                                                                               │
+task-5-strategy-schema ──► task-6-strategy-tracker ────────────────────────────┼─► task-8-feedback-loop
+                                                                               │         │
+task-7-feedback-schema ────────────────────────────────────────────────────────┘         ▼
+                                                                               task-9-learning-integration
+                                                                                         │
+                                                                                         ▼
+                                                                               task-10-performance
+```
 
 ### Checklist
 
