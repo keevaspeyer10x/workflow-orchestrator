@@ -1,0 +1,5 @@
+creation_rules:
+  - path_regex: .*secrets\.yaml$
+    age: age1cs94hvz4rkj5em26wpx6eff8cu5gkjulw0c2d6dcp4szedq2qy2qgmq3ts
+  - path_regex: .*\.enc\.yaml$
+    age: age1cs94hvz4rkj5em26wpx6eff8cu5gkjulw0c2d6dcp4szedq2qy2qgmq3ts
