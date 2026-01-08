@@ -377,6 +377,24 @@ settings:
     warn_on_resume: true
 ```
 
+**4. Uncommitted changes warning:**
+```
+⚠️  UNCOMMITTED CHANGES DETECTED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Workflow completed but changes not committed:
+  Modified: 5 files
+  Added: 2 files
+
+Suggested commit message:
+  feat: Implement auth feature
+
+  - Add JWT validation middleware
+  - Add login/logout endpoints
+  - Add auth tests
+
+Create commit now? [Y/n/edit message]
+```
+
 **Tasks:**
 - [ ] Create session end hook that checks for active workflow
 - [ ] Add auto-checkpoint on session end
@@ -384,6 +402,8 @@ settings:
 - [ ] Add abandonment tracking to workflow state
 - [ ] Add `--check-stale` flag to status command
 - [ ] Add resume prompt on session start
+- [ ] Add uncommitted changes check to `orchestrator finish`
+- [ ] Suggest commit message based on workflow task description
 - [ ] Add configuration options
 - [ ] Track abandonment metrics for analysis
 - [ ] Integrate with session logging (CORE-024)
@@ -551,6 +571,209 @@ orchestrator sessions analyze-errors   # Standalone error analysis
 
 **Privacy Consideration:**
 Error analysis runs on already-scrubbed transcripts (CORE-024), so no secrets are exposed in error messages. However, file paths and code snippets in stack traces should be reviewed for sensitivity.
+
+---
+
+#### CONTEXT-001: Context Documents System (North Star, Architecture, UI Style Guide)
+**Status:** Planned
+**Complexity:** Medium
+**Priority:** High
+**Source:** User discussion - Ensuring AI alignment with project vision in zero-human-review workflows
+
+**Description:** A system of persistent context documents that get injected into sessions and review prompts, ensuring AI agents stay aligned with project vision, architecture decisions, and design standards - even across context compaction and session boundaries.
+
+**Problem Solved:**
+In zero-human-review AI coding, there's no human to catch:
+- "Wait, we decided to use PostgreSQL, not SQLite"
+- "That button style doesn't match our design system"
+- "This feature conflicts with our stated non-negotiables"
+
+The AI needs a **persistent proxy for human intent** that survives context loss.
+
+**Document Hierarchy:**
+
+| Document | Purpose | Size | Injection |
+|----------|---------|------|-----------|
+| **NORTH_STAR.md** | Vision, non-negotiables, current focus | ~500 tokens | Always |
+| **ARCHITECTURE.md** | System design, data flow, anti-patterns | ~1.5k tokens | On code changes |
+| **UI_STYLE_GUIDE.md** | Visual design system, components, brand | ~1k tokens | On frontend changes |
+| **PRDs/** | Feature specifications, acceptance criteria | ~2-5k each | PLAN phase / on-demand |
+
+**1. North Star (Always Injected)**
+
+```markdown
+# NORTH_STAR.md
+
+## Vision
+A workflow orchestrator enabling zero-human-review AI coding
+with quality gates enforced by multi-model review.
+
+## Non-Negotiables
+- All code changes go through external model review
+- Workflows must complete (no silent abandonment)
+- Secrets never appear in logs or transcripts
+
+## Architecture Decisions
+| Decision | Date | Rationale |
+|----------|------|-----------|
+| Use Claude Squad for multi-agent | 2026-01-08 | Simpler than custom spawning |
+| Hybrid secret scrubbing | 2026-01-09 | Known secrets + regex patterns |
+
+## What We're NOT Building
+- A GUI (CLI-first)
+- A SaaS product (local-first tool)
+
+## Current Focus
+PRD-001 Phase 2: Complete Claude Squad integration
+
+## Active PRDs
+- PRD-001: Claude Squad Integration [Phase 2] → docs/prd/prd-001.md
+- PRD-003: Unified Parallelization [Planning] → docs/prd/prd-003.md
+```
+
+**2. Architecture Doc (On Code Changes)**
+
+```markdown
+# ARCHITECTURE.md
+
+## System Overview
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   CLI       │────▶│   Engine    │────▶│   State     │
+│ (src/cli.py)│     │(src/engine) │     │ (.json files)│
+└─────────────┘     └─────────────┘     └─────────────┘
+
+## Extension Points
+- New review types: Add to src/review/registry.py
+- New CLI commands: Add to src/cli.py
+- New workflow phases: Modify workflow.yaml schema
+
+## Anti-Patterns (Don't Do This)
+- Don't add new state files - extend existing schema
+- Don't create new util files - use src/utils.py
+- Don't add dependencies without updating pyproject.toml
+```
+
+**3. UI/UX Style Guide (On Frontend Changes)**
+
+```markdown
+# UI_STYLE_GUIDE.md
+
+## Brand
+- Primary: #2563EB (blue-600)
+- Secondary: #1E293B (slate-800)
+- Font: Inter for UI, JetBrains Mono for code
+
+## Components
+- Buttons: rounded-md, py-2 px-4
+- Inputs: border-gray-300, focus:ring-2 focus:ring-blue-500
+- Cards: shadow-sm, rounded-lg, p-6
+
+## Spacing Scale
+4px base: 4, 8, 12, 16, 24, 32, 48
+
+## Accessibility
+- Minimum contrast ratio: 4.5:1
+- All interactive elements keyboard accessible
+```
+
+**Injection Strategy:**
+
+```
+Session Start
+    │
+    ├── Always: CLAUDE.md + NORTH_STAR.md (~1k tokens)
+    │
+    ├── On code changes: + ARCHITECTURE.md (~1.5k tokens)
+    │
+    ├── On frontend changes: + UI_STYLE_GUIDE.md (~1k tokens)
+    │
+    └── On PLAN phase: + relevant PRD (~3k tokens)
+```
+
+**Integration with Reviews:**
+
+External reviewers receive context document summaries:
+
+```
+REVIEW PROMPT
+─────────────
+Project Vision: Zero-human-review AI coding with multi-model quality gates
+
+Non-Negotiables:
+- All changes go through external review
+- No secrets in logs
+
+Architecture Constraints:
+- Using Claude Squad for multi-agent (not custom spawning)
+- State in JSON files, not database
+
+UI Requirements (if frontend):
+- Primary color: #2563EB
+- Minimum contrast: 4.5:1
+
+Please review this diff for:
+1. Security issues
+2. Alignment with stated vision and architecture
+3. Violations of non-negotiables
+4. Style guide compliance (if UI changes)
+```
+
+**CLI Commands:**
+
+```bash
+# Initialize context documents
+orchestrator init-context              # Create template docs
+
+# Check alignment before major changes
+orchestrator align-check               # Validate against North Star
+# "⚠️ This adds a database. North Star says 'No database for MVP'. Proceed?"
+
+# Update during LEARN phase
+orchestrator north-star add-decision "Use SOPS for secrets" --rationale "Team standard"
+orchestrator north-star update-focus "CORE-023: Merge resolution"
+
+# View current context
+orchestrator context --show            # Display what would be injected
+orchestrator context --include-prd PRD-001  # Include specific PRD
+```
+
+**Update Triggers:**
+
+| Event | Action |
+|-------|--------|
+| LEARN phase | Prompt: "Any new architecture decisions to record?" |
+| PRD completion | Update North Star focus to next priority |
+| Major refactor | Prompt: "Update ARCHITECTURE.md?" |
+| New component | Prompt: "Add to UI_STYLE_GUIDE.md?" |
+
+**Integration Points:**
+- **CORE-024** (Session Logging): Log which context was injected
+- **LEARN-001** (Error Analysis): Suggest context updates based on errors
+- **WF-008** (AI Critique): Reviewers use context for alignment checks
+- **Visual Verification**: VV-001 already supports style guide path
+
+**Tasks:**
+- [ ] Define document schemas/templates
+- [ ] Create `orchestrator init-context` command
+- [ ] Implement context injection at session start
+- [ ] Add smart injection (detect code vs frontend changes)
+- [ ] Integrate context into review prompts
+- [ ] Add `orchestrator align-check` command
+- [ ] Add `orchestrator north-star` subcommands
+- [ ] Create LEARN phase prompts for context updates
+- [ ] Add `orchestrator context --show` command
+- [ ] Update review router to include context summaries
+- [ ] Add tests for injection logic
+- [ ] Document in CLAUDE.md
+
+**Why This Matters for Zero-Human-Review:**
+These documents act as the **human's proxy**. When no human is reviewing:
+- North Star enforces intent and priorities
+- Architecture prevents structural drift
+- UI Style Guide ensures visual consistency
+- PRDs provide detailed requirements
+
+The AI reviewers become enforcers of these standards, catching violations that would otherwise slip through.
 
 ---
 
