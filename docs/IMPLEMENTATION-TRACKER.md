@@ -415,7 +415,7 @@ See: `docs/design-review-round3-synthesis.md` for full details.
   - [x] GitHubActionsBackend
 - [x] PRD Executor orchestrator (`src/prd/executor.py`)
 - [x] Scale to 20+ concurrent agents (configurable)
-- [ ] CLI integration with orchestrator
+- [x] CLI integration with orchestrator (`orchestrator prd` command)
 - [ ] End-to-end testing with real PRD
 
 ### Files Created

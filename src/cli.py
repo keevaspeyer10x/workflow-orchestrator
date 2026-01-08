@@ -2075,6 +2075,259 @@ def cmd_update_models(args):
         sys.exit(1)
 
 
+# ============================================================================
+# PRD Commands (Phase 6)
+# ============================================================================
+
+def cmd_prd_start(args):
+    """Start PRD execution from a PRD file."""
+    import asyncio
+    import yaml
+    from src.prd import PRDExecutor, PRDConfig, PRDDocument, PRDTask, WorkerBackend
+
+    working_dir = Path(args.dir or '.')
+    prd_path = Path(args.prd_file)
+
+    if not prd_path.exists():
+        print(f"Error: PRD file not found: {prd_path}")
+        sys.exit(1)
+
+    # Load PRD YAML
+    try:
+        with open(prd_path) as f:
+            prd_data = yaml.safe_load(f)
+    except Exception as e:
+        print(f"Error: Failed to parse PRD file: {e}")
+        sys.exit(1)
+
+    # Create PRD document from YAML
+    try:
+        tasks = []
+        for task_data in prd_data.get('tasks', []):
+            tasks.append(PRDTask(
+                id=task_data['id'],
+                description=task_data['description'],
+                dependencies=task_data.get('dependencies', []),
+            ))
+
+        prd = PRDDocument(
+            id=prd_data.get('id', f"prd-{datetime.now().strftime('%Y%m%d-%H%M%S')}"),
+            title=prd_data.get('title', 'Untitled PRD'),
+            tasks=tasks,
+        )
+    except KeyError as e:
+        print(f"Error: Invalid PRD format - missing required field: {e}")
+        sys.exit(1)
+
+    # Map backend argument to enum
+    backend_map = {
+        'auto': WorkerBackend.AUTO,
+        'local': WorkerBackend.LOCAL,
+        'modal': WorkerBackend.MODAL,
+        'render': WorkerBackend.RENDER,
+        'github': WorkerBackend.GITHUB_ACTIONS,
+        'manual': WorkerBackend.MANUAL,
+    }
+
+    # Create config
+    config = PRDConfig(
+        enabled=True,
+        worker_backend=backend_map.get(args.backend, WorkerBackend.AUTO),
+        max_concurrent_agents=args.max_agents,
+        checkpoint_interval=args.checkpoint_interval,
+    )
+
+    print(f"Starting PRD execution: {prd.title}")
+    print(f"  PRD ID: {prd.id}")
+    print(f"  Tasks: {len(prd.tasks)}")
+    print(f"  Backend: {config.worker_backend.value}")
+    print(f"  Max agents: {config.max_concurrent_agents}")
+    print()
+
+    # Create executor with callbacks
+    def on_task_complete(task, result):
+        status = "✓" if result.success else "✗"
+        print(f"  {status} Task {task.id} completed")
+
+    def on_checkpoint(checkpoint):
+        print(f"  📋 Checkpoint PR created: {checkpoint.pr_url}")
+
+    executor = PRDExecutor(
+        config=config,
+        working_dir=working_dir,
+        on_task_complete=on_task_complete,
+        on_checkpoint=on_checkpoint,
+    )
+
+    # Run execution
+    try:
+        result = asyncio.run(executor.execute_prd(prd))
+    except KeyboardInterrupt:
+        print("\nExecution interrupted")
+        executor.cancel()
+        sys.exit(1)
+
+    # Print results
+    print()
+    print("=" * 60)
+    print("PRD EXECUTION COMPLETE")
+    print("=" * 60)
+    print(f"  Status: {'SUCCESS' if result.success else 'FAILED'}")
+    print(f"  Tasks completed: {result.tasks_completed}")
+    print(f"  Tasks failed: {result.tasks_failed}")
+    print(f"  Duration: {result.duration_seconds:.1f}s")
+
+    if result.checkpoint_prs:
+        print(f"  Checkpoint PRs: {len(result.checkpoint_prs)}")
+        for cp in result.checkpoint_prs:
+            print(f"    - {cp.pr_url}")
+
+    if result.final_pr_url:
+        print(f"  Final PR: {result.final_pr_url}")
+
+    if result.error:
+        print(f"  Error: {result.error}")
+
+    sys.exit(0 if result.success else 1)
+
+
+def cmd_prd_status(args):
+    """Show PRD execution status."""
+    from src.prd import PRDExecutor, PRDConfig
+
+    working_dir = Path(args.dir or '.')
+
+    # Create a minimal executor to check status
+    config = PRDConfig(enabled=True)
+    executor = PRDExecutor(config=config, working_dir=working_dir)
+
+    status = executor.get_status()
+
+    if status.get('status') == 'idle':
+        print("No PRD execution in progress")
+        sys.exit(0)
+
+    print("PRD Execution Status")
+    print("=" * 40)
+    print(f"  PRD ID: {status.get('prd_id', 'N/A')}")
+    print(f"  Status: {status.get('status', 'unknown')}")
+
+    if progress := status.get('progress'):
+        print(f"  Progress: {progress}")
+
+    if queue := status.get('queue'):
+        print(f"  Queue: {queue}")
+
+    if workers := status.get('workers'):
+        print(f"  Workers: {workers}")
+
+
+def cmd_prd_cancel(args):
+    """Cancel PRD execution."""
+    from src.prd import PRDExecutor, PRDConfig
+
+    working_dir = Path(args.dir or '.')
+
+    config = PRDConfig(enabled=True)
+    executor = PRDExecutor(config=config, working_dir=working_dir)
+
+    if executor.cancel():
+        print("✓ PRD execution cancelled")
+    else:
+        print("No PRD execution to cancel")
+
+
+def cmd_prd_validate(args):
+    """Validate a PRD file without executing."""
+    import yaml
+    from src.prd import PRDTask
+
+    prd_path = Path(args.prd_file)
+
+    if not prd_path.exists():
+        print(f"Error: PRD file not found: {prd_path}")
+        sys.exit(1)
+
+    try:
+        with open(prd_path) as f:
+            prd_data = yaml.safe_load(f)
+    except Exception as e:
+        print(f"Error: Failed to parse YAML: {e}")
+        sys.exit(1)
+
+    errors = []
+    warnings = []
+
+    # Check required fields
+    if 'id' not in prd_data:
+        warnings.append("Missing 'id' field - will be auto-generated")
+
+    if 'title' not in prd_data:
+        warnings.append("Missing 'title' field")
+
+    if 'tasks' not in prd_data:
+        errors.append("Missing 'tasks' field - PRD must have at least one task")
+    elif not isinstance(prd_data['tasks'], list):
+        errors.append("'tasks' must be a list")
+    elif len(prd_data['tasks']) == 0:
+        errors.append("PRD must have at least one task")
+    else:
+        # Validate tasks
+        task_ids = set()
+        for i, task in enumerate(prd_data['tasks']):
+            if not isinstance(task, dict):
+                errors.append(f"Task {i}: must be a dictionary")
+                continue
+
+            if 'id' not in task:
+                errors.append(f"Task {i}: missing 'id' field")
+            else:
+                if task['id'] in task_ids:
+                    errors.append(f"Task {i}: duplicate task ID '{task['id']}'")
+                task_ids.add(task['id'])
+
+            if 'description' not in task:
+                errors.append(f"Task {i}: missing 'description' field")
+
+            # Check dependencies exist
+            for dep in task.get('dependencies', []):
+                if dep not in task_ids:
+                    # Dep might be defined later
+                    pass
+
+        # Second pass: verify all dependencies exist
+        for task in prd_data['tasks']:
+            for dep in task.get('dependencies', []):
+                if dep not in task_ids:
+                    errors.append(f"Task '{task.get('id', '?')}': dependency '{dep}' not found")
+
+    # Print results
+    if errors:
+        print("✗ PRD validation FAILED")
+        print()
+        for error in errors:
+            print(f"  ERROR: {error}")
+    else:
+        print("✓ PRD validation passed")
+
+    if warnings:
+        print()
+        for warning in warnings:
+            print(f"  WARNING: {warning}")
+
+    if not errors:
+        print()
+        print(f"  Tasks: {len(prd_data.get('tasks', []))}")
+
+        # Show task summary
+        for task in prd_data.get('tasks', []):
+            deps = task.get('dependencies', [])
+            dep_str = f" (deps: {', '.join(deps)})" if deps else ""
+            print(f"    - {task.get('id', '?')}: {task.get('description', 'No description')[:50]}{dep_str}")
+
+    sys.exit(1 if errors else 0)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="AI Workflow Orchestrator - Enforce multi-phase workflows with active verification",
@@ -2327,6 +2580,38 @@ Examples:
     update_models_parser.add_argument('--force', action='store_true', help='Update even if not stale')
     update_models_parser.add_argument('--check', action='store_true', help='Only check if registry is stale')
     update_models_parser.set_defaults(func=cmd_update_models)
+
+    # PRD command (Phase 6)
+    prd_parser = subparsers.add_parser('prd', help='Execute PRD mode with multiple concurrent agents')
+    prd_subparsers = prd_parser.add_subparsers(dest='prd_command', help='PRD subcommands')
+
+    # prd start
+    prd_start = prd_subparsers.add_parser('start', help='Start PRD execution from a PRD file')
+    prd_start.add_argument('prd_file', help='Path to PRD YAML file')
+    prd_start.add_argument('--backend', choices=['auto', 'local', 'modal', 'render', 'github', 'manual'],
+                          default='auto', help='Worker backend (default: auto)')
+    prd_start.add_argument('--max-agents', type=int, default=20, help='Maximum concurrent agents (default: 20)')
+    prd_start.add_argument('--checkpoint-interval', type=int, default=5,
+                          help='Create checkpoint PR every N tasks (default: 5)')
+    prd_start.add_argument('-d', '--dir', help='Working directory')
+    prd_start.set_defaults(func=cmd_prd_start)
+
+    # prd status
+    prd_status = prd_subparsers.add_parser('status', help='Show PRD execution status')
+    prd_status.add_argument('-d', '--dir', help='Working directory')
+    prd_status.set_defaults(func=cmd_prd_status)
+
+    # prd cancel
+    prd_cancel = prd_subparsers.add_parser('cancel', help='Cancel PRD execution')
+    prd_cancel.add_argument('-d', '--dir', help='Working directory')
+    prd_cancel.set_defaults(func=cmd_prd_cancel)
+
+    # prd validate
+    prd_validate = prd_subparsers.add_parser('validate', help='Validate a PRD file without executing')
+    prd_validate.add_argument('prd_file', help='Path to PRD YAML file')
+    prd_validate.set_defaults(func=cmd_prd_validate)
+
+    prd_parser.set_defaults(func=lambda args: prd_parser.print_help() if not args.prd_command else None)
 
     args = parser.parse_args()
     

@@ -1,0 +1,45 @@
+# Sample PRD file for testing
+# Usage: orchestrator prd validate examples/sample_prd.yaml
+
+id: prd-sample-feature
+title: Add User Authentication System
+
+tasks:
+  - id: task-1-db-schema
+    description: |
+      Create database schema for users table with fields:
+      - id (UUID)
+      - email (unique, indexed)
+      - password_hash
+      - created_at, updated_at
+
+  - id: task-2-user-model
+    description: Create User model class with validation and password hashing
+    dependencies:
+      - task-1-db-schema
+
+  - id: task-3-auth-routes
+    description: |
+      Implement authentication routes:
+      - POST /auth/register
+      - POST /auth/login
+      - POST /auth/logout
+      - GET /auth/me
+    dependencies:
+      - task-2-user-model
+
+  - id: task-4-jwt-tokens
+    description: Implement JWT token generation and validation
+    dependencies:
+      - task-2-user-model
+
+  - id: task-5-auth-middleware
+    description: Create authentication middleware for protected routes
+    dependencies:
+      - task-4-jwt-tokens
+
+  - id: task-6-integration-tests
+    description: Write integration tests for authentication flow
+    dependencies:
+      - task-3-auth-routes
+      - task-5-auth-middleware
