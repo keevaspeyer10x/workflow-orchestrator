@@ -1,0 +1,286 @@
+name: "General Development Workflow"
+version: "2.1"
+description: "A general-purpose 5-phase workflow for software development tasks. Works with any project type (Node.js, Python, etc.). Default to using Claude Code for implementation unless task is trivial."
+
+# =============================================================================
+# SETUP REQUIREMENTS
+# =============================================================================
+# Before starting this workflow, ensure:
+# 1. Claude Code CLI is installed: npm install -g @anthropic-ai/claude-code
+# 2. Required environment variables are set (check with: env | grep -i api_key)
+# 3. Project dependencies are installed
+#
+# Available secrets (check your environment):
+# - ANTHROPIC_API_KEY: Required for Claude Code and Claude API calls
+# - OPENAI_API_KEY: For multi-model reviews (use latest generation available)
+# =============================================================================
+
+settings:
+  # Configurable settings - override these per-project
+  # Test command - defaults to build check
+  # Override with actual test command: "npm test", "pytest", "go test ./...", etc.
+  test_command: "npm run build"
+  
+  # Build/compile command (optional, for compiled languages)
+  build_command: "npm run build"
+  
+  # Lint command (optional)
+  lint_command: "npm run lint"
+  
+  # Documentation directory
+  docs_dir: "docs"
+  
+  # Tests directory  
+  tests_dir: "tests"
+  
+  # Claude Code is the default executor - only skip for trivial tasks
+  default_executor: "claude_code"
+  
+  # Model selection for multi-agent reviews
+  # Principle: Use latest generation model available, don't hardcode specific versions
+  # Examples: "gpt-4.1-mini" -> use latest GPT, "claude-3" -> use latest Claude
+  review_model: "latest_available"
+  
+  # Visual verification settings
+  # Service URL and API key should be set via environment variables
+  visual_verification_url: "${VISUAL_VERIFICATION_URL}"
+  visual_verification_api_key: "${VISUAL_VERIFICATION_API_KEY}"
+  
+  # Path to style guide for visual evaluation (configurable per project)
+  style_guide_path: "docs/UI_DESIGN_BRIEF.md"
+  
+  # Enable mobile viewport testing (default: true)
+  # Set to false for desktop-only applications
+  mobile_check_enabled: true
+  
+  # Visual test mode: "quick" (specific checks + 2 key questions) or "full" (all evaluations)
+  visual_test_mode: "quick"
+
+phases:
+  # ===========================================================================
+  # PHASE 0: SETUP (implicit, run before workflow starts)
+  # ===========================================================================
+  # The orchestrator should verify these before starting:
+  # - [ ] Claude Code CLI installed and accessible
+  # - [ ] Required API keys present in environment
+  # - [ ] Project can be built (test_command runs successfully)
+  # - [ ] Git repository is clean or changes are stashed
+
+  # ===========================================================================
+  # PHASE 1: PLAN
+  # ===========================================================================
+  - id: "PLAN"
+    name: "Planning & Scoping"
+    description: "Define the work to be done, assess risks, and get approval before starting. ASK CLARIFYING QUESTIONS before proceeding."
+    items:
+      - id: "check_roadmap"
+        name: "Review Roadmap/Backlog"
+        description: "Check if any existing roadmap items or backlog issues should be addressed alongside this task. Review ROADMAP.md and/or GitHub issues if used. Ask user if any should be included in scope."
+        required: false
+        skippable: true
+        skip_conditions: ["new_project", "no_roadmap_exists"]
+
+      - id: "clarifying_questions"
+        name: "Ask Clarifying Questions"
+        description: "Before creating a plan, ask the user clarifying questions to ensure full understanding. MUST provide RECOMMENDED ANSWERS with each question. Examples: What does the issue look like? Is this a regression? What's the expected behavior? Which areas are affected?"
+        required: true
+        skippable: true
+        skip_conditions: ["requirements_crystal_clear", "user_provided_full_context"]
+
+      - id: "initial_plan"
+        name: "Generate initial plan"
+        description: "Create a detailed plan of action and save it to {{docs_dir}}/plan.md. Include decision on whether to use Claude Code (default: yes) or handle directly (only for trivial tasks)."
+        required: true
+        skippable: false
+        verification:
+          type: "file_exists"
+          path: "{{docs_dir}}/plan.md"
+
+      - id: "risk_analysis"
+        name: "Risk & Impact Analysis"
+        description: "Document potential risks and their impact in {{docs_dir}}/risk_analysis.md"
+        required: true
+        skippable: true
+        skip_conditions: ["simple_bug_fix", "trivial_change"]
+        verification:
+          type: "file_exists"
+          path: "{{docs_dir}}/risk_analysis.md"
+
+      - id: "define_test_cases"
+        name: "Define Test Cases"
+        description: "Outline the test cases that will be used to verify the feature in {{tests_dir}}/test_cases.md. For UI changes, include visual/screenshot test cases."
+        required: true
+        skippable: false
+        verification:
+          type: "file_exists"
+          path: "{{tests_dir}}/test_cases.md"
+
+      - id: "user_approval"
+        name: "Get User Approval"
+        description: "The user must approve the plan before execution can begin."
+        required: true
+        skippable: false
+        verification:
+          type: "manual_gate"
+          description: "User must run 'orchestrator approve-item user_approval' to proceed."
+
+  # ===========================================================================
+  # PHASE 2: EXECUTE
+  # ===========================================================================
+  - id: "EXECUTE"
+    name: "Implementation"
+    description: "Write code and tests to implement the planned feature. DEFAULT: Use Claude Code for implementation. Only handle directly for trivial tasks with explicit justification."
+    items:
+      - id: "handoff_decision"
+        name: "Claude Code Handoff Decision"
+        description: "Determine if task should be handed off to Claude Code (default) or handled directly. Document reasoning. Only skip Claude Code for: 1) Single-line config changes, 2) Documentation-only updates, 3) Explicit user request to handle directly."
+        required: true
+        skippable: false
+
+      - id: "implement_code"
+        name: "Implement feature code"
+        description: "Write the application code that satisfies the requirements. Use Claude Code unless explicitly decided otherwise in handoff_decision."
+        required: true
+        skippable: false
+
+      - id: "write_tests"
+        name: "Write tests"
+        description: "Implement the test cases defined in the planning phase. For UI changes, include screenshot/visual regression tests where appropriate."
+        required: true
+        skippable: false
+        verification:
+          type: "command"
+          command: "{{test_command}}"
+          expect_exit_code: 0
+
+      - id: "all_tests_pass"
+        name: "Ensure all tests pass"
+        description: "Run the test suite and ensure all tests pass after implementation."
+        required: true
+        skippable: false
+        verification:
+          type: "command"
+          command: "{{test_command}}"
+          expect_exit_code: 0
+
+  # ===========================================================================
+  # PHASE 3: REVIEW
+  # ===========================================================================
+  - id: "REVIEW"
+    name: "Code & Architecture Review"
+    description: "Perform multi-agent review of the code against best practices. MUST use a different model than the one that wrote the code. Use latest generation model available."
+    items:
+      - id: "security_review"
+        name: "Security Review"
+        description: "MANDATORY for code changes. Check for common security vulnerabilities (e.g., OWASP Top 10, injection attacks, auth issues, SSRF). Use a different model than the implementation model."
+        required: true
+        skippable: false
+        skip_conditions: ["documentation_only"]
+
+      - id: "architecture_review"
+        name: "Architecture Review"
+        description: "Ensure the implementation aligns with the project's architecture and design patterns. Check for refactoring opportunities."
+        required: true
+        skippable: true
+        skip_conditions: ["minor_change", "no_architecture_impact"]
+
+      - id: "quality_review"
+        name: "Code Quality Review"
+        description: "Check for code smells, readability, maintainability, and adherence to coding standards."
+        required: true
+        skippable: true
+        skip_conditions: ["trivial_change"]
+
+      - id: "refactoring_assessment"
+        name: "Refactoring Assessment"
+        description: "Assess if the changes warrant broader refactoring of existing code. Document any technical debt introduced or addressed."
+        required: false
+        skippable: true
+        skip_conditions: ["isolated_change", "no_existing_code_touched"]
+
+  # ===========================================================================
+  # PHASE 4: VERIFY
+  # ===========================================================================
+  - id: "VERIFY"
+    name: "Final Verification"
+    description: "Perform final checks to ensure the feature is ready for release."
+    items:
+      - id: "full_test_suite"
+        name: "Run full test suite"
+        description: "Ensure no regressions were introduced during review."
+        required: true
+        skippable: false
+        verification:
+          type: "command"
+          command: "{{test_command}}"
+          expect_exit_code: 0
+
+      - id: "visual_regression_test"
+        name: "Visual/Screenshot Regression Test"
+        description: "For UI changes: capture screenshots and compare against baseline. Verify no unintended visual changes."
+        required: true
+        skippable: true
+        skip_conditions: ["no_ui_changes", "backend_only", "api_only"]
+
+      - id: "manual_smoke_test"
+        name: "Manual Smoke Test"
+        description: "Manually test the core functionality to ensure it works as expected."
+        required: true
+        skippable: true
+        verification:
+          type: "manual_gate"
+          description: "User to confirm manual smoke test passed."
+
+  # ===========================================================================
+  # PHASE 5: LEARN
+  # ===========================================================================
+  - id: "LEARN"
+    name: "Learning & Documentation"
+    description: "Document learnings and update knowledge base. Learnings must be approved before being embedded in the process."
+    items:
+      - id: "root_cause_analysis"
+        name: "Root Cause Analysis"
+        description: "MANDATORY: Perform and document root cause analysis. Why did this issue occur? What was the underlying cause, not just the symptom? Document in LEARNINGS.md."
+        required: true
+        skippable: false
+
+      - id: "document_learnings"
+        name: "Document Learnings"
+        description: "Create or update LEARNINGS.md with: 1) Problem summary, 2) Root cause analysis, 3) Fix applied, 4) Systemic insights (broader implications), 5) Prevention measures, 6) Audit recommendations, 7) Workflow improvements identified."
+        required: true
+        skippable: false
+        verification:
+          type: "file_exists"
+          path: "LEARNINGS.md"
+
+      - id: "approve_learnings"
+        name: "User Approval of Learnings"
+        description: "User must review and approve the documented learnings before they are committed. This ensures learnings are accurate, complete, and valuable for future reference."
+        required: true
+        skippable: false
+        verification:
+          type: "manual_gate"
+          description: "User must review LEARNINGS.md and run 'orchestrator approve-item approve_learnings' to confirm learnings are correct and complete."
+
+      - id: "update_roadmap"
+        name: "Update Roadmap with Audit Items"
+        description: "Add any audit recommendations from LEARNINGS.md to ROADMAP.md for future tracking."
+        required: true
+        skippable: true
+        skip_conditions: ["no_audit_recommendations"]
+        verification:
+          type: "file_exists"
+          path: "ROADMAP.md"
+
+      - id: "backport_improvements"
+        name: "Backport Universal Improvements"
+        description: "Identify any improvements that are universally applicable (not project-specific) and backport them to the workflow-orchestrator repository. This includes workflow changes, bug fixes, and documentation improvements."
+        required: true
+        skippable: true
+        skip_conditions: ["no_universal_improvements", "project_specific_only"]
+
+      - id: "update_knowledge_base"
+        name: "Update Knowledge Base"
+        description: "Update any relevant project documentation or knowledge base with approved learnings."
+        required: false
+        skippable: true

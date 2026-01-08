@@ -3,7 +3,17 @@ Claude Code Integration Module
 
 This module provides integration with Claude Code CLI for delegating
 coding tasks to Claude Code while Manus orchestrates the workflow.
+
+DEPRECATED: This module is deprecated. Use src.providers.claude_code instead.
 """
+
+import warnings
+
+warnings.warn(
+    "claude_integration module is deprecated. Use src.providers.claude_code instead.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 import subprocess
 import json

@@ -13,29 +13,78 @@ A general-purpose workflow enforcement system for AI agents. Prevents AI agents 
 - **Cross-phase protection** - Can't complete items from other phases
 - **Security hardening** - Command injection protection, path traversal blocking
 
-## Quick Start
+## Installation
+
+### Quick Install (Recommended)
+
+Run this in any repo to install with automatic updates:
 
 ```bash
-# 1. Install dependencies
-pip install pydantic pyyaml
-
-# 2. Copy the orchestrator to your project
-cp -r workflow-orchestrator /path/to/your/project/
-
-# 3. Copy and customize a workflow definition
-cp examples/pingxa_workflow.yaml workflow.yaml
-
-# 4. Start a workflow
-./orchestrator start "Your task description"
-
-# 5. Check status (AI should do this constantly)
-./orchestrator status
+curl -sSL https://raw.githubusercontent.com/keevaspeyer10x/workflow-orchestrator/main/install.sh | bash
 ```
+
+This installs the orchestrator AND sets up a SessionStart hook so future Claude Code sessions auto-update to the latest version.
+
+**Your files are safe:** Auto-updates only update the orchestrator code. Your repo-specific files (`workflow.yaml`, workflow state, logs) are never modified.
+
+### Manual Install
+
+```bash
+pip install git+https://github.com/keevaspeyer10x/workflow-orchestrator.git
+orchestrator setup  # Optional: enables auto-updates for this repo
+```
+
+After installation, the `orchestrator` command is available globally:
+
+```bash
+orchestrator --version
+orchestrator init        # Create workflow.yaml in current directory
+orchestrator start "My task"
+orchestrator status
+```
+
+### For AI Agents (Claude Code Web, Manus, etc.)
+
+Just ask: "install workflow-orchestrator from keevaspeyer10x github"
+
+Or add to your project's CLAUDE.md:
+
+```markdown
+## Setup
+curl -sSL https://raw.githubusercontent.com/keevaspeyer10x/workflow-orchestrator/main/install.sh | bash
+```
+
+### Development Install
+
+For contributing or local development:
+
+```bash
+git clone https://github.com/keevaspeyer10x/workflow-orchestrator.git
+cd workflow-orchestrator
+pip install -e .
+```
+
+## Quick Start
+
+**For vibe coders:** Just say to Claude:
+- "Install orchestrator" (first time only)
+- "Use orchestrator to build a user settings page"
+- "Use orchestrator to fix the login bug"
+
+**What happens:** The orchestrator guides you through 5 phases:
+1. **PLAN** - Define the work, get your approval
+2. **EXECUTE** - Write tests first, then code
+3. **REVIEW** - AI reviews the code for security/quality
+4. **VERIFY** - Run tests, manual checks
+5. **LEARN** - Document learnings, commit changes
+
+**For developers:** See [Commands](#commands) below for direct CLI usage.
 
 ## Commands
 
 | Command | Purpose |
 |---------|---------|
+| `init` | Initialize workflow.yaml in current directory |
 | `start "task"` | Begin a new workflow |
 | `status` | Check current state (AI should do this constantly) |
 | `complete <item> --notes "..."` | Mark item done (runs verification) |
@@ -49,7 +98,9 @@ cp examples/pingxa_workflow.yaml workflow.yaml
 | `learn` | Generate learning report |
 | `validate` | Validate a workflow YAML file |
 | `generate-md` | Generate human-readable WORKFLOW.md |
-| `abandon` | Abandon current workflow |
+| `finish --abandon` | Abandon current workflow |
+| `setup` | Enable automatic updates for this repo |
+| `setup --remove` | Disable automatic updates |
 
 ## Workflow YAML Format
 
@@ -107,10 +158,10 @@ The orchestrator can delegate coding tasks to Claude Code:
 
 ```bash
 # Generate a handoff prompt (copy to Claude Code manually)
-./orchestrator handoff --files "src/main.py,src/utils.py"
+orchestrator handoff --files "src/main.py,src/utils.py"
 
 # Execute directly with Claude Code CLI
-./orchestrator handoff --execute --timeout 600
+orchestrator handoff --execute --timeout 600
 ```
 
 ## For AI Agents
@@ -127,19 +178,19 @@ The orchestrator can delegate coding tasks to Claude Code:
 
 ```bash
 # 1. Check status
-./orchestrator status
+orchestrator status
 
 # 2. Do the work for an item
 # ... (actual work) ...
 
 # 3. Mark complete
-./orchestrator complete initial_plan --notes "Created plan in PLAN.md"
+orchestrator complete initial_plan --notes "Created plan in PLAN.md"
 
 # 4. Check status again
-./orchestrator status
+orchestrator status
 
 # 5. When all items done, advance
-./orchestrator advance
+orchestrator advance
 ```
 
 ## Manus Project Setup
@@ -150,12 +201,12 @@ Add this to your Manus Project Instructions:
 ## AI Workflow Enforcement
 
 Before ANY coding task:
-1. Run `./orchestrator status` to check current workflow state
-2. If no active workflow, run `./orchestrator start "task description"`
+1. Run `orchestrator status` to check current workflow state
+2. If no active workflow, run `orchestrator start "task description"`
 3. Work only on items in the current phase
-4. After completing work, run `./orchestrator complete <item> --notes "..."`
+4. After completing work, run `orchestrator complete <item> --notes "..."`
 5. Check status again before moving to next item
-6. When all items complete, run `./orchestrator advance`
+6. When all items complete, run `orchestrator advance`
 
 NEVER skip the status check. NEVER work on items from other phases.
 ```

@@ -1,0 +1,409 @@
+name: "General Development Workflow"
+version: "2.1"
+description: "A general-purpose 5-phase workflow for software development tasks. Works with any project type (Node.js, Python, etc.). Default to using Claude Code for implementation unless task is trivial."
+
+# =============================================================================
+# SETUP REQUIREMENTS
+# =============================================================================
+# Before starting this workflow, ensure:
+# 1. Claude Code CLI is installed: npm install -g @anthropic-ai/claude-code
+# 2. Required environment variables are set (check with: env | grep -i api_key)
+# 3. Project dependencies are installed
+#
+# Available secrets (check your environment):
+# - ANTHROPIC_API_KEY: Required for Claude Code and Claude API calls
+# - OPENAI_API_KEY: For multi-model reviews (use latest generation available)
+# =============================================================================
+
+settings:
+  # Configurable settings - override these per-project
+  # Test command - defaults to build check
+  # Override with actual test command: "npm test", "pytest", "go test ./...", etc.
+  test_command: "npm run build"
+  
+  # Build/compile command (optional, for compiled languages)
+  build_command: "npm run build"
+  
+  # Lint command (optional)
+  lint_command: "npm run lint"
+  
+  # Documentation directory
+  docs_dir: "docs"
+  
+  # Tests directory
+  tests_dir: "tests"
+
+  # Roadmap and Changelog files (for LEARN phase automation)
+  roadmap_file: "ROADMAP.md"
+  changelog_file: "CHANGELOG.md"
+
+  # Claude Code is the default executor - only skip for trivial tasks
+  default_executor: "claude_code"
+  
+  # Model selection for multi-agent reviews
+  # Principle: Use latest generation model available, don't hardcode specific versions
+  # Examples: "gpt-4.1-mini" -> use latest GPT, "claude-3" -> use latest Claude
+  review_model: "latest_available"
+
+  # Multi-model review configuration
+  # Reviews are ON by default to catch issues in AI-generated code
+  reviews:
+    enabled: true
+    on_by_default: true  # Reviews run automatically in REVIEW phase
+
+    # Execution method: auto | cli | api | github-actions
+    # - cli: Codex CLI + Gemini CLI (full repo access, best experience)
+    # - api: OpenRouter API (context injection, works in Claude Code Web)
+    # - github-actions: Triggered on PR (requires setup-reviews)
+    method: auto
+
+    # Review types and their models
+    # Security + Quality use Codex (code-specialized)
+    # Consistency + Holistic use Gemini (1M context for codebase understanding)
+    types:
+      security_review: codex
+      quality_review: codex
+      consistency_review: gemini
+      holistic_review: gemini
+
+    # Model versions - UPDATE THESE when new models are released
+    # CLI models are used when running Codex/Gemini CLIs directly
+    # API models are used when routing through OpenRouter
+    models:
+      cli:
+        codex: "gpt-5.1-codex-max"       # Latest Codex model
+        gemini: "gemini-3-pro-preview"   # Latest Gemini model (preview)
+      api:
+        codex: "openai/gpt-5.1"          # OpenRouter model ID
+        gemini: "google/gemini-3-pro-preview"  # OpenRouter model ID
+
+    # GitHub Actions configuration
+    github_actions:
+      required_for_merge: true  # Block PR merge if reviews fail
+
+    # Fallback when preferred method unavailable
+    fallback_to_api: true
+
+phases:
+  # ===========================================================================
+  # PHASE 0: SETUP (implicit, run before workflow starts)
+  # ===========================================================================
+  # The orchestrator should verify these before starting:
+  # - [ ] Claude Code CLI installed and accessible
+  # - [ ] Required API keys present in environment
+  # - [ ] Project can be built (test_command runs successfully)
+  # - [ ] Git repository is clean or changes are stashed
+
+  # ===========================================================================
+  # PHASE 1: PLAN
+  # ===========================================================================
+  - id: "PLAN"
+    name: "Planning & Scoping"
+    description: "Define the work to be done, assess risks, and get approval before starting. ASK CLARIFYING QUESTIONS before proceeding."
+    items:
+      - id: "check_roadmap"
+        name: "Review Roadmap/Backlog"
+        description: "Check if any existing roadmap items or backlog issues should be addressed alongside this task. Review ROADMAP.md and/or GitHub issues if used. Ask user if any should be included in scope."
+        required: false
+        skippable: true
+        skip_conditions: ["new_project", "no_roadmap_exists"]
+
+      - id: "clarifying_questions"
+        name: "Present Clarifying Questions"
+        description: "Present clarifying questions to ensure full understanding. For EACH question provide: 1) RECOMMENDATION, 2) ALTERNATIVES, 3) TRADEOFFS. Format: '**Q1: [Question]** | Recommendation: X | Alternatives: Y, Z | Tradeoffs: ...'"
+        required: true
+        skippable: true
+        skip_conditions: ["requirements_crystal_clear", "user_provided_full_context"]
+        notes:
+          - "[tip] Format each question as: Question → Recommendation → Alternatives → Tradeoffs"
+          - "[example] 'Should we include run_command? Recommendation: No (security risk). Alternatives: Yes with allowlist, Yes unrestricted. Tradeoffs: Security vs flexibility.'"
+
+      - id: "questions_answered"
+        name: "User Answers Questions"
+        description: "Wait for user to answer clarifying questions or confirm recommendations. Do NOT proceed until user explicitly responds."
+        required: true
+        skippable: true
+        skip_conditions: ["clarifying_questions_skipped"]
+        verification:
+          type: "manual_gate"
+          description: "User must provide answers or confirm 'use your recommendations'"
+        notes:
+          - "[caution] This is a BLOCKING gate. Cannot proceed without user input."
+          - "[tip] User can say 'use your recommendations' to accept all defaults."
+
+      - id: "initial_plan"
+        name: "Generate initial plan"
+        description: "Create a detailed plan of action and save it to {{docs_dir}}/plan.md. Include decision on whether to use Claude Code (default: yes) or handle directly (only for trivial tasks)."
+        required: true
+        skippable: false
+        verification:
+          type: "file_exists"
+          path: "{{docs_dir}}/plan.md"
+
+      - id: "risk_analysis"
+        name: "Risk & Impact Analysis"
+        description: "Document potential risks and their impact in {{docs_dir}}/risk_analysis.md"
+        required: true
+        skippable: true
+        skip_conditions: ["simple_bug_fix", "trivial_change"]
+        verification:
+          type: "file_exists"
+          path: "{{docs_dir}}/risk_analysis.md"
+
+      - id: "define_test_cases"
+        name: "Define Test Cases"
+        description: "Outline the test cases that will be used to verify the feature in {{tests_dir}}/test_cases.md. For UI changes, include visual/screenshot test cases."
+        required: true
+        skippable: false
+        verification:
+          type: "file_exists"
+          path: "{{tests_dir}}/test_cases.md"
+
+      - id: "user_approval"
+        name: "Get User Approval"
+        description: "The user must approve the plan before execution can begin."
+        required: true
+        skippable: false
+        verification:
+          type: "manual_gate"
+          description: "User must run 'orchestrator approve-item user_approval' to proceed."
+
+  # ===========================================================================
+  # PHASE 2: EXECUTE
+  # ===========================================================================
+  - id: "EXECUTE"
+    name: "Implementation"
+    description: "Write code and tests to implement the planned feature. DEFAULT: Use Claude Code for implementation. Only handle directly for trivial tasks with explicit justification."
+    notes:
+      - "[caution] Before implementing, verify that your chosen agent/provider is actually available. If Claude Code CLI is not installed, check for alternative connectors (e.g., Manus direct connection, OpenRouter API)."
+      - "[tip] If the preferred agent is unavailable, ASK THE USER before defaulting to manual implementation. They may know of alternative connection methods."
+      - "[learning] From v2.2: Claude Code CLI may not be available in all environments (e.g., Manus sandbox), but alternative connectors often exist."
+    items:
+      - id: "handoff_decision"
+        name: "Claude Code Handoff Decision"
+        description: "Determine if task should be handed off to Claude Code (default) or handled directly. Document reasoning. Only skip Claude Code for: 1) Single-line config changes, 2) Documentation-only updates, 3) Explicit user request to handle directly."
+        required: true
+        skippable: false
+        notes:
+          - "[caution] BEFORE deciding, verify agent availability: 1) Check if Claude Code CLI is installed (`which claude`), 2) Check for Manus direct connector, 3) Check for OpenRouter API key. If primary agent unavailable, ASK USER about alternatives before proceeding."
+          - "[tip] Use `orchestrator handoff --provider auto` to auto-detect the best available provider for your environment."
+          - "[learning] Different environments have different agent access: Claude Code CLI (local dev), Manus direct connector (Manus sandbox), OpenRouter API (universal fallback)."
+
+      - id: "write_tests"
+        name: "Write tests (RED phase)"
+        description: "Write test code from test_cases.md BEFORE implementation. Tests should fail initially - this verifies they actually test something. TDD: Red-Green-Refactor."
+        required: true
+        skippable: false
+        notes:
+          - "[caution] Write tests BEFORE implementation code. Tests that pass before code is written are not testing anything."
+          - "[tip] Run tests after writing - they SHOULD fail. If they pass, the test is not testing new functionality."
+          - "[learning] Post-implementation tests tend to verify 'what was built' rather than 'what should be built', leading to gaps."
+
+      - id: "implement_code"
+        name: "Implement feature code (GREEN phase)"
+        description: "Write the minimal application code to make tests pass. TDD: Red-Green-Refactor."
+        required: true
+        skippable: false
+        notes:
+          - "[tip] Write just enough code to make the failing tests pass. Refactor later."
+
+      - id: "all_tests_pass"
+        name: "Ensure all tests pass"
+        description: "Run the test suite and ensure all tests pass after implementation."
+        required: true
+        skippable: false
+        verification:
+          type: "command"
+          command: "{{test_command}}"
+          expect_exit_code: 0
+
+  # ===========================================================================
+  # PHASE 3: REVIEW
+  # ===========================================================================
+  - id: "REVIEW"
+    name: "Code & Architecture Review"
+    description: "Perform multi-agent review of the code against best practices. MUST use a different model than the one that wrote the code. Use latest generation model available."
+    items:
+      - id: "security_review"
+        name: "Security Review"
+        description: "MANDATORY for code changes. Check for common security vulnerabilities (e.g., OWASP Top 10, injection attacks, auth issues, SSRF). Use a different model than the implementation model."
+        required: true
+        skippable: false
+        skip_conditions: ["documentation_only"]
+
+      - id: "architecture_review"
+        name: "Architecture Review"
+        description: "Ensure the implementation aligns with the project's architecture and design patterns. Check for refactoring opportunities."
+        required: true
+        skippable: true
+        skip_conditions: ["minor_change", "no_architecture_impact"]
+
+      - id: "quality_review"
+        name: "Code Quality Review"
+        description: "Check for code smells, readability, maintainability, and adherence to coding standards."
+        required: true
+        skippable: true
+        skip_conditions: ["trivial_change"]
+
+      - id: "refactoring_assessment"
+        name: "Refactoring Assessment"
+        description: "Assess if the changes warrant broader refactoring of existing code. Document any technical debt introduced or addressed."
+        required: false
+        skippable: true
+        skip_conditions: ["isolated_change", "no_existing_code_touched"]
+
+  # ===========================================================================
+  # PHASE 4: VERIFY
+  # ===========================================================================
+  - id: "VERIFY"
+    name: "Final Verification"
+    description: "Perform final checks to ensure the feature is ready for release."
+    items:
+      - id: "full_test_suite"
+        name: "Run full test suite"
+        description: "Ensure no regressions were introduced during review."
+        required: true
+        skippable: false
+        verification:
+          type: "command"
+          command: "{{test_command}}"
+          expect_exit_code: 0
+
+      - id: "visual_regression_test"
+        name: "Visual/Screenshot Regression Test"
+        description: "For UI changes: capture screenshots and compare against baseline. Verify no unintended visual changes."
+        required: true
+        skippable: true
+        skip_conditions: ["no_ui_changes", "backend_only", "api_only"]
+
+      - id: "manual_smoke_test"
+        name: "Manual Smoke Test"
+        description: "Manually test the core functionality to ensure it works as expected."
+        required: true
+        skippable: true
+        verification:
+          type: "manual_gate"
+          description: "User to confirm manual smoke test passed."
+
+  # ===========================================================================
+  # PHASE 5: DOCUMENT (WF-009)
+  # ===========================================================================
+  - id: "DOCUMENT"
+    name: "Documentation Update"
+    description: "Update documentation to reflect changes. Optional phase - can be skipped for small changes with no user-facing impact."
+    items:
+      - id: "update_readme"
+        name: "Update README if needed"
+        description: "Review and update README.md for any new features, changed behavior, or updated setup instructions."
+        required: false
+        skippable: true
+        skip_conditions: ["no_user_facing_changes", "internal_refactor_only"]
+
+      - id: "update_setup_guide"
+        name: "Update setup/installation instructions"
+        description: "Ensure setup guides and installation instructions reflect any new dependencies or configuration requirements."
+        required: false
+        skippable: true
+        skip_conditions: ["no_setup_changes", "no_new_dependencies"]
+
+      - id: "update_api_docs"
+        name: "Update API documentation"
+        description: "Document any new CLI commands, options, or API changes. Update help text and examples."
+        required: false
+        skippable: true
+        skip_conditions: ["no_api_changes", "no_cli_changes"]
+
+      - id: "changelog_entry"
+        name: "Add changelog entry"
+        description: "Add an entry to CHANGELOG.md describing what changed. Required for all non-trivial changes."
+        required: true
+        skippable: true
+        skip_conditions: ["trivial_change", "documentation_only"]
+        verification:
+          type: "file_exists"
+          path: "CHANGELOG.md"
+
+  # ===========================================================================
+  # PHASE 6: LEARN
+  # ===========================================================================
+  - id: "LEARN"
+    name: "Learning & Documentation"
+    description: "Document learnings, propose actions, get user approval, then apply. Actions are only embedded after explicit user approval."
+    notes:
+      - "[caution] Never apply learnings to workflow/roadmap without user approval first."
+      - "[tip] Propose specific actions, not vague improvements. User should know exactly what will change."
+    items:
+      - id: "root_cause_analysis"
+        name: "Root Cause Analysis"
+        description: "MANDATORY: Perform and document root cause analysis. Why did this issue occur? What was the underlying cause, not just the symptom? Document in LEARNINGS.md."
+        required: true
+        skippable: false
+
+      - id: "document_learnings"
+        name: "Document Learnings"
+        description: "Create or update LEARNINGS.md with: 1) Problem summary, 2) Root cause analysis, 3) Fix applied, 4) Systemic insights, 5) Prevention measures."
+        required: true
+        skippable: false
+        verification:
+          type: "file_exists"
+          path: "LEARNINGS.md"
+
+      - id: "propose_actions"
+        name: "Propose Recommended Actions"
+        description: "Based on learnings, propose specific actions to prevent recurrence. List each action clearly: 1) What to change, 2) Which file(s) affected, 3) Whether it's immediate (apply now) or roadmap (future). Present to user for approval."
+        required: true
+        skippable: false
+        notes:
+          - "[tip] Be specific: 'Reorder EXECUTE items in workflow.yaml' not 'improve workflow'"
+          - "[tip] Categorize: APPLY NOW (small, safe) vs ROADMAP (large, needs design)"
+          - "[caution] User must approve actions before any changes are made"
+
+      - id: "approve_actions"
+        name: "User Approval of Proposed Actions"
+        description: "User reviews proposed actions and approves which ones to apply. User may reject, modify, or defer actions. Only approved actions proceed to implementation."
+        required: true
+        skippable: false
+        verification:
+          type: "manual_gate"
+          description: "User must review proposed actions and run 'orchestrator approve-item approve_actions' to confirm which actions to apply."
+
+      - id: "apply_approved_actions"
+        name: "Apply Approved Actions"
+        description: "Apply the user-approved actions: update workflow.yaml, add to ROADMAP.md, backport to bundled defaults, etc. Only apply what was explicitly approved."
+        required: true
+        skippable: true
+        skip_conditions: ["no_actions_approved"]
+        notes:
+          - "[caution] Only apply actions the user approved in previous step"
+          - "[tip] For workflow changes, update both workflow.yaml AND src/default_workflow.yaml"
+
+      - id: "update_knowledge_base"
+        name: "Update Knowledge Base"
+        description: "Update any relevant project documentation with approved learnings."
+        required: false
+        skippable: true
+
+      - id: "update_changelog_roadmap"
+        name: "Update Changelog and Roadmap"
+        description: "Move completed roadmap items to CHANGELOG.md. Check ROADMAP.md for items marked as completed during this workflow. For each completed item: 1) Add entry to CHANGELOG.md with date and summary, 2) Remove from ROADMAP.md. This keeps documentation current."
+        required: false
+        skippable: true
+        skip_conditions: ["no_roadmap_items_completed", "no_roadmap_exists"]
+        notes:
+          - "[tip] Check workflow constraints and completed items to identify roadmap items that were addressed"
+          - "[tip] Changelog format: ## [version] - YYYY-MM-DD followed by bullet points"
+          - "[caution] Only move items that are fully completed, not partially done"
+
+      - id: "commit_and_sync"
+        name: "Commit and Sync Changes"
+        description: "Ask user if they are ready to commit and sync to main. If approved: 1) Run git status/diff, 2) Auto-generate commit message from workflow task and changes, 3) Stage relevant files (exclude .env, secrets, workflow state), 4) Commit and push."
+        required: true
+        skippable: true
+        skip_conditions: ["no_changes_to_commit", "user_will_commit_manually"]
+        verification:
+          type: "manual_gate"
+          description: "User confirms ready to commit and sync changes to main."
+        notes:
+          - "[tip] Auto-generate commit message: summarize the task from workflow state + key changes from git diff"
+          - "[tip] Commit message format: 'feat/fix/chore: <summary from task>' with bullet points of what changed"
+          - "[caution] Exclude from commit: .env, .workflow_state.json, .workflow_log.jsonl, secrets, credentials"
