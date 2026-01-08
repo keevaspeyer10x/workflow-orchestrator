@@ -152,6 +152,7 @@ Design reviews were conducted by multiple AI models:
 
 | Item | Priority | Description |
 |------|----------|-------------|
+| Review Types Single Source of Truth | **CRITICAL** | Review types are defined in 3 places: `workflow.yaml` settings, `prompts.py` REVIEW_TOOLS dict, and `model_registry.py` category_mapping. This caused bugs when adding vibe_coding_review (forgot to update all 3). **Fix:** Make `workflow.yaml` the single source of truth - code reads review config at runtime. Remove hardcoded mappings from prompts.py and model_registry.py. Add schema validation that review types in workflow match what code expects. |
 | Orchestrator Context Persistence | HIGH | Build mechanism to ensure Claude remembers to use orchestrator after context compaction. Options: (1) Add to system prompt, (2) Hook into context restore, (3) Automated prompt injection |
 | Background Parallel Reviews | HIGH | Run external model reviews in background during workflow, not just at commit. Trigger on file save, cache results, notify when complete. Reviews should run continuously as code is written. |
 | Fix OpenAI Model Configuration | HIGH | OpenAI models (gpt-5.2-max, codex) fail in litellm due to model naming format. Need to update `src/review/models.py` to use correct litellm format (e.g., `openai/gpt-4` not `gpt-5.2-max`). |
@@ -520,6 +521,32 @@ See: `docs/design-review-round3-synthesis.md` for full details.
 - Third-party reviews (external models) ran during REVIEW phase
 
 **Status:** Phase 5 COMPLETE. Ready to commit.
+
+### Session 8
+**Date:** January 2026
+**Work Done:**
+- Gold-plated the review system for vibe coding (zero human review):
+  - Added 5th review: `vibe_coding_review` using Grok 4.1 for AI-specific issues
+  - Fixed root cause: REVIEW phase items now include all 5 reviews (was missing consistency + holistic)
+  - All reviews run in background for parallel execution
+- Fixed model versioning:
+  - CLI executor now uses `model_registry.get_latest_model()` instead of hardcoding
+  - Added Grok to model_registry with correct OpenRouter IDs (`x-ai/grok-4.1-fast`)
+  - Updated workflow.yaml and default_workflow.yaml with all models
+- Improved visibility:
+  - `cmd_finish` now shows which external models performed reviews
+  - Added API key checks to `install.sh` with SOPS instructions
+  - Added review event types to schema.py
+
+**Root Causes Fixed:**
+1. Gemini reviews skipped: workflow phase items didn't match configured review types
+2. Used outdated Grok model: hardcoded instead of using model_registry framework
+3. Wrong model ID format: `grok-4-1-fast-reasoning` vs actual `grok-4.1-fast`
+
+**Architectural Issue Identified:**
+Review types defined in 3 places (workflow.yaml, prompts.py, model_registry.py) - added to roadmap as CRITICAL priority to consolidate to single source of truth.
+
+**Status:** Review system improvements committed. Ready for Phase 6 or architectural cleanup.
 
 ---
 
