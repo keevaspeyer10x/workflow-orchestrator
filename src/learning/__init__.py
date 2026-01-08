@@ -30,6 +30,7 @@ from .strategy_schema import (
     StrategyRecommendation,
     DEFAULT_STRATEGY_ORDER,
 )
+from .strategy_tracker import StrategyTracker
 
 __all__ = [
     # Pattern Enums
@@ -59,4 +60,6 @@ __all__ = [
     "StrategyRecommendation",
     # Strategy Constants
     "DEFAULT_STRATEGY_ORDER",
+    # Tracker
+    "StrategyTracker",
 ]
