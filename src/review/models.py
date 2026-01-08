@@ -181,36 +181,43 @@ class LiteLLMReviewer(BaseReviewer):
     # Maps our config model IDs to litellm-compatible model IDs
     # LiteLLM format: "provider/model-name" or just "model-name" for OpenAI
     # See: https://docs.litellm.ai/docs/providers
+    # CANONICAL SOURCE: .claude/review-config.yaml
     MODEL_MAPPINGS = {
-        # OpenAI - use actual available models
-        # Note: gpt-5.2-max is fictional, map to best available
-        "openai/gpt-5.2-max": "gpt-4o",  # Best available OpenAI model
-        "openai/chatgpt-5.2-max": "gpt-4o",  # Alias
+        # OpenAI GPT-5.2 family (latest generation)
+        "openai/gpt-5.2-max": "gpt-5.2-pro",  # GPT-5.2 Pro is the max variant
+        "openai/gpt-5.2-pro": "gpt-5.2-pro",
+        "openai/gpt-5.2": "gpt-5.2",
+        "openai/gpt-5": "gpt-5-2025-08-07",
+
+        # OpenAI Codex (code-specialized)
+        "openai/codex": "gpt-5.1-codex-max",  # Latest Codex model
+        "openai/gpt-5.1-codex-max": "gpt-5.1-codex-max",
+
+        # OpenAI legacy (for fallback)
         "openai/gpt-4-turbo": "gpt-4-turbo",
         "openai/gpt-4o": "gpt-4o",
-        "openai/o3": "o1-preview",  # o3 not yet available, use o1
-        "openai/o4-mini": "o1-mini",  # o4-mini not yet available
-        "openai/codex": "gpt-4o",  # Codex deprecated, use GPT-4o
+        "openai/o3": "o3",
+        "openai/o1-preview": "o1-preview",
 
-        # Google Gemini - use gemini/ prefix for litellm
-        "google/gemini-2.5-pro": "gemini/gemini-1.5-pro",  # 2.5 not yet available
-        "google/gemini-2.5-flash": "gemini/gemini-1.5-flash",
-        "google/gemini-pro": "gemini/gemini-pro",
+        # Google Gemini
+        "google/gemini-2.5-pro": "gemini/gemini-2.5-pro-preview",
+        "google/gemini-2.5-flash": "gemini/gemini-2.5-flash-preview",
         "google/gemini-1.5-pro": "gemini/gemini-1.5-pro",
+        "google/gemini-pro": "gemini/gemini-pro",
 
-        # xAI Grok - not yet in litellm, may need openrouter
-        "xai/grok-4.1": "openrouter/x-ai/grok-beta",  # Via OpenRouter
-        "xai/grok-4.1-fast": "openrouter/x-ai/grok-beta",
+        # xAI Grok
+        "xai/grok-4.1": "openrouter/x-ai/grok-4.1",
+        "xai/grok-4.1-fast": "openrouter/x-ai/grok-4.1-fast",
         "xai/grok-beta": "openrouter/x-ai/grok-beta",
 
         # Anthropic Claude
-        "anthropic/claude-opus-4.5": "claude-3-opus-20240229",  # Use available Claude
-        "anthropic/claude-sonnet-4": "claude-3-5-sonnet-20241022",
+        "anthropic/claude-opus-4.5": "claude-opus-4-5-20251101",
+        "anthropic/claude-sonnet-4": "claude-sonnet-4-20250514",
         "anthropic/claude-3-opus": "claude-3-opus-20240229",
 
         # OpenRouter passthrough
         "openrouter/anthropic/claude-3-opus": "openrouter/anthropic/claude-3-opus",
-        "openrouter/openai/gpt-4o": "openrouter/openai/gpt-4o",
+        "openrouter/openai/gpt-5.2-pro": "openrouter/openai/gpt-5.2-pro",
     }
 
     async def review(self, context: ChangeContext) -> ModelReview:

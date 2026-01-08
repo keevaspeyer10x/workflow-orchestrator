@@ -32,8 +32,10 @@ Usage:
 Model Strengths (from empirical testing):
 - Codex CLI: Best for security, code correctness, performance (CLI primary)
 - Gemini CLI: Best for architecture, 1M context window (CLI primary)
-- GPT-4o: Best for security, correctness, actionability (API fallback)
-- Grok: Best for breadth, operations, edge cases (API fallback)
+- GPT-5.2 Max: Best for security, correctness, actionability (API fallback)
+- Grok 4.1: Best for breadth, operations, edge cases (API fallback)
+
+Model configuration: See .claude/review-config.yaml for canonical model settings.
 """
 
 # =============================================================================
