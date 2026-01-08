@@ -2,7 +2,7 @@
 
 **Design Document:** `docs/FINAL-merge-conflict-system-design.md`
 **Started:** January 2026
-**Current Phase:** 6 - PRD Mode & Scale (Next)
+**Current Phase:** 6 - PRD Mode & Scale (In Progress)
 
 ---
 
@@ -50,7 +50,7 @@ Canonical config: `.claude/review-config.yaml` - always check this for current m
 | 3. Basic Resolution | **COMPLETE** | ~60% |
 | 4. Escalation System | **COMPLETE** | N/A |
 | 5. Advanced Resolution | **COMPLETE** | ~80% |
-| 6. PRD Mode & Scale | Not Started | N/A |
+| 6. PRD Mode & Scale | **IN PROGRESS** | N/A |
 | 7. Learning & Optimization | Not Started | N/A |
 
 ---
@@ -401,12 +401,73 @@ See: `docs/design-review-round3-synthesis.md` for full details.
 
 ### Checklist
 
-- [ ] PRD mode configuration
-- [ ] Wave-based resolution
-- [ ] Integration branch management
-- [ ] Checkpoint PRs
-- [ ] Auto-merge configuration
-- [ ] Scale to 20+ concurrent agents
+- [x] PRD mode configuration (`src/prd/schema.py`)
+- [x] Wave-based resolution (`src/prd/wave_resolver.py`)
+- [x] Integration branch management (`src/prd/integration.py`)
+- [x] Checkpoint PRs (in IntegrationBranchManager)
+- [x] Multi-backend worker pool (`src/prd/worker_pool.py`)
+- [x] File-based job queue (`src/prd/queue.py`)
+- [x] Backend implementations:
+  - [x] LocalBackend (Claude Code CLI)
+  - [x] ManualBackend (Claude Web prompts)
+  - [x] ModalBackend (serverless)
+  - [x] RenderBackend (containers)
+  - [x] GitHubActionsBackend
+- [x] PRD Executor orchestrator (`src/prd/executor.py`)
+- [x] Scale to 20+ concurrent agents (configurable)
+- [ ] CLI integration with orchestrator
+- [ ] End-to-end testing with real PRD
+
+### Files Created
+
+| File | Status | Description |
+|------|--------|-------------|
+| `src/prd/__init__.py` | **DONE** | Package init with all exports |
+| `src/prd/schema.py` | **DONE** | PRDConfig, PRDTask, PRDDocument, JobMessage, WorkerBackend enum |
+| `src/prd/queue.py` | **DONE** | FileJobQueue (pending/processing/completed/failed) |
+| `src/prd/worker_pool.py` | **DONE** | WorkerPool with auto-scaling backend selection |
+| `src/prd/integration.py` | **DONE** | IntegrationBranchManager, MergeRecord, CheckpointPR |
+| `src/prd/wave_resolver.py` | **DONE** | WaveResolver, WaveResult, WaveResolutionResult |
+| `src/prd/executor.py` | **DONE** | PRDExecutor, PRDExecutionResult |
+| `src/prd/backends/__init__.py` | **DONE** | Backend package exports |
+| `src/prd/backends/base.py` | **DONE** | WorkerBackendBase abstract class |
+| `src/prd/backends/local.py` | **DONE** | LocalBackend (Claude Code CLI) |
+| `src/prd/backends/manual.py` | **DONE** | ManualBackend (prompts for Claude Web) |
+| `src/prd/backends/modal_worker.py` | **DONE** | ModalBackend (serverless functions) |
+| `src/prd/backends/render.py` | **DONE** | RenderBackend (containers) |
+| `src/prd/backends/github_actions.py` | **DONE** | GitHubActionsBackend |
+| `tests/prd/__init__.py` | **DONE** | Test package init |
+| `tests/prd/test_schema.py` | **DONE** | Schema tests |
+| `tests/prd/test_queue.py` | **DONE** | Job queue tests |
+| `tests/prd/test_workers.py` | **DONE** | Worker pool and backend tests |
+
+### Key Design Decisions
+
+1. **Provider-agnostic architecture**: WorkerBackend enum with auto-selection based on task count and credentials
+2. **Auto-scaling**: Local for ≤4 tasks, cloud backends for larger scale
+3. **File-based job queue**: Simple, reliable, no external dependencies (pending/processing/completed/failed dirs)
+4. **Integration branch strategy**: `integration/{prd_id}` accumulates work, checkpoint PRs to main
+5. **Wave-based resolution**: Merge non-conflicting first, then resolve conflicts in waves
+6. **Manual backend for Claude Web**: Generates copy/paste prompts when no API available
+
+### Backend Selection Logic
+
+```
+task_count ≤ 4: LOCAL (Claude Code CLI)
+task_count > 4:
+  1. MODAL (if credentials available) - serverless, fastest
+  2. RENDER (if credentials available) - containers
+  3. GITHUB_ACTIONS (if authenticated) - built-in
+  4. MANUAL - generate prompts for Claude Web
+```
+
+### Secrets Configured
+
+| Secret | Location | Purpose |
+|--------|----------|---------|
+| `render_api_key` | secrets.enc.yaml | Render container backend |
+| `modal_token_id` | secrets.enc.yaml | Modal serverless auth |
+| `modal_token_secret` | secrets.enc.yaml | Modal serverless auth |
 
 ---
 
@@ -600,6 +661,31 @@ Review types defined in 3 places (workflow.yaml, prompts.py, model_registry.py) 
 
 **Status:** Architectural cleanup COMPLETE. Ready to continue with Phase 6.
 
+### Session 9 (Continued)
+**Date:** January 2026
+**Work Done:**
+- Implemented Phase 6: PRD Mode & Scale core infrastructure
+  - `src/prd/schema.py` - PRDConfig, PRDTask, PRDDocument, JobMessage, WorkerBackend enum, backend configs
+  - `src/prd/queue.py` - FileJobQueue with pending/processing/completed/failed directories
+  - `src/prd/worker_pool.py` - WorkerPool with auto-scaling backend selection
+  - `src/prd/integration.py` - IntegrationBranchManager, MergeRecord, CheckpointPR
+  - `src/prd/wave_resolver.py` - WaveResolver for wave-based conflict resolution
+  - `src/prd/executor.py` - PRDExecutor main orchestrator
+  - 5 backend implementations (Local, Manual, Modal, Render, GitHub Actions)
+  - 51 tests passing
+- Added Render and Modal credentials to encrypted secrets
+- User provided:
+  - Render API key: `rnd_VxSWOndcqHxRCamT0KEnycgHRWFz`
+  - Modal token: `ak-YjLWQg7WOslrl4rUsT8j7T` / `as-UhDItFATIrLFSjDw8JzBpZ`
+
+**Key Design Decisions:**
+- Provider-agnostic: all 5 backends supported with auto-selection
+- Auto-scaling: Local for ≤4 tasks, cloud for larger scale
+- ManualBackend for Claude Web users (generates copy/paste prompts)
+- Integration branch pattern: `integration/{prd_id}` accumulates work
+
+**Status:** Phase 6 core infrastructure COMPLETE. Pending: CLI integration, end-to-end tests, external reviews.
+
 ---
 
 ## Context Switch Guidelines
@@ -664,5 +750,19 @@ src/
 │   ├── timeout_handler.py # SLA-based reminders/auto-select
 │   └── manager.py     # Main EscalationManager
 ├── review/            # Code review (DONE)
+├── prd/               # PRD execution (Phase 6) IN PROGRESS
+│   ├── schema.py      # PRDConfig, PRDTask, PRDDocument, JobMessage
+│   ├── queue.py       # FileJobQueue (file-based job queue)
+│   ├── worker_pool.py # WorkerPool with auto-scaling
+│   ├── integration.py # Integration branch management
+│   ├── wave_resolver.py # Wave-based conflict resolution
+│   ├── executor.py    # PRDExecutor main orchestrator
+│   └── backends/      # Worker backend implementations
+│       ├── base.py        # WorkerBackendBase abstract class
+│       ├── local.py       # LocalBackend (Claude Code CLI)
+│       ├── manual.py      # ManualBackend (Claude Web prompts)
+│       ├── modal_worker.py # ModalBackend (serverless)
+│       ├── render.py      # RenderBackend (containers)
+│       └── github_actions.py # GitHubActionsBackend
 └── git_ops/           # Git operations wrapper
 ```
