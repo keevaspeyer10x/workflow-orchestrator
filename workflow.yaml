@@ -57,19 +57,32 @@ phases:
 
   - id: "REVIEW"
     name: "Code Review"
-    description: "Review code for quality and security."
+    description: "Review code for quality and security using external models."
     items:
-      - id: "security_review"
-        name: "Security review"
-        description: "Check for security vulnerabilities."
+      - id: "external_model_review"
+        name: "External model review"
+        description: "Run external model reviews (GPT-4o, Gemini, Codex) on staged changes."
         required: true
         skippable: true
+        skip_conditions: ["trivial_change", "no_staged_changes"]
+        verification:
+          type: "command"
+          command: ".venv/bin/python scripts/pre_commit_review.py"
+          expect_exit_code: 0
+
+      - id: "security_review"
+        name: "Security review"
+        description: "Check for security vulnerabilities (included in external review)."
+        required: true
+        skippable: true
+        skip_conditions: ["external_review_passed"]
 
       - id: "quality_review"
         name: "Code quality review"
-        description: "Check for code quality issues."
+        description: "Check for code quality issues (included in external review)."
         required: true
         skippable: true
+        skip_conditions: ["external_review_passed"]
 
   - id: "VERIFY"
     name: "Verification"
