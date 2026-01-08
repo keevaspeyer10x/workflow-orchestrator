@@ -2,7 +2,7 @@
 
 **Design Document:** `docs/FINAL-merge-conflict-system-design.md`
 **Started:** January 2026
-**Current Phase:** 3 - Basic Resolution (Next)
+**Current Phase:** 4 - Escalation System (Next)
 
 ---
 
@@ -23,7 +23,7 @@ When starting a new chat, read these files in order:
 |-------|--------|---------------------|
 | 1. Foundation (MVP) | **COMPLETE** | N/A (fast-path only) |
 | 2. Conflict Detection | **COMPLETE** | N/A |
-| 3. Basic Resolution | Not Started | ~60% |
+| 3. Basic Resolution | **COMPLETE** | ~60% |
 | 4. Escalation System | Not Started | N/A |
 | 5. Advanced Resolution | Not Started | ~80% |
 | 6. PRD Mode & Scale | Not Started | N/A |
@@ -196,12 +196,33 @@ See: `docs/design-review-round3-synthesis.md` for full details.
 
 ### Checklist
 
-- [ ] Stage 1: Context assembly
-- [ ] Stage 2: Intent extraction (basic)
-- [ ] Stage 3: Interface harmonization
-- [ ] Single candidate generation
-- [ ] Basic validation (build + targeted tests)
-- [ ] Auto-resolve low-risk conflicts
+- [x] Stage 1: Context assembly (`src/resolution/context.py`)
+- [x] Stage 2: Intent extraction (basic) (`src/resolution/intent.py`)
+- [x] Stage 3: Interface harmonization (`src/resolution/harmonizer.py`)
+- [x] Single candidate generation (`src/resolution/candidate.py`)
+- [x] Basic validation (build + targeted tests) (`src/resolution/validator.py`)
+- [x] Resolution pipeline orchestrator (`src/resolution/pipeline.py`)
+
+### Files Created
+
+| File | Status | Description |
+|------|--------|-------------|
+| `src/resolution/__init__.py` | **DONE** | Package init with all exports |
+| `src/resolution/schema.py` | **DONE** | Data models (ConflictContext, ExtractedIntent, etc.) |
+| `src/resolution/context.py` | **DONE** | Stage 1: Context assembly from manifests and git |
+| `src/resolution/intent.py` | **DONE** | Stage 2: Intent extraction and comparison |
+| `src/resolution/harmonizer.py` | **DONE** | Stage 3: Interface harmonization |
+| `src/resolution/candidate.py` | **DONE** | Candidate generation with strategy selection |
+| `src/resolution/validator.py` | **DONE** | Build/test validation and scoring |
+| `src/resolution/pipeline.py` | **DONE** | Main ResolutionPipeline orchestrator |
+| `tests/resolution/test_resolution.py` | **DONE** | Tests for Phase 3 components |
+
+### Key Design Decisions
+
+1. **Heuristic-based intent extraction** for Phase 3 (LLM-based in Phase 5)
+2. **Single candidate generation** - select best strategy, generate one candidate
+3. **Auto-escalate on low confidence** - don't guess when unsure
+4. **Strategy selection** based on intent confidence and harmonization success
 
 ---
 
@@ -311,6 +332,26 @@ See: `docs/design-review-round3-synthesis.md` for full details.
 
 **Status:** Phase 2 COMPLETE - ready to commit and begin Phase 3
 
+### Session 4
+**Date:** January 2026
+**Work Done:**
+- Fixed security vulnerabilities from Codex review:
+  - Path traversal prevention in `src/engine.py`
+  - Manual gates bypass prevention in `src/schema.py`
+  - CSRF token protection in `src/dashboard.py`
+- Designed autonomous pattern lifecycle for learning system
+- Completed Phase 3: Basic Resolution
+  - `src/resolution/schema.py` - Data models for resolution pipeline
+  - `src/resolution/context.py` - Stage 1: Context assembly
+  - `src/resolution/intent.py` - Stage 2: Intent extraction and comparison
+  - `src/resolution/harmonizer.py` - Stage 3: Interface harmonization
+  - `src/resolution/candidate.py` - Candidate generation with strategy selection
+  - `src/resolution/validator.py` - Build/test validation and scoring
+  - `src/resolution/pipeline.py` - Main ResolutionPipeline orchestrator
+  - `tests/resolution/test_resolution.py` - Comprehensive tests
+
+**Status:** Phase 3 COMPLETE - ready to commit and begin Phase 4
+
 ---
 
 ## Context Switch Guidelines
@@ -349,14 +390,20 @@ src/
 │   └── fast_path.py   # Non-conflict merge
 ├── conflict/          # Conflict detection (Phase 1-2)
 │   ├── detector.py    # Basic detection (merge-tree)
-│   ├── classifier.py  # Type/severity (Phase 2)
-│   └── clusterer.py   # Graph clustering (Phase 2)
-├── resolution/        # Resolution pipeline (Phase 3-5)
-│   ├── pipeline.py    # Orchestration
-│   ├── context.py     # Stage 1
-│   ├── intent.py      # Stage 2
-│   └── ...
-├── escalation/        # Human escalation (Phase 4)
+│   ├── pipeline.py    # 6-step detection orchestrator
+│   ├── build_tester.py # Build/test validation
+│   ├── semantic.py    # Symbol/domain analysis
+│   ├── dependency.py  # Package version conflicts
+│   └── clusterer.py   # Graph clustering
+├── resolution/        # Resolution pipeline (Phase 3) DONE
+│   ├── schema.py      # Data models (ConflictContext, Intent, etc.)
+│   ├── pipeline.py    # Main orchestration
+│   ├── context.py     # Stage 1: Context assembly
+│   ├── intent.py      # Stage 2: Intent extraction
+│   ├── harmonizer.py  # Stage 3: Interface harmonization
+│   ├── candidate.py   # Candidate generation
+│   └── validator.py   # Build/test validation
+├── escalation/        # Human escalation (Phase 4) - TODO
 ├── review/            # Code review (DONE)
 └── git_ops/           # Git operations wrapper
 ```
