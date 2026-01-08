@@ -31,6 +31,18 @@ from .strategy_schema import (
     DEFAULT_STRATEGY_ORDER,
 )
 from .strategy_tracker import StrategyTracker
+from .feedback_schema import (
+    FeedbackType,
+    FeedbackSeverity,
+    ConflictHint,
+    PatternSuggestion,
+    AgentFeedback,
+    GuidanceType,
+    GuidanceUrgency,
+    GuidanceMessage,
+    FeedbackBatch,
+    GuidanceBatch,
+)
 
 __all__ = [
     # Pattern Enums
@@ -62,4 +74,17 @@ __all__ = [
     "DEFAULT_STRATEGY_ORDER",
     # Tracker
     "StrategyTracker",
+    # Feedback Enums
+    "FeedbackType",
+    "FeedbackSeverity",
+    "GuidanceType",
+    "GuidanceUrgency",
+    # Feedback Data models
+    "ConflictHint",
+    "PatternSuggestion",
+    "AgentFeedback",
+    "GuidanceMessage",
+    # Batch classes
+    "FeedbackBatch",
+    "GuidanceBatch",
 ]
