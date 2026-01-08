@@ -2,7 +2,7 @@
 
 **Design Document:** `docs/FINAL-merge-conflict-system-design.md`
 **Started:** January 2026
-**Current Phase:** 1 - Foundation (MVP)
+**Current Phase:** 3 - Basic Resolution (Next)
 
 ---
 
@@ -73,6 +73,58 @@ When starting a new chat, read these files in order:
 ### Blockers
 
 (None yet)
+
+---
+
+## Supporting Systems
+
+### Multi-Model Code Review System
+
+**Status:** OPERATIONAL
+**Location:** `src/review/`
+
+The review system uses multiple AI models to review code changes before merge.
+
+| Component | Status | Description |
+|-----------|--------|-------------|
+| `src/review/orchestrator.py` | **DONE** | ReviewOrchestrator with tier selection |
+| `src/review/models.py` | **DONE** | LiteLLM-based adapters for all providers |
+| `src/review/schema.py` | **DONE** | ReviewConfig, ModelSpec, ReviewIssue |
+
+**Configured Models:**
+
+| Provider | Model | Focus Areas | Status |
+|----------|-------|-------------|--------|
+| OpenAI | gpt-5.2-max | Security, Correctness | Working |
+| Google | gemini-2.5-pro | Architecture, Design | Working |
+| xAI | grok-4.1 | Operations, Edge Cases | Working |
+| OpenAI | codex → gpt-5.2-max | Correctness, Performance | Working |
+
+**API Keys:** Managed via SOPS (`secrets.enc.yaml`)
+
+### Third-Party Design Reviews
+
+Design reviews were conducted by multiple AI models:
+
+| Round | Reviewers | Key Findings |
+|-------|-----------|--------------|
+| Round 1 | Claude Opus, Gemini, Grok, ChatGPT | Initial architecture validation |
+| Round 2 | Codex, Grok, Gemini, ChatGPT | Security (split workflows), "derive don't trust" |
+| Round 3 | Codex | O(n²) scaling, existing code security issues |
+
+**Key Validated Decisions:**
+- Split workflows (untrusted ping + trusted coordinator)
+- Manifest-as-artifact (not in git)
+- "Derive, don't trust" philosophy
+- Tiered validation approach
+
+**Outstanding Recommendations (from reviews):**
+- [ ] Fix existing orchestrator security issues (path traversal, CSRF)
+- [ ] Add artifact signing/attestation
+- [ ] Add CODEOWNERS integration for intent conflicts
+- [ ] Add pattern expiry/decay in learning system
+
+See: `docs/design-review-round3-synthesis.md` for full details.
 
 ---
 
