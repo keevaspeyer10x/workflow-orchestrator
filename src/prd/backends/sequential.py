@@ -25,20 +25,20 @@ def is_inside_claude_code() -> bool:
     Returns:
         True if running inside Claude Code, False otherwise
     """
-    # Check explicit environment variable
+    # Check explicit environment variables (both CLAUDECODE and CLAUDE_CODE)
+    if os.environ.get('CLAUDECODE') == '1':
+        return True
     if os.environ.get('CLAUDE_CODE') == '1':
+        return True
+
+    # Check Claude Code specific entrypoint
+    if os.environ.get('CLAUDE_CODE_ENTRYPOINT'):
         return True
 
     # Check if claude is in the command path
     cmd = os.environ.get('_', '')
     if 'claude' in cmd.lower():
         return True
-
-    # Check for Claude Code specific environment
-    if os.environ.get('ANTHROPIC_API_KEY'):
-        # Could be Claude Code or just API usage
-        # Check for other indicators
-        pass
 
     return False
 

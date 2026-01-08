@@ -21,21 +21,35 @@ class TestEnvironmentDetection:
         """Detects CLAUDE_CODE=1 environment variable."""
         from src.prd.backends.sequential import is_inside_claude_code
 
-        with patch.dict(os.environ, {'CLAUDE_CODE': '1'}):
+        with patch.dict(os.environ, {'CLAUDE_CODE': '1'}, clear=True):
+            assert is_inside_claude_code() is True
+
+    def test_detects_claudecode_env_var(self):
+        """Detects CLAUDECODE=1 environment variable (no underscore)."""
+        from src.prd.backends.sequential import is_inside_claude_code
+
+        with patch.dict(os.environ, {'CLAUDECODE': '1'}, clear=True):
+            assert is_inside_claude_code() is True
+
+    def test_detects_claude_code_entrypoint(self):
+        """Detects CLAUDE_CODE_ENTRYPOINT environment variable."""
+        from src.prd.backends.sequential import is_inside_claude_code
+
+        with patch.dict(os.environ, {'CLAUDE_CODE_ENTRYPOINT': 'cli'}, clear=True):
             assert is_inside_claude_code() is True
 
     def test_detects_claude_in_path(self):
         """Detects 'claude' in the command path."""
         from src.prd.backends.sequential import is_inside_claude_code
 
-        with patch.dict(os.environ, {'_': '/usr/bin/claude', 'CLAUDE_CODE': ''}):
+        with patch.dict(os.environ, {'_': '/usr/bin/claude'}, clear=True):
             assert is_inside_claude_code() is True
 
     def test_returns_false_outside_claude(self):
         """Returns False when not in Claude Code."""
         from src.prd.backends.sequential import is_inside_claude_code
 
-        with patch.dict(os.environ, {'_': '/usr/bin/python', 'CLAUDE_CODE': ''}, clear=True):
+        with patch.dict(os.environ, {'_': '/usr/bin/python'}, clear=True):
             assert is_inside_claude_code() is False
 
 
