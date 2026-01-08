@@ -350,6 +350,67 @@ class ConflictDetector:
             merge_tree_output=f"Error: {message}",
         )
 
+    def detect_risk_flags(self, files: list[str]) -> list[str]:
+        """
+        Detect risk flags based on file paths.
+
+        Risk flags indicate areas that need extra scrutiny:
+        - security: Security-related code (auth, crypto, secrets)
+        - auth: Authentication/authorization code
+        - db_migration: Database migration files
+        - public_api: Public API endpoints
+        - config: Configuration files
+
+        Args:
+            files: List of file paths to analyze
+
+        Returns:
+            List of risk flag strings
+        """
+        flags = set()
+
+        # Pattern definitions for each risk type
+        risk_patterns = {
+            "security": [
+                r"security", r"crypto", r"encrypt", r"decrypt",
+                r"secret", r"credential", r"password", r"\.pem$",
+                r"\.key$", r"vault",
+            ],
+            "auth": [
+                r"auth", r"login", r"logout", r"session",
+                r"token", r"oauth", r"jwt", r"permission",
+                r"rbac", r"acl",
+            ],
+            "db_migration": [
+                r"migrations?/", r"migrate", r"alembic",
+                r"schema", r"flyway", r"liquibase",
+            ],
+            "public_api": [
+                r"api/", r"routes?\.py", r"endpoints?",
+                r"handlers?\.py", r"views\.py", r"controllers?/",
+                r"openapi", r"swagger",
+            ],
+            "config": [
+                r"config", r"settings", r"\.env", r"\.yaml$",
+                r"\.yml$", r"\.toml$", r"\.ini$",
+            ],
+            "infrastructure": [
+                r"terraform", r"cloudformation", r"kubernetes",
+                r"k8s", r"docker", r"helm", r"ansible",
+            ],
+        }
+
+        for file_path in files:
+            path_lower = file_path.lower()
+
+            for flag_name, patterns in risk_patterns.items():
+                for pattern in patterns:
+                    if re.search(pattern, path_lower):
+                        flags.add(flag_name)
+                        break
+
+        return sorted(flags)
+
 
 # ============================================================================
 # Convenience Functions

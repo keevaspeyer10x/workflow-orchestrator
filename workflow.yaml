@@ -1,0 +1,113 @@
+name: "Multi-Agent Merge Conflict System Development"
+version: "1.0"
+description: "Workflow for implementing the multi-agent merge conflict resolution system."
+
+settings:
+  test_command: ".venv/bin/pytest tests/ -v"
+  docs_dir: "docs"
+
+phases:
+  - id: "PLAN"
+    name: "Planning & Design"
+    description: "Review design docs, plan implementation, get approval."
+    items:
+      - id: "initial_plan"
+        name: "Create implementation plan"
+        description: "Document the implementation approach in docs/plan.md"
+        required: true
+        skippable: false
+        verification:
+          type: "file_exists"
+          path: "docs/plan.md"
+
+      - id: "user_approval"
+        name: "Get user approval"
+        description: "User must approve the plan before implementation."
+        required: true
+        skippable: false
+        verification:
+          type: "manual_gate"
+
+  - id: "EXECUTE"
+    name: "Implementation"
+    description: "Implement the planned features with tests."
+    items:
+      - id: "write_tests"
+        name: "Write tests first"
+        description: "Create tests for the new functionality."
+        required: true
+        skippable: true
+        skip_conditions: ["trivial_change"]
+
+      - id: "implement_code"
+        name: "Implement feature code"
+        description: "Write the implementation code."
+        required: true
+        skippable: false
+
+      - id: "verify_imports"
+        name: "Verify imports work"
+        description: "Ensure all new modules can be imported without errors."
+        required: true
+        skippable: false
+        verification:
+          type: "command"
+          command: ".venv/bin/python -c 'from src.coordinator import *; from src.conflict import *; print(\"OK\")'"
+          expect_exit_code: 0
+
+  - id: "REVIEW"
+    name: "Code Review"
+    description: "Review code for quality and security."
+    items:
+      - id: "security_review"
+        name: "Security review"
+        description: "Check for security vulnerabilities."
+        required: true
+        skippable: true
+
+      - id: "quality_review"
+        name: "Code quality review"
+        description: "Check for code quality issues."
+        required: true
+        skippable: true
+
+  - id: "VERIFY"
+    name: "Verification"
+    description: "Final verification before completion."
+    items:
+      - id: "run_tests"
+        name: "Run test suite"
+        description: "Ensure all tests pass."
+        required: true
+        skippable: true
+        verification:
+          type: "command"
+          command: ".venv/bin/pytest tests/ -v --tb=short"
+          expect_exit_code: 0
+
+      - id: "manual_check"
+        name: "Manual verification"
+        description: "User confirms implementation is correct."
+        required: true
+        skippable: true
+        verification:
+          type: "manual_gate"
+
+  - id: "LEARN"
+    name: "Documentation"
+    description: "Update documentation and commit."
+    items:
+      - id: "update_tracker"
+        name: "Update implementation tracker"
+        description: "Update docs/IMPLEMENTATION-TRACKER.md with progress."
+        required: true
+        skippable: false
+        verification:
+          type: "file_exists"
+          path: "docs/IMPLEMENTATION-TRACKER.md"
+
+      - id: "commit_changes"
+        name: "Commit changes"
+        description: "Commit all changes with descriptive message."
+        required: true
+        skippable: false

@@ -22,7 +22,7 @@ When starting a new chat, read these files in order:
 | Phase | Status | Auto-Resolve Target |
 |-------|--------|---------------------|
 | 1. Foundation (MVP) | **COMPLETE** | N/A (fast-path only) |
-| 2. Conflict Detection | Not Started | N/A |
+| 2. Conflict Detection | **COMPLETE** | N/A |
 | 3. Basic Resolution | Not Started | ~60% |
 | 4. Escalation System | Not Started | N/A |
 | 5. Advanced Resolution | Not Started | ~80% |
@@ -83,12 +83,23 @@ When starting a new chat, read these files in order:
 
 ### Checklist
 
-- [ ] Stage 0: Full detection pipeline
-- [ ] Build/test merged result
-- [ ] Semantic conflict detection
-- [ ] Dependency conflict detection
-- [ ] Conflict clustering
-- [ ] Risk flag detection
+- [x] Stage 0: Full detection pipeline (`src/conflict/pipeline.py`)
+- [x] Build/test merged result (`src/conflict/build_tester.py`)
+- [x] Semantic conflict detection (`src/conflict/semantic.py`)
+- [x] Dependency conflict detection (`src/conflict/dependency.py`)
+- [x] Conflict clustering (`src/conflict/clusterer.py`)
+- [x] Risk flag detection (enhanced `src/conflict/detector.py`)
+
+### Files Created
+
+| File | Status | Description |
+|------|--------|-------------|
+| `src/conflict/pipeline.py` | **DONE** | DetectionPipeline orchestrating all steps |
+| `src/conflict/build_tester.py` | **DONE** | BuildTester for merged code testing |
+| `src/conflict/dependency.py` | **DONE** | DependencyAnalyzer for package conflicts |
+| `src/conflict/semantic.py` | **DONE** | SemanticAnalyzer for symbol/domain overlap |
+| `src/conflict/clusterer.py` | **DONE** | ConflictClusterer for wave-based resolution |
+| `tests/conflict/test_pipeline.py` | **DONE** | Tests for Phase 2 components |
 
 ---
 
@@ -198,6 +209,21 @@ When starting a new chat, read these files in order:
 - Updated this tracker
 
 **Status:** Phase 1 COMPLETE - ready to commit and begin Phase 2
+
+### Session 3
+**Date:** January 2026
+**Work Done:**
+- Completed Phase 2: Conflict Detection
+  - `pipeline.py` - 6-step detection orchestrator
+  - `build_tester.py` - Tests merged code (catches "clean but broken")
+  - `dependency.py` - Detects version conflicts in package files
+  - `semantic.py` - Symbol overlap, domain overlap, API changes
+  - `clusterer.py` - Groups conflicts for wave-based resolution
+  - Enhanced `detector.py` with risk flag detection
+- Added tests in `tests/conflict/test_pipeline.py`
+- Used orchestrator workflow system for implementation
+
+**Status:** Phase 2 COMPLETE - ready to commit and begin Phase 3
 
 ---
 
