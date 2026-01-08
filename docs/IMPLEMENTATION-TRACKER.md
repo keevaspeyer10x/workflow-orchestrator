@@ -476,12 +476,27 @@ task_count > 4:
 **Goal:** System improves over time
 **Deliverable:** Self-improving system
 
+**EXECUTION PLAN:** Phase 7 will be implemented using the PRD system itself (dogfooding).
+This serves as both the Phase 7 implementation AND the end-to-end test for Phase 6.
+
+```bash
+# In a new chat session with fresh context:
+orchestrator prd start examples/phase7_prd.yaml --backend local
+```
+
+The PRD file (`examples/phase7_prd.yaml`) contains 10 tasks with proper dependencies.
+
 ### Checklist
 
-- [ ] Pattern memory (rerere-like)
-- [ ] Strategy performance tracking
-- [ ] Agent feedback loop
-- [ ] Integration with orchestrator learning
+- [ ] Pattern memory schema (`src/learning/pattern_schema.py`)
+- [ ] Pattern database (`src/learning/pattern_database.py`)
+- [ ] Pattern hasher (`src/learning/pattern_hasher.py`)
+- [ ] Pattern memory integration (`src/learning/pattern_memory.py`)
+- [ ] Strategy tracker schema (`src/learning/strategy_schema.py`)
+- [ ] Strategy tracker (`src/learning/strategy_tracker.py`)
+- [ ] Agent feedback schema (`src/learning/feedback_schema.py`)
+- [ ] Feedback loop (`src/learning/feedback_loop.py`)
+- [ ] Learning engine integration
 - [ ] Performance optimization
 
 ---
