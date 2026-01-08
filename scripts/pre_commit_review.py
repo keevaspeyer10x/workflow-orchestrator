@@ -23,10 +23,12 @@ Integration:
 import asyncio
 import json
 import logging
+import re
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -43,6 +45,210 @@ logger = logging.getLogger(__name__)
 
 # Review history directory
 REVIEW_HISTORY_DIR = Path(__file__).parent.parent / ".review_history"
+
+
+# ============================================================================
+# Static Workflow Audit (runs before external model reviews)
+# ============================================================================
+
+def audit_github_workflows(files: list[str], diff_content: str) -> list[dict]:
+    """
+    Audit GitHub Actions workflow files for dangerous patterns.
+
+    This is a static check that runs locally without external models.
+    It catches common issues like:
+    - High-frequency schedules (cost/compute concern)
+    - Overly permissive permissions
+    - Missing concurrency controls
+    - Secrets exposure risks
+
+    Returns list of blocking issues found.
+    """
+    issues = []
+
+    workflow_files = [f for f in files if f.startswith('.github/workflows/') and f.endswith('.yml')]
+
+    if not workflow_files:
+        return issues
+
+    logger.info(f"Auditing {len(workflow_files)} GitHub Actions workflow file(s)")
+
+    for filepath in workflow_files:
+        try:
+            # Read the staged version of the file
+            result = subprocess.run(
+                ["git", "show", f":{filepath}"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            content = result.stdout
+        except subprocess.CalledProcessError:
+            # File might be deleted or not staged properly
+            continue
+
+        file_issues = _audit_single_workflow(filepath, content)
+        issues.extend(file_issues)
+
+    return issues
+
+
+def _audit_single_workflow(filepath: str, content: str) -> list[dict]:
+    """Audit a single workflow file for dangerous patterns."""
+    issues = []
+
+    # Check 1: High-frequency cron schedules
+    cron_matches = re.findall(r"cron:\s*['\"]([^'\"]+)['\"]", content)
+    for cron in cron_matches:
+        runs_per_day = _estimate_cron_frequency(cron)
+        if runs_per_day > 24:  # More than hourly
+            issues.append({
+                "severity": "critical",
+                "category": "cost",
+                "title": f"High-frequency workflow schedule: {runs_per_day} runs/day",
+                "description": (
+                    f"Workflow '{filepath}' has cron schedule '{cron}' which runs ~{runs_per_day} times/day. "
+                    f"This could consume {runs_per_day * 30} minutes/month of GitHub Actions compute. "
+                    "Consider reducing frequency or using event-driven triggers instead."
+                ),
+                "file_path": filepath,
+                "recommendation": "Use event-driven triggers (push, pull_request, repository_dispatch) or reduce to hourly/daily.",
+            })
+        elif runs_per_day > 4:  # More than every 6 hours
+            issues.append({
+                "severity": "high",
+                "category": "cost",
+                "title": f"Frequent workflow schedule: {runs_per_day} runs/day",
+                "description": (
+                    f"Workflow '{filepath}' has cron schedule '{cron}' which runs ~{runs_per_day} times/day. "
+                    "Verify this frequency is necessary."
+                ),
+                "file_path": filepath,
+                "recommendation": "Consider if this frequency is needed or if event-driven triggers would suffice.",
+            })
+
+    # Check 2: Overly permissive permissions
+    if "permissions:" not in content:
+        # No permissions block = defaults to read-all for most triggers
+        pass  # This is actually fine for most cases
+    else:
+        if "permissions: write-all" in content or "permissions:\n  contents: write" in content:
+            if "pull_request:" in content and "pull_request_target:" not in content:
+                issues.append({
+                    "severity": "high",
+                    "category": "security",
+                    "title": "Write permissions on pull_request trigger",
+                    "description": (
+                        f"Workflow '{filepath}' has write permissions with pull_request trigger. "
+                        "This could allow PRs from forks to modify repository contents."
+                    ),
+                    "file_path": filepath,
+                    "recommendation": "Use pull_request_target for write operations or reduce permissions.",
+                })
+
+    # Check 3: Running on untrusted input without checkout protection
+    if "pull_request:" in content or "pull_request_target:" in content:
+        if "actions/checkout@" in content:
+            # Check if it's checking out the PR head (potentially untrusted)
+            if "ref: ${{ github.event.pull_request.head.sha }}" in content:
+                if "permissions:" in content and "write" in content.lower():
+                    issues.append({
+                        "severity": "critical",
+                        "category": "security",
+                        "title": "Checkout of untrusted PR code with write permissions",
+                        "description": (
+                            f"Workflow '{filepath}' checks out PR head code and has write permissions. "
+                            "This is a known security anti-pattern that can lead to repository compromise."
+                        ),
+                        "file_path": filepath,
+                        "recommendation": "Separate trusted and untrusted workflows, or use read-only permissions.",
+                    })
+
+    # Check 4: Secrets in workflow outputs/logs
+    dangerous_patterns = [
+        (r'\$\{\{\s*secrets\.[^}]+\s*\}\}.*>>', "Secret value redirected to file"),
+        (r'echo.*\$\{\{\s*secrets\.[^}]+\s*\}\}', "Secret value echoed (may appear in logs)"),
+    ]
+    for pattern, desc in dangerous_patterns:
+        if re.search(pattern, content, re.IGNORECASE):
+            issues.append({
+                "severity": "high",
+                "category": "security",
+                "title": f"Potential secret exposure: {desc}",
+                "description": f"Workflow '{filepath}' may expose secrets in logs or files.",
+                "file_path": filepath,
+                "recommendation": "Use secrets only in env vars or action inputs, never echo or redirect.",
+            })
+
+    return issues
+
+
+def _estimate_cron_frequency(cron: str) -> int:
+    """Estimate how many times per day a cron expression runs."""
+    parts = cron.strip().split()
+    if len(parts) != 5:
+        return 0  # Invalid cron
+
+    minute, hour, day, month, dow = parts
+
+    # Simple estimation
+    runs_per_hour = 1
+    if minute.startswith('*/'):
+        interval = int(minute[2:])
+        runs_per_hour = 60 // interval
+    elif minute == '*':
+        runs_per_hour = 60
+    elif ',' in minute:
+        runs_per_hour = len(minute.split(','))
+
+    hours_per_day = 1
+    if hour.startswith('*/'):
+        interval = int(hour[2:])
+        hours_per_day = 24 // interval
+    elif hour == '*':
+        hours_per_day = 24
+    elif ',' in hour:
+        hours_per_day = len(hour.split(','))
+
+    return runs_per_hour * hours_per_day
+
+
+def print_workflow_audit_results(issues: list[dict]) -> bool:
+    """Print workflow audit results. Returns True if blocking issues found."""
+    if not issues:
+        return False
+
+    print("\n" + "=" * 70)
+    print("GITHUB ACTIONS WORKFLOW AUDIT")
+    print("=" * 70)
+
+    critical_count = sum(1 for i in issues if i['severity'] == 'critical')
+    high_count = sum(1 for i in issues if i['severity'] == 'high')
+
+    print(f"\nFound {len(issues)} issue(s): {critical_count} critical, {high_count} high")
+    print("-" * 40)
+
+    for issue in issues:
+        severity_icon = {
+            "critical": "[CRITICAL]",
+            "high": "[HIGH]    ",
+            "medium": "[MEDIUM]  ",
+            "low": "[LOW]     ",
+        }.get(issue['severity'], "[INFO]    ")
+
+        print(f"\n  {severity_icon} {issue['title']}")
+        print(f"              File: {issue['file_path']}")
+        print(f"              {issue['description'][:200]}")
+        if issue.get('recommendation'):
+            print(f"              Fix: {issue['recommendation']}")
+
+    if critical_count > 0:
+        print("\n" + "!" * 70)
+        print("BLOCKING: Critical workflow issues must be fixed before commit")
+        print("!" * 70)
+        return True
+
+    return False
 
 
 def get_staged_files() -> tuple[list[str], list[str], list[str]]:
@@ -220,6 +426,20 @@ async def run_review() -> int:
     # Get diff content
     diff = get_staged_diff()
 
+    all_files = modified + added
+
+    # =========================================================================
+    # Phase 1: Static workflow audit (fast, local, no API calls)
+    # =========================================================================
+    workflow_issues = audit_github_workflows(all_files, diff)
+    if print_workflow_audit_results(workflow_issues):
+        print("\nCOMMIT BLOCKED: Fix workflow issues before committing.")
+        return 1
+
+    # =========================================================================
+    # Phase 2: External model reviews (slower, requires API keys)
+    # =========================================================================
+
     # Create change context
     context = ChangeContext(
         files_changed=modified,
@@ -235,7 +455,7 @@ async def run_review() -> int:
 
     # Run review
     print("\nRunning external model reviews...")
-    print("  (GPT-5.2 Max, Gemini 2.5 Pro, Grok 4.1, Codex)")
+    print("  (GPT-4o, Gemini 1.5 Pro, Codex)")
     print("  This may take a moment...\n")
 
     try:

@@ -16,9 +16,9 @@ on:
   repository_dispatch:
     types: [claude-branch-update]
 
-  schedule:
-    # Run every 5 minutes to catch missed events
-    - cron: '*/5 * * * *'
+  # NOTE: Schedule removed to avoid excessive compute costs (was */5 * * * * = 288 runs/day)
+  # Event-driven via repository_dispatch is sufficient for normal operation.
+  # Re-enable with conservative frequency (e.g., '0 */6 * * *') only if events are being missed.
 
   workflow_dispatch:
     inputs:
