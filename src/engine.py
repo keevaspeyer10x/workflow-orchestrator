@@ -1215,3 +1215,139 @@ class WorkflowEngine:
                 all_cleaned.extend(cleaned)
         
         return all_cleaned
+
+    # ========================================================================
+    # Process Compliance Methods (WF-012, WF-013, WF-014, WF-015)
+    # ========================================================================
+
+    def get_completed_reviews(self) -> set[str]:
+        """
+        Get set of completed review types from workflow log.
+
+        Returns:
+            Set of review type strings (e.g., {"security", "quality"})
+        """
+        completed = set()
+        for event in self.get_events():
+            if event.event_type == EventType.REVIEW_COMPLETED:
+                # Try to get review_type from details first
+                review_type = event.details.get("review_type") if event.details else None
+                # Fall back to extracting from item_id (e.g., "security_review" -> "security")
+                if not review_type and event.item_id and event.item_id.endswith("_review"):
+                    review_type = event.item_id.rsplit("_review", 1)[0]
+                if review_type:
+                    completed.add(review_type)
+        return completed
+
+    def validate_reviews_completed(self) -> tuple[bool, list[str]]:
+        """
+        Check if required reviews were completed.
+
+        Returns:
+            Tuple of (is_valid, list_of_missing_review_types)
+        """
+        required = {"security", "quality"}  # Minimum required reviews
+        completed = self.get_completed_reviews()
+        missing = required - completed
+        return len(missing) == 0, list(missing)
+
+    def verify_write_allowed(self) -> tuple[bool, str]:
+        """
+        Check if writing implementation code is allowed based on current phase.
+
+        Returns:
+            Tuple of (allowed, reason_message)
+        """
+        if not self.state:
+            return True, "No active workflow - write allowed"
+
+        phase = self.state.current_phase_id
+        if phase == "EXECUTE":
+            return True, "In EXECUTE phase - write allowed"
+        else:
+            return False, f"In {phase} phase - writing implementation code not allowed. Complete {phase} phase first."
+
+    def get_context_reminder(self) -> dict:
+        """
+        Get compact workflow state for context injection after compaction.
+
+        Returns:
+            Dictionary with workflow state suitable for AI context injection
+        """
+        if not self.state:
+            return {"active": False}
+
+        # Count completed and total items
+        completed = 0
+        total = 0
+        for phase in self.state.phases.values():
+            for item in phase.items.values():
+                total += 1
+                if item.status == ItemStatus.COMPLETED:
+                    completed += 1
+
+        return {
+            "active": True,
+            "task": self.state.task_description,
+            "phase": self.state.current_phase_id,
+            "progress": f"{completed}/{total}",
+            "constraints": self.state.constraints or [],
+        }
+
+    def get_status_json(self) -> dict:
+        """
+        Get workflow status as JSON-serializable dictionary.
+
+        Returns:
+            Dictionary with full workflow status for CLI --json output
+        """
+        if not self.state:
+            return {"active": False}
+
+        # Count completed and total items
+        completed = 0
+        total = 0
+        for phase in self.state.phases.values():
+            for item in phase.items.values():
+                total += 1
+                if item.status == ItemStatus.COMPLETED:
+                    completed += 1
+
+        # Get current phase items (merge state with definition)
+        current_phase = self.state.phases.get(self.state.current_phase_id)
+        items = []
+        if current_phase:
+            # Get phase definition for item names
+            phase_def = None
+            if self.workflow_def:
+                for p in self.workflow_def.phases:
+                    if p.id == self.state.current_phase_id:
+                        phase_def = p
+                        break
+
+            for item_id, item in current_phase.items.items():
+                item_info = {
+                    "id": item_id,
+                    "status": item.status.value,
+                }
+                # Get name and required from definition if available
+                if phase_def:
+                    for item_def in phase_def.items:
+                        if item_def.id == item_id:
+                            item_info["name"] = item_def.name
+                            item_info["required"] = item_def.required
+                            break
+                items.append(item_info)
+
+        return {
+            "active": True,
+            "workflow_id": self.state.workflow_id,
+            "task": self.state.task_description,
+            "phase": self.state.current_phase_id,
+            "progress": {
+                "completed": completed,
+                "total": total,
+            },
+            "items": items,
+            "constraints": self.state.constraints or [],
+        }

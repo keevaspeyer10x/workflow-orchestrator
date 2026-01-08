@@ -1,100 +1,34 @@
 {
-  "prd_id": "phase7-learning-optimization",
-  "prd_title": "Phase 7: Learning & Optimization System",
-  "prd_file": "/home/keeva/workflow-orchestrator/examples/phase7_prd.yaml",
+  "prd_id": "prd-process-compliance",
+  "prd_title": "Process Compliance Fixes (WF-012, WF-013, WF-014, WF-015)",
+  "prd_file": "/home/keeva/workflow-orchestrator/process-compliance.prd.yaml",
   "tasks": [
     {
-      "id": "task-1-pattern-schema",
-      "description": "Create the data models for conflict pattern memory in src/learning/pattern_schema.py\n\nModels to create:\n- ConflictPattern: Records a conflict pattern with hash, type, files, resolution\n- PatternMatch: Result of matching a conflict to known patterns\n- ResolutionOutcome: Success/failure record for a pattern application\n\nKey fields for ConflictPattern:\n- pattern_hash: str (computed from conflict characteristics)\n- conflict_type: str (textual, semantic, dependency, etc.)\n- files_involved: list[str]\n- intent_categories: list[str]\n- resolution_strategy: str (agent1_primary, merge, etc.)\n- success_rate: float (0.0 to 1.0)\n- last_used: datetime\n- use_count: int\n\nWrite tests in tests/learning/test_pattern_schema.py\n",
+      "id": "wf-014-review-validation",
+      "description": "## WF-014: Block Workflow Finish Without Required Reviews\n\n**Goal:** Prevent `orchestrator finish` from completing if required external\nmodel reviews were not run.\n\n**Implementation:**\n\n1. Add method to `src/engine.py`:\n   ```python\n   def get_completed_reviews(self) -> set[str]:\n       \"\"\"Get set of completed review types from workflow log.\"\"\"\n       completed = set()\n       for event in self.get_events():\n           if event.event_type == EventType.REVIEW_COMPLETED:\n               review_type = event.details.get(\"review_type\")\n               if review_type:\n                   completed.add(review_type)\n       return completed\n\n   def validate_reviews_completed(self) -> tuple[bool, list[str]]:\n       \"\"\"Check if required reviews were completed.\"\"\"\n       required = {\"security\", \"quality\"}  # Minimum required\n       completed = self.get_completed_reviews()\n       missing = required - completed\n       return len(missing) == 0, list(missing)\n   ```\n\n2. Add validation to `cmd_finish()` in `src/cli.py`:\n   - Check `engine.validate_reviews_completed()` before completing\n   - If missing reviews, print warning and block unless `--skip-review-check` flag\n   - Add `--skip-review-check` argument with required `--reason`\n\n3. Add tests to `tests/test_process_compliance.py`:\n   - Test get_completed_reviews returns review types\n   - Test validate_reviews_completed passes/fails correctly\n   - Test cmd_finish blocks without reviews\n\n**Files to modify:**\n- src/engine.py\n- src/cli.py\n- tests/test_process_compliance.py (tests already exist - make them pass)\n\n**Success criteria:**\n- `orchestrator finish` blocks if reviews missing\n- `orchestrator finish --skip-review-check --reason \"...\"` allows bypass\n- All TestReviewValidation tests pass\n",
       "dependencies": [],
-      "status": "completed"
+      "status": "done"
     },
     {
-      "id": "task-2-pattern-database",
-      "description": "Create PatternDatabase class in src/learning/pattern_database.py\n\nImplements file-based storage for conflict patterns:\n- store(pattern: ConflictPattern) -> None\n- lookup(pattern_hash: str) -> Optional[ConflictPattern]\n- find_similar(conflict: ConflictContext, threshold: float) -> list[PatternMatch]\n- update_outcome(pattern_hash: str, success: bool) -> None\n- prune_stale(days: int) -> int  # Remove unused patterns\n\nStorage: JSON files in .claude/patterns/ directory\n\nWrite tests in tests/learning/test_pattern_database.py\n",
-      "dependencies": [
-        "task-1-pattern-schema"
-      ],
-      "status": "completed"
-    },
-    {
-      "id": "task-3-pattern-hasher",
-      "description": "Create pattern hashing logic in src/learning/pattern_hasher.py\n\nCompute a hash that identifies \"similar\" conflicts:\n- compute_hash(conflict: ConflictContext) -> str\n- compute_similarity(hash1: str, hash2: str) -> float\n\nHash factors (from design doc):\n- Normalized file paths (remove unique identifiers)\n- Conflict type\n- Intent categories (extracted intents)\n- Code structure patterns (AST-based if available)\n\nThe hash should be fuzzy - similar conflicts should have similar hashes.\nUse locality-sensitive hashing or similar technique.\n\nWrite tests in tests/learning/test_pattern_hasher.py\n",
-      "dependencies": [
-        "task-1-pattern-schema"
-      ],
-      "status": "completed"
-    },
-    {
-      "id": "task-4-pattern-memory",
-      "description": "Create ConflictPatternMemory class in src/learning/pattern_memory.py\n\nThis is the main interface (like git rerere for agents):\n- record_resolution(conflict, resolution, outcome) -> None\n- suggest_resolution(conflict) -> Optional[Resolution]\n- get_success_rate(pattern_hash) -> float\n\nIntegration points:\n- Called by ResolutionPipeline after resolution attempt\n- Consulted before generating new candidates\n\nWrite tests in tests/learning/test_pattern_memory.py\n",
-      "dependencies": [
-        "task-2-pattern-database",
-        "task-3-pattern-hasher"
-      ],
-      "status": "completed"
-    },
-    {
-      "id": "task-5-strategy-schema",
-      "description": "Create strategy tracking models in src/learning/strategy_schema.py\n\nModels:\n- StrategyStats: Win rate, use count, avg duration per strategy\n- StrategyContext: When/where a strategy works best\n- StrategyRecommendation: Suggested strategy with confidence\n\nStrategies to track:\n- agent1_primary, agent2_primary, merge, fresh_synthesis\n- Per-language/framework breakdowns\n\nWrite tests in tests/learning/test_strategy_schema.py\n",
+      "id": "wf-012-context-reminder",
+      "description": "## WF-012: Context Reminder Command\n\n**Goal:** Add a command that outputs compact workflow state suitable for\nre-injection after context compaction.\n\n**Implementation:**\n\n1. Add method to `src/engine.py`:\n   ```python\n   def get_context_reminder(self) -> dict:\n       \"\"\"Get compact workflow state for context injection.\"\"\"\n       if not self.state:\n           return {\"active\": False}\n\n       return {\n           \"active\": True,\n           \"task\": self.state.task_description,\n           \"phase\": self.state.current_phase_id,\n           \"progress\": f\"{self._count_completed()}/{self._count_total()}\",\n           \"constraints\": self.state.constraints or [],\n       }\n   ```\n\n2. Add CLI command `context-reminder` to `src/cli.py`:\n   ```python\n   def cmd_context_reminder(args):\n       engine = get_engine(args)\n       reminder = engine.get_context_reminder()\n       print(json.dumps(reminder))\n   ```\n\n3. Register the command in argument parser.\n\n4. Add tests - make TestContextReminder tests pass.\n\n**Files to modify:**\n- src/engine.py\n- src/cli.py\n- tests/test_process_compliance.py (tests already exist)\n\n**Success criteria:**\n- `orchestrator context-reminder` outputs JSON\n- Output includes active, task, phase, progress, constraints\n- All TestContextReminder tests pass\n",
       "dependencies": [],
-      "status": "completed"
+      "status": "done"
     },
     {
-      "id": "task-6-strategy-tracker",
-      "description": "Create StrategyTracker class in src/learning/strategy_tracker.py\n\nTrack which resolution strategies work best:\n- record_attempt(strategy, context, success, duration) -> None\n- get_stats(strategy: str) -> StrategyStats\n- recommend(context: ConflictContext) -> StrategyRecommendation\n- get_all_stats() -> dict[str, StrategyStats]\n\nStorage: JSON file at .claude/strategy_stats.json\n\nWrite tests in tests/learning/test_strategy_tracker.py\n",
-      "dependencies": [
-        "task-5-strategy-schema"
-      ],
-      "status": "completed"
-    },
-    {
-      "id": "task-7-feedback-schema",
-      "description": "Create agent feedback models in src/learning/feedback_schema.py\n\nModels:\n- AgentFeedback: Feedback from an agent about a resolution\n- FeedbackType: enum (CONFLICT_HINT, PATTERN_SUGGESTION, etc.)\n- GuidanceMessage: Proactive guidance to send to agents\n\nFeedback includes:\n- What worked/didn't work\n- Suggested improvements\n- Context about the conflict\n\nWrite tests in tests/learning/test_feedback_schema.py\n",
+      "id": "wf-013-verify-write",
+      "description": "## WF-013: Verify Write Allowed Command\n\n**Goal:** Add a command that checks if implementation code should be written\nbased on current workflow phase.\n\n**Implementation:**\n\n1. Add method to `src/engine.py`:\n   ```python\n   def verify_write_allowed(self) -> tuple[bool, str]:\n       \"\"\"Check if writing implementation code is allowed.\"\"\"\n       if not self.state:\n           return True, \"No active workflow - write allowed\"\n\n       phase = self.state.current_phase_id\n       if phase == \"EXECUTE\":\n           return True, \"In EXECUTE phase - write allowed\"\n       else:\n           return False, f\"In {phase} phase - writing implementation code not allowed. Complete {phase} phase first.\"\n   ```\n\n2. Add CLI command `verify-write-allowed` to `src/cli.py`:\n   ```python\n   def cmd_verify_write_allowed(args):\n       engine = get_engine(args)\n       allowed, reason = engine.verify_write_allowed()\n       if allowed:\n           print(f\"\u2713 {reason}\")\n           sys.exit(0)\n       else:\n           print(f\"\u2717 {reason}\")\n           sys.exit(1)\n   ```\n\n3. Register the command in argument parser.\n\n4. Add tests - make TestVerifyWriteAllowed tests pass.\n\n**Files to modify:**\n- src/engine.py\n- src/cli.py\n- tests/test_process_compliance.py (tests already exist)\n\n**Success criteria:**\n- `orchestrator verify-write-allowed` returns 0 if allowed, 1 if not\n- Returns True when no workflow or in EXECUTE phase\n- Returns False in PLAN, REVIEW, VERIFY, LEARN phases\n- All TestVerifyWriteAllowed tests pass\n",
       "dependencies": [],
-      "status": "completed"
+      "status": "done"
     },
     {
-      "id": "task-8-feedback-loop",
-      "description": "Create FeedbackLoop class in src/learning/feedback_loop.py\n\nBidirectional communication with agents:\n- collect_feedback(agent_id, feedback: AgentFeedback) -> None\n- generate_guidance(agent_id, task_context) -> list[GuidanceMessage]\n- get_agent_history(agent_id) -> list[AgentFeedback]\n\nGuidance includes:\n- \"Similar conflict resolved with X strategy\"\n- \"Avoid Y approach, failed 3 times\"\n- \"Watch for Z pattern in this codebase\"\n\nWrite tests in tests/learning/test_feedback_loop.py\n",
-      "dependencies": [
-        "task-7-feedback-schema",
-        "task-4-pattern-memory",
-        "task-6-strategy-tracker"
-      ],
-      "status": "completed"
-    },
-    {
-      "id": "task-9-learning-integration",
-      "description": "Integrate learning components with existing systems.\n\nUpdate src/learning/__init__.py to export new classes.\n\nIntegration points:\n1. ResolutionPipeline (src/resolution/pipeline.py):\n   - Consult PatternMemory before generating candidates\n   - Record outcomes after resolution\n\n2. PRDExecutor (src/prd/executor.py):\n   - Send guidance to agents before task start\n   - Collect feedback after task completion\n\n3. WaveResolver (src/prd/wave_resolver.py):\n   - Use StrategyTracker to pick best strategy\n\nWrite integration tests in tests/learning/test_integration.py\n",
-      "dependencies": [
-        "task-4-pattern-memory",
-        "task-6-strategy-tracker",
-        "task-8-feedback-loop"
-      ],
-      "status": "completed"
-    },
-    {
-      "id": "task-10-performance",
-      "description": "Optimize learning system performance.\n\nOptimizations:\n1. Pattern lookup caching (LRU cache for frequent patterns)\n2. Async pattern storage (don't block resolution on I/O)\n3. Batch feedback processing\n4. Index patterns by conflict type for faster lookup\n\nAdd performance tests in tests/learning/test_performance.py\nTarget: Pattern lookup < 10ms, storage < 50ms\n",
-      "dependencies": [
-        "task-9-learning-integration"
-      ],
-      "status": "completed"
+      "id": "wf-015-status-json",
+      "description": "## WF-015: Status --json Flag\n\n**Goal:** Add `--json` flag to status command for machine-readable output.\n\n**Implementation:**\n\n1. Add method to `src/engine.py`:\n   ```python\n   def get_status_json(self) -> dict:\n       \"\"\"Get workflow status as JSON-serializable dict.\"\"\"\n       if not self.state:\n           return {\"active\": False}\n\n       return {\n           \"active\": True,\n           \"workflow_id\": self.state.workflow_id,\n           \"task\": self.state.task_description,\n           \"phase\": self.state.current_phase_id,\n           \"progress\": {\n               \"completed\": self._count_completed(),\n               \"total\": self._count_total(),\n           },\n           \"items\": self._get_current_phase_items(),\n           \"constraints\": self.state.constraints or [],\n       }\n   ```\n\n2. Add `--json` flag to status command in `src/cli.py`:\n   ```python\n   def cmd_status(args):\n       engine = get_engine(args)\n\n       if args.json:\n           status = engine.get_status_json()\n           print(json.dumps(status))\n           return\n\n       # ... existing status display ...\n   ```\n\n3. Add `--json` argument to status parser.\n\n4. Add tests - make TestStatusJson tests pass.\n\n**Files to modify:**\n- src/engine.py\n- src/cli.py\n- tests/test_process_compliance.py (tests already exist)\n\n**Success criteria:**\n- `orchestrator status --json` outputs valid JSON\n- JSON includes active, workflow_id, task, phase, progress, items, constraints\n- All TestStatusJson tests pass\n",
+      "dependencies": [],
+      "status": "done"
     }
   ],
   "current_task": null,
-  "completed_tasks": [
-    "task-1-pattern-schema",
-    "task-2-pattern-database",
-    "task-3-pattern-hasher",
-    "task-4-pattern-memory",
-    "task-5-strategy-schema",
-    "task-6-strategy-tracker",
-    "task-7-feedback-schema",
-    "task-8-feedback-loop",
-    "task-9-learning-integration",
-    "task-10-performance"
-  ],
-  "checkpoint_interval": 3
+  "completed_tasks": ["wf-014-review-validation", "wf-012-context-reminder", "wf-013-verify-write", "wf-015-status-json"],
+  "checkpoint_interval": 5
 }

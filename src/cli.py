@@ -268,11 +268,31 @@ def cmd_init(args):
 def cmd_status(args):
     """Show current workflow status."""
     engine = get_engine(args)
-    
+
     if args.json:
-        print(json.dumps(engine.get_status(), indent=2, default=str))
+        # WF-015: Use the new get_status_json for proper JSON output
+        print(json.dumps(engine.get_status_json(), indent=2, default=str))
     else:
         print(engine.get_recitation_text())
+
+
+def cmd_context_reminder(args):
+    """WF-012: Output compact workflow state for context injection."""
+    engine = get_engine(args)
+    reminder = engine.get_context_reminder()
+    print(json.dumps(reminder))
+
+
+def cmd_verify_write_allowed(args):
+    """WF-013: Check if writing implementation code is allowed."""
+    engine = get_engine(args)
+    allowed, reason = engine.verify_write_allowed()
+    if allowed:
+        print(f"✓ {reason}")
+        sys.exit(0)
+    else:
+        print(f"✗ {reason}")
+        sys.exit(1)
 
 
 def cmd_complete(args):
@@ -711,6 +731,29 @@ def cmd_finish(args):
         engine.abandon_workflow(args.reason)
         print("✓ Workflow abandoned")
     else:
+        # WF-014: Validate that required reviews were completed
+        skip_review_check = getattr(args, 'skip_review_check', False)
+        if not skip_review_check:
+            is_valid, missing_reviews = engine.validate_reviews_completed()
+            if not is_valid:
+                print("=" * 60)
+                print("⚠️  REVIEW VALIDATION FAILED")
+                print("=" * 60)
+                print(f"Missing required reviews: {', '.join(missing_reviews)}")
+                print()
+                print("External model reviews are REQUIRED before completing a workflow.")
+                print("Run the reviews first, or use --skip-review-check with --reason")
+                print()
+                print("Example:")
+                print('  orchestrator finish --skip-review-check --reason "Reviewed manually"')
+                print("=" * 60)
+                sys.exit(1)
+        else:
+            if not args.reason:
+                print("Error: --reason is required when using --skip-review-check")
+                sys.exit(1)
+            print(f"⚠️  Skipping review check: {args.reason}")
+
         # CORE-011: Capture summary data before completing
         summary = engine.get_workflow_summary()
         all_skipped = engine.get_all_skipped_items()
@@ -2863,9 +2906,19 @@ Examples:
 
     # Status command
     status_parser = subparsers.add_parser('status', help='Show current workflow status')
-    status_parser.add_argument('--json', action='store_true', help='Output as JSON')
+    status_parser.add_argument('--json', action='store_true', help='Output as JSON (WF-015)')
     status_parser.set_defaults(func=cmd_status)
-    
+
+    # Context reminder command (WF-012)
+    context_reminder_parser = subparsers.add_parser('context-reminder',
+        help='Output compact workflow state for context injection after compaction')
+    context_reminder_parser.set_defaults(func=cmd_context_reminder)
+
+    # Verify write allowed command (WF-013)
+    verify_write_parser = subparsers.add_parser('verify-write-allowed',
+        help='Check if writing implementation code is allowed in current phase')
+    verify_write_parser.set_defaults(func=cmd_verify_write_allowed)
+
     # Complete command
     complete_parser = subparsers.add_parser('complete', help='Mark an item as complete')
     complete_parser.add_argument('item', help='Item ID to complete')
@@ -2907,9 +2960,11 @@ Examples:
     # Finish command
     finish_parser = subparsers.add_parser('finish', help='Complete or abandon the workflow')
     finish_parser.add_argument('--abandon', action='store_true', help='Abandon instead of complete')
-    finish_parser.add_argument('--reason', '-r', help='Reason for abandoning')
+    finish_parser.add_argument('--reason', '-r', help='Reason for abandoning (or for skipping review check)')
     finish_parser.add_argument('--notes', '-n', help='Completion notes')
     finish_parser.add_argument('--skip-learn', action='store_true', help='Skip learning report')
+    finish_parser.add_argument('--skip-review-check', action='store_true', dest='skip_review_check',
+                              help='Skip the external review validation (requires --reason)')
     finish_parser.set_defaults(func=cmd_finish)
     
     # Analyze command

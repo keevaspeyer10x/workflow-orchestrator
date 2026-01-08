@@ -10,6 +10,550 @@ For completed features, see [CHANGELOG.md](CHANGELOG.md).
 
 > Items identified during v2.2 implementation for future work
 
+### Critical - Blocking Parallel Execution
+
+#### PRD-004: Fix or Replace Claude Squad Integration
+**Status:** BLOCKED - Current integration non-functional
+**Complexity:** High
+**Priority:** CRITICAL - Spawning feature is completely broken
+**Source:** Dogfood testing 2026-01-09
+
+**Description:** The Claude Squad integration (PRD-001) is non-functional. The `squad_adapter.py` was designed expecting a CLI interface that doesn't exist.
+
+**Problem:**
+Our adapter expects commands like:
+```bash
+claude-squad new --name X --dir Y --prompt-file Z
+claude-squad list --json
+claude-squad attach <session>
+```
+
+But Claude Squad (`cs`) is a **TUI (Terminal User Interface)** - you launch it interactively and use keyboard commands (`n` for new, etc.). There is no programmatic CLI.
+
+**Impact:**
+- `orchestrator prd spawn` falls back to "manual" mode
+- No actual parallel agent spawning occurs
+- PRD-001 Phase 1 "Complete" status is misleading
+- The entire spawning subsystem is untestable
+
+**Options:**
+
+| Option | Pros | Cons |
+|--------|------|------|
+| **A: Fix Claude Squad integration** | Reuse existing tool | May require upstream changes to `cs`; TUI not designed for automation |
+| **B: Direct tmux management** | Full control; no external deps | Reinvent wheel; session management complexity |
+| **C: Use Happy API** | User already uses Happy; mobile access | Requires Happy API; coupling to specific tool |
+| **D: Simple subprocess spawning** | Minimal complexity | No session management; orphan risk |
+
+**Recommended: Option B or D**
+
+Option B (direct tmux) gives us control without depending on external TUI tools:
+```python
+# Direct tmux approach
+def spawn_session(task_id: str, prompt: str, working_dir: Path):
+    session_name = f"wfo-{task_id}"
+    subprocess.run(["tmux", "new-session", "-d", "-s", session_name, "-c", str(working_dir)])
+    subprocess.run(["tmux", "send-keys", "-t", session_name, f"claude --print '{prompt}'", "Enter"])
+```
+
+Option D (simple subprocess) is even simpler for non-interactive batch execution.
+
+**Tasks:**
+- [ ] Decide on approach (A/B/C/D)
+- [ ] If B: Implement direct tmux session management
+- [ ] If D: Implement simple subprocess spawning
+- [ ] Remove or deprecate broken Claude Squad adapter
+- [ ] Update capability detection for chosen approach
+- [ ] Add integration tests that actually spawn agents
+- [ ] Update documentation
+
+**Files Affected:**
+- `src/prd/squad_adapter.py` - Replace or fix
+- `src/prd/squad_capabilities.py` - Update for new approach
+- `src/prd/backend_selector.py` - Update mode detection
+- `tests/prd/test_squad_adapter.py` - Fix tests
+
+---
+
+#### CORE-023: Simple `orchestrator resolve` for Merge Conflicts
+**Status:** Planned
+**Complexity:** Medium
+**Priority:** CRITICAL - Blocks parallel execution
+**Source:** User request - Cannot run multiple Claude Code instances in parallel without this
+
+**Description:** Add a zero-argument `orchestrator resolve` command that automatically resolves merge conflicts when git is in a conflict state. No branch specification needed - git already knows everything.
+
+**Problem Solved:**
+When running multiple Claude Code instances (or any parallel AI agents) independently, merge conflicts occur. The existing sophisticated conflict resolution pipeline (semantic analysis, interface harmonization, build testing) is only accessible through PRD workflows with explicit branch arguments. Users need a frictionless way to resolve conflicts without ceremony.
+
+**Desired Behavior:**
+```bash
+git merge some-branch
+# CONFLICT in src/api/client.py
+
+orchestrator resolve
+# ✓ Detected 1 conflict in src/api/client.py
+# ✓ Analyzing conflict context...
+# ✓ Applied semantic merge strategy
+# ✓ Resolved src/api/client.py
+# ✓ Build verification passed
+#
+# Conflicts resolved. Run `git commit` to complete the merge.
+```
+
+**How It Works:**
+1. Detect conflict state via `git diff --name-only --diff-filter=U`
+2. If no conflicts, exit with "No merge conflicts detected"
+3. For each conflicted file:
+   - Get base/ours/theirs via `git show :1:file`, `:2:file`, `:3:file`
+   - Get MERGE_HEAD info from `.git/MERGE_HEAD`
+   - Run existing conflict resolution pipeline
+4. Stage resolved files with `git add`
+5. Optionally verify build passes
+6. User runs `git commit` (or use `--commit` flag)
+
+**CLI Interface:**
+```bash
+# Basic - just resolve conflicts
+orchestrator resolve
+
+# With options (for power users/agents)
+orchestrator resolve --dry-run          # Show what would be done
+orchestrator resolve --strategy semantic # Force specific strategy
+orchestrator resolve --commit           # Auto-commit after resolving
+orchestrator resolve --no-build-check   # Skip build verification
+```
+
+**Integration with Existing Code:**
+- Reuse `src/conflict/detector.py` - ConflictDetector
+- Reuse `src/conflict/pipeline.py` - DetectionPipeline
+- Reuse `src/resolution/harmonizer.py` - InterfaceHarmonizer
+- Reuse `src/resolution/intent.py` - IntentAnalyzer
+- NEW: `src/git_conflict_resolver.py` - Wrapper that gets conflict info from git state
+
+**Key Principle:**
+Zero configuration for the user. Git already knows:
+- Which files have conflicts
+- What the base/ours/theirs versions are
+- What branch is being merged (MERGE_HEAD)
+
+The command just reads this state and applies resolution.
+
+**Tasks:**
+- [ ] Create `src/git_conflict_resolver.py` to extract conflict state from git
+- [ ] Add `resolve` command to CLI
+- [ ] Wire up existing ConflictDetector with git state
+- [ ] Wire up existing resolution pipeline
+- [ ] Add `--dry-run` flag
+- [ ] Add `--commit` flag
+- [ ] Add `--no-build-check` flag
+- [ ] Add tests for git state extraction
+- [ ] Add tests for resolution flow
+- [ ] Document in CLAUDE.md
+
+**Why Critical:**
+Without this, users cannot safely run multiple Claude Code instances in parallel because merge conflicts require manual resolution. This is the missing piece for practical parallel AI agent execution outside of the full PRD workflow.
+
+---
+
+#### CORE-024: Session Transcript Logging with Secret Scrubbing
+**Status:** Planned
+**Complexity:** Medium
+**Priority:** High
+**Source:** User request - Need visibility into session failures and patterns
+
+**Description:** Log all orchestrator session transcripts with automatic secret scrubbing to enable debugging and pattern analysis without exposing sensitive data.
+
+**Problem Solved:**
+When workflows fail or behave unexpectedly, there's no record of what happened. Session transcripts would reveal patterns (e.g., "context compaction causes 80% of workflow abandonment") but raw transcripts may contain API keys, passwords, and other secrets.
+
+**Desired Behavior:**
+```bash
+# Sessions automatically logged to .workflow_sessions/
+ls .workflow_sessions/
+# 2026-01-09_14-32-15_auth-feature.log
+# 2026-01-09_16-45-22_bugfix-api.log
+
+# View a session (secrets already scrubbed)
+cat .workflow_sessions/2026-01-09_14-32-15_auth-feature.log
+# ... transcript with [REDACTED:OPENAI_API_KEY] instead of actual key ...
+
+# Analyze patterns
+orchestrator sessions analyze --last 30
+# Workflow completion rate: 67%
+# Most common failure point: REVIEW phase (context compaction)
+# Average session duration: 45 minutes
+```
+
+**Secret Scrubbing Strategy (Hybrid):**
+
+1. **Known-secret replacement** (precise):
+   - Load secrets from SecretsManager (SOPS, env, etc.)
+   - Replace exact matches with `[REDACTED:SECRET_NAME]`
+   - Handles: API keys, passwords, tokens you've configured
+
+2. **Pattern-based scrubbing** (safety net):
+   - Common API key formats: `sk-...`, `ghp_...`, `xai-...`, `pk_live_...`
+   - Bearer tokens: `Bearer [a-zA-Z0-9_-]+`
+   - Base64-encoded credentials
+   - Email:password patterns
+
+3. **Configurable patterns**:
+   ```yaml
+   # workflow.yaml or .orchestrator.yaml
+   logging:
+     scrub_patterns:
+       - 'custom_secret_\w+'
+       - 'internal_token_[a-f0-9]+'
+   ```
+
+**Storage & Retention:**
+- Location: `.workflow_sessions/` (gitignored by default)
+- Rotation: Keep last N sessions or last N days (configurable)
+- Format: JSONL for structured analysis, or plain text for readability
+
+**CLI Commands:**
+```bash
+orchestrator sessions list              # List recent sessions
+orchestrator sessions show <id>         # View specific session
+orchestrator sessions analyze           # Pattern analysis
+orchestrator sessions clean --older 30d # Clean old sessions
+```
+
+**Implementation Notes:**
+```python
+class TranscriptLogger:
+    def __init__(self, secrets_manager: SecretsManager):
+        self.secrets = secrets_manager.get_all_secrets()
+        self.patterns = self._load_scrub_patterns()
+
+    def scrub(self, text: str) -> str:
+        # 1. Replace known secrets
+        for name, value in self.secrets.items():
+            text = text.replace(value, f"[REDACTED:{name}]")
+
+        # 2. Apply regex patterns
+        for pattern in self.patterns:
+            text = re.sub(pattern, "[REDACTED:PATTERN_MATCH]", text)
+
+        return text
+
+    def log(self, session_id: str, content: str):
+        scrubbed = self.scrub(content)
+        path = self.sessions_dir / f"{session_id}.log"
+        path.write_text(scrubbed)
+```
+
+**Tasks:**
+- [ ] Create `src/transcript_logger.py` with scrubbing logic
+- [ ] Integrate with SecretsManager for known-secret loading
+- [ ] Add common API key regex patterns
+- [ ] Add configurable custom patterns
+- [ ] Create `.workflow_sessions/` directory management
+- [ ] Add `sessions` CLI command group
+- [ ] Add retention/rotation policy
+- [ ] Add session analysis command
+- [ ] Add to .gitignore template
+- [ ] Document in CLAUDE.md
+
+---
+
+#### WF-023: Detect and Prevent Workflow Abandonment
+**Status:** Planned
+**Complexity:** Medium
+**Priority:** High
+**Source:** User observation - Workflows aren't finishing
+
+**Description:** Detect when workflows are being abandoned (session ends, context compacts, agent drifts) and take corrective action to ensure workflows complete.
+
+**Problem Solved:**
+AI agents frequently abandon workflows mid-execution:
+- Context compaction causes agent to forget active workflow
+- Session ends without completing LEARN phase
+- Agent drifts to other tasks without finishing
+- No record that workflow was abandoned
+
+This leads to incomplete work, missed reviews, and no learnings captured.
+
+**Detection Mechanisms:**
+
+| Trigger | Detection | Action |
+|---------|-----------|--------|
+| Session end | Hook on session termination | Warn + force checkpoint |
+| Context compaction | Post-compaction hook | Re-inject workflow state |
+| Stale workflow | No progress in X minutes | Periodic reminder |
+| Agent drift | Work outside workflow | Warn about active workflow |
+
+**Desired Behavior:**
+
+1. **On session end with active workflow:**
+```
+⚠️  SESSION ENDING WITH ACTIVE WORKFLOW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Workflow: "Implement auth feature"
+Phase: REVIEW (3/4 items complete)
+Status: IN PROGRESS
+
+Options:
+  1. Complete workflow now (`orchestrator finish`)
+  2. Checkpoint for later (`orchestrator checkpoint`)
+  3. Abandon workflow (`orchestrator finish --abandon`)
+
+Creating automatic checkpoint...
+✓ Checkpoint saved: cp_2026-01-09_auth-feature
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+2. **Stale workflow warning (configurable interval):**
+```
+⚠️  WORKFLOW STALE - No progress in 30 minutes
+Current phase: EXECUTE
+Last activity: write_tests (completed 32 min ago)
+Remaining items: implement_core, integration_tests
+
+Continue working or checkpoint?
+```
+
+3. **Session resume with incomplete workflow:**
+```
+⚠️  INCOMPLETE WORKFLOW DETECTED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Last session ended with active workflow:
+  Task: "Implement auth feature"
+  Phase: REVIEW
+  Checkpoint: cp_2026-01-09_auth-feature
+
+Resume this workflow? [Y/n]
+```
+
+**Implementation:**
+
+1. **Session end hook** (`.claude/hooks/session_end.sh`):
+```bash
+#!/bin/bash
+if orchestrator status --quiet 2>/dev/null | grep -q "IN_PROGRESS"; then
+    echo "⚠️  Active workflow detected!"
+    orchestrator checkpoint --auto --message "Auto-checkpoint on session end"
+fi
+```
+
+2. **Stale detection** (background or periodic check):
+```python
+def check_stale_workflow(threshold_minutes: int = 30):
+    state = load_workflow_state()
+    if not state or state.status != "in_progress":
+        return
+
+    last_activity = get_last_activity_time(state)
+    if (now() - last_activity).minutes > threshold_minutes:
+        warn_stale_workflow(state, last_activity)
+```
+
+3. **Abandonment tracking:**
+```python
+# In workflow state
+@dataclass
+class WorkflowState:
+    # ... existing fields ...
+    session_count: int = 0  # How many sessions touched this
+    abandonment_count: int = 0  # How many times abandoned
+    last_checkpoint_reason: str = ""  # "manual", "session_end", "stale"
+```
+
+**CLI Additions:**
+```bash
+orchestrator status --check-stale     # Warn if stale
+orchestrator checkpoint --auto        # Non-interactive checkpoint
+orchestrator resume --last            # Resume most recent checkpoint
+```
+
+**Configuration:**
+```yaml
+# workflow.yaml
+settings:
+  abandonment_detection:
+    stale_threshold_minutes: 30
+    auto_checkpoint_on_session_end: true
+    warn_on_resume: true
+```
+
+**Tasks:**
+- [ ] Create session end hook that checks for active workflow
+- [ ] Add auto-checkpoint on session end
+- [ ] Add stale workflow detection
+- [ ] Add abandonment tracking to workflow state
+- [ ] Add `--check-stale` flag to status command
+- [ ] Add resume prompt on session start
+- [ ] Add configuration options
+- [ ] Track abandonment metrics for analysis
+- [ ] Integrate with session logging (CORE-024)
+- [ ] Document hooks setup in CLAUDE.md
+
+**Metrics to Track:**
+- Workflow completion rate (completed vs started)
+- Average phase reached before abandonment
+- Most common abandonment points
+- Session count per workflow (high = many restarts)
+- Recovery rate (abandoned → resumed → completed)
+
+---
+
+#### LEARN-001: Automated Error Analysis in LEARN Phase
+**Status:** Planned
+**Complexity:** Medium
+**Priority:** High
+**Source:** User request - Understand what went wrong and could be streamlined
+
+**Description:** Automatically analyze session transcripts during the LEARN phase to identify errors, friction points, and wasted time - then suggest concrete improvements.
+
+**Problem Solved:**
+Currently, the LEARN phase relies on the AI agent to self-reflect on what went wrong. But:
+- Agents often forget earlier errors by the time they reach LEARN
+- Context compaction may have removed error details
+- No systematic pattern detection across sessions
+- Learnings are vague ("had some issues") rather than actionable
+
+Automated analysis provides objective, data-driven insights.
+
+**What Gets Detected:**
+
+| Category | Detection Method | Example |
+|----------|------------------|---------|
+| **Errors** | Stack traces, error messages | `ImportError: No module named 'pytest_asyncio'` |
+| **Retries** | Repeated similar commands | Same API call 3x with different params |
+| **Friction** | Natural language patterns | "let me try a different approach", "that didn't work" |
+| **Time sinks** | Timestamps between actions | 8 minutes between attempts on same task |
+| **Tool failures** | Non-zero exit codes | `pytest` returning exit code 1 |
+| **External issues** | Timeout/connection errors | API timeouts, rate limits |
+
+**Desired Behavior:**
+
+During LEARN phase (or via `orchestrator learn --analyze`):
+```
+LEARN PHASE - Session Error Analysis
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Session duration: 47 minutes
+Errors detected: 3
+Estimated time lost: ~12 minutes (26%)
+
+ERRORS & FRICTION POINTS
+─────────────────────────
+1. pytest ImportError (3 occurrences, ~5 min)
+   First seen: 14:32:15
+   Error: ModuleNotFoundError: No module named 'pytest_asyncio'
+   Resolution: Installed missing dependency
+   → Suggestion: Add pytest-asyncio to workflow prerequisites check
+
+2. Git merge conflict (1 occurrence, ~4 min)
+   File: src/api/client.py
+   Resolution: Manual edit to combine changes
+   → Suggestion: Use `orchestrator resolve` for semantic merge
+
+3. OpenRouter API timeout (2 occurrences, ~3 min)
+   Error: ReadTimeout after 30s
+   Resolution: Retry succeeded
+   → Suggestion: Already addressed by ARCH-001 (retry utility) ✓
+
+PATTERNS ACROSS RECENT SESSIONS
+───────────────────────────────
+• Missing dependencies: 4 of last 10 sessions (40%)
+  Most common: pytest plugins, type stubs
+• Merge conflicts: 3 of last 10 sessions (30%)
+  Usually in: src/cli.py, src/engine.py
+
+SUGGESTED IMPROVEMENTS
+──────────────────────
+□ Add dependency check to PLAN phase (would save ~5 min/session)
+□ Document merge workflow in CLAUDE.md
+□ Consider pre-commit hook for import sorting (reduces conflicts)
+
+Add these to ROADMAP.md? [y/N/select]
+```
+
+**Integration Points:**
+- **CORE-024** (Session Logging): Provides the transcript data to analyze
+- **WF-023** (Abandonment Detection): Errors often precede abandonment
+- **WF-007** (Learnings to Roadmap): Auto-generated suggestions feed into roadmap
+- **LEARN phase items**: Enhances `capture_learnings` and `identify_improvements`
+
+**Implementation:**
+
+```python
+class SessionErrorAnalyzer:
+    """Analyze session transcripts for errors and friction."""
+
+    # Detection patterns
+    ERROR_PATTERNS = [
+        (r'Traceback \(most recent call last\):.*?(?=\n\S|\Z)', 'stack_trace'),
+        (r'Error: .+', 'error_message'),
+        (r'FAILED|ERROR', 'test_failure'),
+        (r'Command .+ returned non-zero exit status', 'command_failure'),
+    ]
+
+    FRICTION_PATTERNS = [
+        (r"let me try (a different|another) approach", 'approach_change'),
+        (r"that didn't work", 'failure_acknowledgment'),
+        (r"I need to .+ instead", 'course_correction'),
+        (r"sorry|apologies|my mistake", 'error_recovery'),
+    ]
+
+    def analyze(self, transcript: str) -> ErrorAnalysis:
+        errors = self._detect_errors(transcript)
+        friction = self._detect_friction(transcript)
+        time_gaps = self._analyze_timing(transcript)
+
+        return ErrorAnalysis(
+            errors=errors,
+            friction_points=friction,
+            time_lost=self._estimate_time_lost(errors, time_gaps),
+            suggestions=self._generate_suggestions(errors, friction),
+        )
+
+    def analyze_patterns(self, sessions: list[str]) -> PatternAnalysis:
+        """Analyze patterns across multiple sessions."""
+        all_errors = []
+        for session in sessions:
+            analysis = self.analyze(session)
+            all_errors.extend(analysis.errors)
+
+        return PatternAnalysis(
+            common_errors=self._find_common(all_errors),
+            trend=self._calculate_trend(all_errors),
+            recommendations=self._cross_session_recommendations(all_errors),
+        )
+```
+
+**CLI Commands:**
+```bash
+orchestrator learn --analyze           # Analyze current session
+orchestrator learn --analyze-all       # Patterns across recent sessions
+orchestrator sessions analyze-errors   # Standalone error analysis
+```
+
+**Output Formats:**
+- Terminal: Formatted summary (as shown above)
+- JSON: Structured data for tooling
+- Markdown: For inclusion in LEARN phase notes
+
+**Tasks:**
+- [ ] Create `src/learning/error_analyzer.py`
+- [ ] Define error detection regex patterns
+- [ ] Define friction detection patterns
+- [ ] Add timing analysis (gaps between actions)
+- [ ] Implement cross-session pattern detection
+- [ ] Generate actionable suggestions from errors
+- [ ] Integrate with LEARN phase workflow items
+- [ ] Add `--analyze` flag to `learn` command
+- [ ] Add `analyze-errors` to `sessions` command
+- [ ] Link suggestions to existing roadmap items when applicable
+- [ ] Add tests for pattern detection
+- [ ] Document in CLAUDE.md
+
+**Privacy Consideration:**
+Error analysis runs on already-scrubbed transcripts (CORE-024), so no secrets are exposed in error messages. However, file paths and code snippets in stack traces should be reviewed for sensitivity.
+
+---
+
 ### High Priority - Architecture Simplification
 
 #### PRD-001: Claude Squad Integration (Replaces Multi-Agent Spawning)
@@ -1385,7 +1929,7 @@ class ReviewDaemon:
 ---
 
 ### WF-012: Workflow State Injection After Context Compaction
-**Status:** Planned
+**Status:** Completed
 **Complexity:** Medium
 **Priority:** Critical
 **Source:** Phase 7 Learning - Process compliance failure
@@ -1395,22 +1939,21 @@ class ReviewDaemon:
 During Phase 7 implementation, context compaction caused the AI to lose awareness of the active orchestrator workflow. It continued coding without the workflow, bypassing all quality gates (REVIEW, VERIFY, LEARN phases).
 
 **Implementation:**
-- Add Claude Code hook that runs after context compaction
-- Hook injects current `orchestrator status` output into context
-- If workflow is active, inject prominent reminder: "ACTIVE WORKFLOW - You MUST follow the orchestrator process"
+- Added `orchestrator context-reminder` command that outputs compact JSON with active, task, phase, progress, constraints
+- Can be called by hooks to inject workflow state after context compaction
 
-**Files:** `.claude/hooks/`, `CLAUDE.md`
+**Files:** `src/cli.py`, `src/engine.py`
 
-**Tasks:**
-- [ ] Create post-compaction hook script
-- [ ] Inject workflow state into context
-- [ ] Add prominent warning if workflow active but not in expected phase
-- [ ] Test with simulated context compaction
+**Completed Tasks:**
+- [x] Added `get_context_reminder()` method to WorkflowEngine
+- [x] Added `cmd_context_reminder` CLI command
+- [x] Output is compact (<500 chars) for context efficiency
+- [x] Tests: TestContextReminder (4 tests)
 
 ---
 
 ### WF-013: Block Implementation Code Without Active Workflow Phase
-**Status:** Planned
+**Status:** Completed
 **Complexity:** Medium
 **Priority:** Critical
 **Source:** Phase 7 Learning - Process compliance failure
@@ -1420,31 +1963,23 @@ During Phase 7 implementation, context compaction caused the AI to lose awarenes
 AI can currently write code regardless of workflow phase. This allows bypassing PLAN phase approval and working during REVIEW/VERIFY/LEARN phases when it should be reviewing, not coding.
 
 **Implementation:**
-- Add behavioral instruction to CLAUDE.md
-- Before writing code, check if workflow is active
-- If active and not in EXECUTE phase, refuse and explain why
-- Exception: Test files can be written in VERIFY phase
+- Added `orchestrator verify-write-allowed` command
+- Returns exit code 0 if allowed (in EXECUTE phase or no workflow), exit code 1 if blocked
+- Can be used by Claude Code hooks to check before file writes
 
-**Behavioral Rule:**
-```
-IF orchestrator workflow is active:
-  IF current phase is NOT "EXECUTE":
-    REFUSE to write implementation code
-    EXPLAIN: "Workflow is in {phase} phase. Cannot write code until EXECUTE phase."
-    SUGGEST: Complete current phase items first
-```
+**Files:** `src/cli.py`, `src/engine.py`
 
-**Files:** `CLAUDE.md`
-
-**Tasks:**
-- [ ] Add behavioral instruction to CLAUDE.md
-- [ ] Document phase-specific allowed actions
-- [ ] Add examples of what to refuse and when
+**Completed Tasks:**
+- [x] Added `verify_write_allowed()` method to WorkflowEngine
+- [x] Added `cmd_verify_write_allowed` CLI command
+- [x] Returns True when no workflow or in EXECUTE phase
+- [x] Returns False with explanation in PLAN, REVIEW, VERIFY, LEARN phases
+- [x] Tests: TestVerifyWriteAllowed (5 tests)
 
 ---
 
 ### WF-014: Block Workflow Finish Without Required Reviews
-**Status:** Planned
+**Status:** Completed
 **Complexity:** Low
 **Priority:** High
 **Source:** Phase 7 Learning - Process compliance failure
@@ -1454,17 +1989,43 @@ IF orchestrator workflow is active:
 Currently, workflows can be finished even if REVIEW phase items were completed without actually running external reviews. This defeats the purpose of multi-model review.
 
 **Implementation:**
-- Check workflow log for `review_completed` events with external model notes
-- If security_review or quality_review completed without external review, block finish
-- Require explicit `--skip-reviews` flag with reason to override
+- Added `get_completed_reviews()` method to get review types from workflow log
+- Added `validate_reviews_completed()` to check if required reviews (security, quality) were done
+- Added `--skip-review-check --reason` flag to `orchestrator finish` to allow bypass with explanation
 
 **Files:** `src/cli.py`, `src/engine.py`
 
-**Tasks:**
-- [ ] Add review completion validation to `cmd_finish()`
-- [ ] Check for "THIRD-PARTY REVIEW" in completion notes
-- [ ] Add `--skip-reviews` override flag with required reason
-- [ ] Display warning showing which reviews were missed
+**Completed Tasks:**
+- [x] Added `get_completed_reviews()` method to WorkflowEngine
+- [x] Added `validate_reviews_completed()` method to WorkflowEngine
+- [x] Added review validation to `cmd_finish()` blocking without reviews
+- [x] Added `--skip-review-check` flag with required `--reason` to override
+- [x] Tests: TestReviewValidation (6 tests)
+
+---
+
+### WF-016: Machine-Readable Status Output
+**Status:** Completed
+**Complexity:** Low
+**Priority:** Medium
+**Source:** Process Compliance Fixes PRD
+**Description:** Add `--json` flag to status command for machine-readable output, enabling hooks and scripts to parse workflow state.
+
+**Problem Solved:**
+The status command only output human-readable text, making it difficult for scripts and hooks to parse workflow state programmatically.
+
+**Implementation:**
+- Added `get_status_json()` method to WorkflowEngine returning full status dict
+- Added `--json` flag to `orchestrator status` command
+- Output includes: active, workflow_id, task, phase, progress, items, constraints
+
+**Files:** `src/cli.py`, `src/engine.py`
+
+**Completed Tasks:**
+- [x] Added `get_status_json()` method to WorkflowEngine
+- [x] Added `--json` flag to status command
+- [x] JSON output is valid and includes all key fields
+- [x] Tests: TestStatusJson (4 tests)
 
 ---
 

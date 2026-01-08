@@ -1,0 +1,214 @@
+# PRD: Process Compliance Fixes
+# Dogfood test: 4 parallel tasks that touch overlapping files
+# Tests Claude Squad spawning AND merge conflict resolution
+
+id: prd-process-compliance
+title: "Process Compliance Fixes (WF-012, WF-013, WF-014, WF-015)"
+
+tasks:
+  - id: wf-014-review-validation
+    description: |
+      ## WF-014: Block Workflow Finish Without Required Reviews
+
+      **Goal:** Prevent `orchestrator finish` from completing if required external
+      model reviews were not run.
+
+      **Implementation:**
+
+      1. Add method to `src/engine.py`:
+         ```python
+         def get_completed_reviews(self) -> set[str]:
+             """Get set of completed review types from workflow log."""
+             completed = set()
+             for event in self.get_events():
+                 if event.event_type == EventType.REVIEW_COMPLETED:
+                     review_type = event.details.get("review_type")
+                     if review_type:
+                         completed.add(review_type)
+             return completed
+
+         def validate_reviews_completed(self) -> tuple[bool, list[str]]:
+             """Check if required reviews were completed."""
+             required = {"security", "quality"}  # Minimum required
+             completed = self.get_completed_reviews()
+             missing = required - completed
+             return len(missing) == 0, list(missing)
+         ```
+
+      2. Add validation to `cmd_finish()` in `src/cli.py`:
+         - Check `engine.validate_reviews_completed()` before completing
+         - If missing reviews, print warning and block unless `--skip-review-check` flag
+         - Add `--skip-review-check` argument with required `--reason`
+
+      3. Add tests to `tests/test_process_compliance.py`:
+         - Test get_completed_reviews returns review types
+         - Test validate_reviews_completed passes/fails correctly
+         - Test cmd_finish blocks without reviews
+
+      **Files to modify:**
+      - src/engine.py
+      - src/cli.py
+      - tests/test_process_compliance.py (tests already exist - make them pass)
+
+      **Success criteria:**
+      - `orchestrator finish` blocks if reviews missing
+      - `orchestrator finish --skip-review-check --reason "..."` allows bypass
+      - All TestReviewValidation tests pass
+    dependencies: []
+
+  - id: wf-012-context-reminder
+    description: |
+      ## WF-012: Context Reminder Command
+
+      **Goal:** Add a command that outputs compact workflow state suitable for
+      re-injection after context compaction.
+
+      **Implementation:**
+
+      1. Add method to `src/engine.py`:
+         ```python
+         def get_context_reminder(self) -> dict:
+             """Get compact workflow state for context injection."""
+             if not self.state:
+                 return {"active": False}
+
+             return {
+                 "active": True,
+                 "task": self.state.task_description,
+                 "phase": self.state.current_phase_id,
+                 "progress": f"{self._count_completed()}/{self._count_total()}",
+                 "constraints": self.state.constraints or [],
+             }
+         ```
+
+      2. Add CLI command `context-reminder` to `src/cli.py`:
+         ```python
+         def cmd_context_reminder(args):
+             engine = get_engine(args)
+             reminder = engine.get_context_reminder()
+             print(json.dumps(reminder))
+         ```
+
+      3. Register the command in argument parser.
+
+      4. Add tests - make TestContextReminder tests pass.
+
+      **Files to modify:**
+      - src/engine.py
+      - src/cli.py
+      - tests/test_process_compliance.py (tests already exist)
+
+      **Success criteria:**
+      - `orchestrator context-reminder` outputs JSON
+      - Output includes active, task, phase, progress, constraints
+      - All TestContextReminder tests pass
+    dependencies: []
+
+  - id: wf-013-verify-write
+    description: |
+      ## WF-013: Verify Write Allowed Command
+
+      **Goal:** Add a command that checks if implementation code should be written
+      based on current workflow phase.
+
+      **Implementation:**
+
+      1. Add method to `src/engine.py`:
+         ```python
+         def verify_write_allowed(self) -> tuple[bool, str]:
+             """Check if writing implementation code is allowed."""
+             if not self.state:
+                 return True, "No active workflow - write allowed"
+
+             phase = self.state.current_phase_id
+             if phase == "EXECUTE":
+                 return True, "In EXECUTE phase - write allowed"
+             else:
+                 return False, f"In {phase} phase - writing implementation code not allowed. Complete {phase} phase first."
+         ```
+
+      2. Add CLI command `verify-write-allowed` to `src/cli.py`:
+         ```python
+         def cmd_verify_write_allowed(args):
+             engine = get_engine(args)
+             allowed, reason = engine.verify_write_allowed()
+             if allowed:
+                 print(f"✓ {reason}")
+                 sys.exit(0)
+             else:
+                 print(f"✗ {reason}")
+                 sys.exit(1)
+         ```
+
+      3. Register the command in argument parser.
+
+      4. Add tests - make TestVerifyWriteAllowed tests pass.
+
+      **Files to modify:**
+      - src/engine.py
+      - src/cli.py
+      - tests/test_process_compliance.py (tests already exist)
+
+      **Success criteria:**
+      - `orchestrator verify-write-allowed` returns 0 if allowed, 1 if not
+      - Returns True when no workflow or in EXECUTE phase
+      - Returns False in PLAN, REVIEW, VERIFY, LEARN phases
+      - All TestVerifyWriteAllowed tests pass
+    dependencies: []
+
+  - id: wf-015-status-json
+    description: |
+      ## WF-015: Status --json Flag
+
+      **Goal:** Add `--json` flag to status command for machine-readable output.
+
+      **Implementation:**
+
+      1. Add method to `src/engine.py`:
+         ```python
+         def get_status_json(self) -> dict:
+             """Get workflow status as JSON-serializable dict."""
+             if not self.state:
+                 return {"active": False}
+
+             return {
+                 "active": True,
+                 "workflow_id": self.state.workflow_id,
+                 "task": self.state.task_description,
+                 "phase": self.state.current_phase_id,
+                 "progress": {
+                     "completed": self._count_completed(),
+                     "total": self._count_total(),
+                 },
+                 "items": self._get_current_phase_items(),
+                 "constraints": self.state.constraints or [],
+             }
+         ```
+
+      2. Add `--json` flag to status command in `src/cli.py`:
+         ```python
+         def cmd_status(args):
+             engine = get_engine(args)
+
+             if args.json:
+                 status = engine.get_status_json()
+                 print(json.dumps(status))
+                 return
+
+             # ... existing status display ...
+         ```
+
+      3. Add `--json` argument to status parser.
+
+      4. Add tests - make TestStatusJson tests pass.
+
+      **Files to modify:**
+      - src/engine.py
+      - src/cli.py
+      - tests/test_process_compliance.py (tests already exist)
+
+      **Success criteria:**
+      - `orchestrator status --json` outputs valid JSON
+      - JSON includes active, workflow_id, task, phase, progress, items, constraints
+      - All TestStatusJson tests pass
+    dependencies: []
