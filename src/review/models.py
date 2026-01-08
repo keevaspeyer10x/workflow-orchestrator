@@ -345,7 +345,7 @@ class LiteLLMReviewer(BaseReviewer):
 
     # Model ID mappings for litellm
     # Maps our config model IDs to litellm-compatible model IDs
-    # LiteLLM format: "provider/model-name" or just "model-name" for OpenAI
+    # LiteLLM format: "provider/model-name" or "openrouter/provider/model" for OpenRouter
     # See: https://docs.litellm.ai/docs/providers
     # CANONICAL SOURCE: .claude/review-config.yaml
     #
@@ -355,32 +355,41 @@ class LiteLLMReviewer(BaseReviewer):
     # GPT-5.2, Gemini 3, Grok 4.1 are CURRENT. Do NOT downgrade to GPT-4/Gemini 1.5.
     # If unsure, CHECK .claude/review-config.yaml - that is the canonical source.
     # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    #
+    # VERIFIED MODELS (Jan 2026 - from OpenRouter /api/v1/models):
+    # - openai/gpt-5.2-pro (NOT gpt-5.2-max - that doesn't exist)
+    # - openai/gpt-5.1-codex-max
+    # - x-ai/grok-4.1-fast (NOT grok-4.1 - that doesn't exist)
+    # - gemini-2.5-pro (via Google API directly)
     MODEL_MAPPINGS = {
-        # OpenAI GPT-5.2 family (current generation as of 2026)
-        "openai/gpt-5.2-max": os.environ.get("REVIEW_MODEL_OPENAI", "gpt-5.2-max"),
-        "openai/gpt-5.2-pro": os.environ.get("REVIEW_MODEL_OPENAI", "gpt-5.2-pro"),
-        "openai/gpt-5.2": "gpt-5.2",
-        "openai/gpt-5": "gpt-5",
+        # OpenAI GPT-5.2 family via OpenRouter (current generation as of 2026)
+        # NOTE: gpt-5.2-max does NOT exist, use gpt-5.2-pro instead
+        "openai/gpt-5.2-max": "openrouter/openai/gpt-5.2-pro",
+        "openai/gpt-5.2-pro": "openrouter/openai/gpt-5.2-pro",
+        "openai/gpt-5.2": "openrouter/openai/gpt-5.2",
+        "openai/gpt-5": "openrouter/openai/gpt-5",
 
-        # OpenAI Codex (code-specialized)
-        "openai/codex": os.environ.get("REVIEW_MODEL_CODEX", "gpt-5.1-codex-max"),
-        "openai/gpt-5.1-codex-max": "gpt-5.1-codex-max",
+        # OpenAI Codex (code-specialized) via OpenRouter
+        # NOTE: Codex models don't support temperature parameter
+        "openai/codex": "openrouter/openai/gpt-5.1-codex-max",
+        "openai/gpt-5.1-codex-max": "openrouter/openai/gpt-5.1-codex-max",
 
-        # OpenAI legacy (for fallback)
-        "openai/gpt-4-turbo": "gpt-4-turbo",
-        "openai/gpt-4o": "gpt-4o",
-        "openai/o3": "o3",
-        "openai/o1-preview": "o1-preview",
+        # OpenAI legacy via OpenRouter (for fallback)
+        "openai/gpt-4-turbo": "openrouter/openai/gpt-4-turbo",
+        "openai/gpt-4o": "openrouter/openai/gpt-4o",
+        "openai/o3": "openrouter/openai/o3",
+        "openai/o1-preview": "openrouter/openai/o1-preview",
 
-        # Google Gemini 3 (current generation as of 2026)
-        "google/gemini-3-pro": os.environ.get("REVIEW_MODEL_GEMINI", "gemini/gemini-3-pro"),
-        "google/gemini-3-flash": "gemini/gemini-3-flash",
+        # Google Gemini via native API (uses GEMINI_API_KEY)
+        "google/gemini-3-pro": "gemini/gemini-2.5-pro",  # gemini-3-pro not yet available via litellm
+        "google/gemini-3-flash": "gemini/gemini-2.0-flash",
         "google/gemini-2.5-pro": "gemini/gemini-2.5-pro",
         "google/gemini-1.5-pro": "gemini/gemini-1.5-pro",
         "google/gemini-pro": "gemini/gemini-pro",
 
-        # xAI Grok 4.1 (current generation as of 2026)
-        "xai/grok-4.1": os.environ.get("REVIEW_MODEL_GROK", "openrouter/x-ai/grok-4.1"),
+        # xAI Grok via OpenRouter (current generation as of 2026)
+        # NOTE: grok-4.1 does NOT exist, use grok-4.1-fast instead
+        "xai/grok-4.1": "openrouter/x-ai/grok-4.1-fast",
         "xai/grok-4.1-fast": "openrouter/x-ai/grok-4.1-fast",
         "xai/grok-beta": "openrouter/x-ai/grok-beta",
 
@@ -392,6 +401,20 @@ class LiteLLMReviewer(BaseReviewer):
         # OpenRouter passthrough
         "openrouter/anthropic/claude-3-opus": "openrouter/anthropic/claude-3-opus",
         "openrouter/openai/gpt-5.2-pro": "openrouter/openai/gpt-5.2-pro",
+    }
+
+    # Models that don't support temperature parameter
+    NO_TEMPERATURE_MODELS = {
+        "openrouter/openai/gpt-5.1-codex-max",
+        "openrouter/openai/gpt-5.1-codex",
+        "openrouter/openai/codex-mini",
+        "openrouter/openai/o1",
+        "openrouter/openai/o1-preview",
+        "openrouter/openai/o1-pro",
+        "openrouter/openai/o3",
+        "openrouter/openai/o3-mini",
+        "openrouter/openai/o3-pro",
+        "openrouter/openai/o4-mini",
     }
 
     async def review(self, context: ChangeContext) -> ModelReview:
@@ -415,16 +438,23 @@ class LiteLLMReviewer(BaseReviewer):
             # Build prompt
             prompt = self._build_prompt(context)
 
-            # Call model
-            response = await litellm.acompletion(
-                model=litellm_model,
-                messages=[
+            # Build completion kwargs
+            completion_kwargs = {
+                "model": litellm_model,
+                "messages": [
                     {"role": "system", "content": "You are a senior software architect performing thorough code reviews. Return your analysis as JSON."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=self.model_spec.temperature,
-                max_tokens=self.model_spec.max_tokens,
-            )
+                "max_tokens": self.model_spec.max_tokens,
+            }
+
+            # Only add temperature for models that support it
+            # (Codex and o1/o3 reasoning models don't support temperature)
+            if litellm_model not in self.NO_TEMPERATURE_MODELS:
+                completion_kwargs["temperature"] = self.model_spec.temperature
+
+            # Call model
+            response = await litellm.acompletion(**completion_kwargs)
 
             # Extract response
             response_text = response.choices[0].message.content

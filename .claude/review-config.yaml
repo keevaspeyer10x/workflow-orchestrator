@@ -31,24 +31,24 @@ tiers:
       - no_critical_paths
     reviewers: []
 
-  # STANDARD: Self + GPT-5.2 Max
+  # STANDARD: Self + GPT-5.2 Pro
   standard:
     conditions:
       - files_changed <= 10
       - no_critical_paths
     reviewers:
-      - model: openai/gpt-5.2-max
+      - model: openai/gpt-5.2-pro
         focus: [security, correctness]
 
-  # COMPREHENSIVE: Self + GPT-5.2 Max + Gemini + Codex
+  # COMPREHENSIVE: Self + GPT-5.2 Pro + Gemini + Codex
   comprehensive:
     conditions:
       - files_changed <= 20
       - OR complexity >= medium
     reviewers:
-      - model: openai/gpt-5.2-max
+      - model: openai/gpt-5.2-pro
         focus: [security, correctness]
-      - model: google/gemini-3-pro
+      - model: google/gemini-2.5-pro
         focus: [architecture, design]
       - model: openai/codex
         focus: [correctness, performance]
@@ -63,11 +63,11 @@ tiers:
       - OR is_security_related
       - OR touches_api_surface
     reviewers:
-      - model: openai/gpt-5.2-max
+      - model: openai/gpt-5.2-pro
         focus: [security, correctness]
-      - model: google/gemini-3-pro
+      - model: google/gemini-2.5-pro
         focus: [architecture]
-      - model: xai/grok-4.1
+      - model: xai/grok-4.1-fast
         focus: [operations, edge_cases]
       - model: openai/codex
         focus: [correctness, performance]
@@ -91,21 +91,25 @@ critical_paths:
 #
 # Model Strengths (from empirical testing):
 #
-# GPT-5.2 Max:
+# GPT-5.2 Pro (openai/gpt-5.2-pro via OpenRouter):
 #   - Best: Security analysis, correctness, actionable recommendations
 #   - Use for: Primary reviewer on all changes
+#   - NOTE: gpt-5.2-max doesn't exist, use gpt-5.2-pro
 #
-# Gemini:
+# Gemini 2.5 Pro (google/gemini-2.5-pro via native API):
 #   - Best: Architecture insights, SPOF detection, concise unique findings
 #   - Use for: System design, complex changes
+#   - NOTE: Uses GEMINI_API_KEY directly (not OpenRouter)
 #
-# Grok 4.1:
+# Grok 4.1 Fast (xai/grok-4.1-fast via OpenRouter):
 #   - Best: Comprehensive breadth, operational concerns, edge cases
 #   - Use for: Critical tier, operations-heavy code
+#   - NOTE: grok-4.1 doesn't exist, use grok-4.1-fast
 #
-# Codex:
+# Codex (openai/gpt-5.1-codex-max via OpenRouter):
 #   - Best: Code correctness, performance, pragmatic suggestions
 #   - Use for: Implementation-focused reviews
+#   - NOTE: Codex doesn't support temperature parameter
 #
 # Claude (self):
 #   - Best: Edge cases, UX, full context awareness
