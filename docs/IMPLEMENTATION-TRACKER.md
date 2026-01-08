@@ -413,9 +413,11 @@ See: `docs/design-review-round3-synthesis.md` for full details.
   - [x] ModalBackend (serverless)
   - [x] RenderBackend (containers)
   - [x] GitHubActionsBackend
+  - [x] SequentialBackend (for running inside Claude Code)
 - [x] PRD Executor orchestrator (`src/prd/executor.py`)
 - [x] Scale to 20+ concurrent agents (configurable)
 - [x] CLI integration with orchestrator (`orchestrator prd` command)
+- [x] Sequential mode for Claude Code environment
 - [ ] End-to-end testing with real PRD
 
 ### Files Created
@@ -436,10 +438,12 @@ See: `docs/design-review-round3-synthesis.md` for full details.
 | `src/prd/backends/modal_worker.py` | **DONE** | ModalBackend (serverless functions) |
 | `src/prd/backends/render.py` | **DONE** | RenderBackend (containers) |
 | `src/prd/backends/github_actions.py` | **DONE** | GitHubActionsBackend |
+| `src/prd/backends/sequential.py` | **DONE** | SequentialBackend (Claude Code environment) |
 | `tests/prd/__init__.py` | **DONE** | Test package init |
 | `tests/prd/test_schema.py` | **DONE** | Schema tests |
 | `tests/prd/test_queue.py` | **DONE** | Job queue tests |
 | `tests/prd/test_workers.py` | **DONE** | Worker pool and backend tests |
+| `tests/prd/test_sequential.py` | **DONE** | Sequential backend tests (12 tests) |
 
 ### Key Design Decisions
 
@@ -449,6 +453,7 @@ See: `docs/design-review-round3-synthesis.md` for full details.
 4. **Integration branch strategy**: `integration/{prd_id}` accumulates work, checkpoint PRs to main
 5. **Wave-based resolution**: Merge non-conflicting first, then resolve conflicts in waves
 6. **Manual backend for Claude Web**: Generates copy/paste prompts when no API available
+7. **Sequential mode for Claude Code**: When running inside Claude Code, LocalBackend cannot spawn subprocess Claude instances. SequentialBackend instead queues tasks and yields them one at a time for the current session to execute. Detection via `CLAUDE_CODE=1` env var or 'claude' in command path.
 
 ### Backend Selection Logic
 

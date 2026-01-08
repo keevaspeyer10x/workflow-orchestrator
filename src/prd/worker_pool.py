@@ -19,6 +19,7 @@ from .backends.manual import ManualBackend
 from .backends.modal_worker import ModalBackend
 from .backends.render import RenderBackend
 from .backends.github_actions import GitHubActionsBackend
+from .backends.sequential import SequentialBackend, is_inside_claude_code
 
 logger = logging.getLogger(__name__)
 
@@ -51,12 +52,22 @@ class WorkerPool:
 
     def _init_backends(self) -> None:
         """Initialize all configured backends."""
-        # Local backend (always available)
-        self._backends[WorkerBackend.LOCAL] = LocalBackend(
-            max_parallel=self.config.backends.local.max_parallel,
-            timeout_minutes=self.config.backends.local.timeout_minutes,
-        )
-        self._available_backends.add(WorkerBackend.LOCAL)
+        # Check if inside Claude Code - use Sequential instead of Local
+        self._inside_claude_code = is_inside_claude_code()
+        if self._inside_claude_code:
+            logger.info("Detected Claude Code environment - using SequentialBackend")
+            self._sequential_backend = SequentialBackend()
+            # Map LOCAL to use Sequential when inside Claude Code
+            self._backends[WorkerBackend.LOCAL] = self._sequential_backend
+            self._available_backends.add(WorkerBackend.LOCAL)
+        else:
+            self._sequential_backend = None
+            # Local backend (always available)
+            self._backends[WorkerBackend.LOCAL] = LocalBackend(
+                max_parallel=self.config.backends.local.max_parallel,
+                timeout_minutes=self.config.backends.local.timeout_minutes,
+            )
+            self._available_backends.add(WorkerBackend.LOCAL)
 
         # Manual backend (always available)
         self._backends[WorkerBackend.MANUAL] = ManualBackend()
@@ -244,3 +255,12 @@ class WorkerPool:
                 ),
             }
         return stats
+
+    # Sequential mode helpers
+    def is_sequential_mode(self) -> bool:
+        """Check if running in sequential mode (inside Claude Code)."""
+        return self._inside_claude_code
+
+    def get_sequential_backend(self) -> Optional[SequentialBackend]:
+        """Get the sequential backend if in sequential mode."""
+        return self._sequential_backend

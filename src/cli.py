@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 
 from src.engine import WorkflowEngine
 from src.analytics import WorkflowAnalytics
-from src.learning import LearningEngine
+from src.learning_engine import LearningEngine
 from src.dashboard import start_dashboard, generate_static_dashboard
 from src.schema import WorkflowDef, WorkflowEvent, EventType
 from src.claude_integration import ClaudeCodeIntegration
@@ -2083,7 +2083,9 @@ def cmd_prd_start(args):
     """Start PRD execution from a PRD file."""
     import asyncio
     import yaml
+    import json
     from src.prd import PRDExecutor, PRDConfig, PRDDocument, PRDTask, WorkerBackend
+    from src.prd.backends.sequential import is_inside_claude_code
 
     working_dir = Path(args.dir or '.')
     prd_path = Path(args.prd_file)
@@ -2137,6 +2139,66 @@ def cmd_prd_start(args):
         checkpoint_interval=args.checkpoint_interval,
     )
 
+    # Check for sequential mode (inside Claude Code)
+    if is_inside_claude_code():
+        print("=" * 60)
+        print("SEQUENTIAL MODE (Inside Claude Code)")
+        print("=" * 60)
+        print(f"PRD: {prd.title}")
+        print(f"PRD ID: {prd.id}")
+        print(f"Tasks: {len(prd.tasks)}")
+        print()
+        print("Tasks will be yielded one at a time for this session to execute.")
+        print()
+
+        # Save PRD state for sequential execution
+        state_file = working_dir / ".claude" / "prd_state.json"
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Get first ready task
+        ready_tasks = prd.get_ready_tasks()
+        if not ready_tasks:
+            print("No tasks are ready to execute.")
+            sys.exit(0)
+
+        first_task = ready_tasks[0]
+
+        # Save state
+        state = {
+            "prd_id": prd.id,
+            "prd_title": prd.title,
+            "prd_file": str(prd_path.absolute()),
+            "tasks": [
+                {
+                    "id": t.id,
+                    "description": t.description,
+                    "dependencies": t.dependencies,
+                    "status": t.status.value,
+                }
+                for t in prd.tasks
+            ],
+            "current_task": first_task.id,
+            "completed_tasks": [],
+            "checkpoint_interval": args.checkpoint_interval,
+        }
+        with open(state_file, 'w') as f:
+            json.dump(state, f, indent=2)
+
+        # Print first task
+        print("=" * 60)
+        print(f"TASK: {first_task.id}")
+        print("=" * 60)
+        print()
+        print(first_task.description)
+        print()
+        print("-" * 60)
+        print("When this task is complete, run:")
+        print(f"  orchestrator prd task-done {first_task.id}")
+        print("-" * 60)
+
+        sys.exit(0)
+
+    # Standard async execution mode
     print(f"Starting PRD execution: {prd.title}")
     print(f"  PRD ID: {prd.id}")
     print(f"  Tasks: {len(prd.tasks)}")
@@ -2150,7 +2212,7 @@ def cmd_prd_start(args):
         print(f"  {status} Task {task.id} completed")
 
     def on_checkpoint(checkpoint):
-        print(f"  📋 Checkpoint PR created: {checkpoint.pr_url}")
+        print(f"  Checkpoint PR created: {checkpoint.pr_url}")
 
     executor = PRDExecutor(
         config=config,
@@ -2326,6 +2388,103 @@ def cmd_prd_validate(args):
             print(f"    - {task.get('id', '?')}: {task.get('description', 'No description')[:50]}{dep_str}")
 
     sys.exit(1 if errors else 0)
+
+
+def cmd_prd_task_done(args):
+    """Mark a task as complete in sequential mode."""
+    import json
+    from src.prd import TaskStatus
+
+    working_dir = Path(args.dir or '.')
+    state_file = working_dir / ".claude" / "prd_state.json"
+
+    if not state_file.exists():
+        print("Error: No PRD execution in progress.")
+        print("Start a PRD with: orchestrator prd start <prd_file>")
+        sys.exit(1)
+
+    # Load state
+    with open(state_file) as f:
+        state = json.load(f)
+
+    task_id = args.task_id
+
+    # Find the task
+    task_found = False
+    for task in state["tasks"]:
+        if task["id"] == task_id:
+            task_found = True
+            if task["status"] == "completed":
+                print(f"Task {task_id} is already completed.")
+            else:
+                task["status"] = "completed"
+                state["completed_tasks"].append(task_id)
+                print(f"Task {task_id} marked as complete.")
+            break
+
+    if not task_found:
+        print(f"Error: Task '{task_id}' not found in PRD.")
+        sys.exit(1)
+
+    # Find next ready task
+    def get_ready_tasks():
+        """Get tasks that are pending and have all dependencies satisfied."""
+        completed = set(state["completed_tasks"])
+        ready = []
+        for task in state["tasks"]:
+            if task["status"] != "pending":
+                continue
+            deps = set(task.get("dependencies", []))
+            if deps <= completed:
+                ready.append(task)
+        return ready
+
+    ready_tasks = get_ready_tasks()
+
+    # Save updated state
+    if ready_tasks:
+        state["current_task"] = ready_tasks[0]["id"]
+    else:
+        state["current_task"] = None
+
+    with open(state_file, 'w') as f:
+        json.dump(state, f, indent=2)
+
+    # Show progress
+    completed_count = len(state["completed_tasks"])
+    total_count = len(state["tasks"])
+    print()
+    print(f"Progress: {completed_count}/{total_count} tasks complete")
+    print()
+
+    if not ready_tasks:
+        # Check if all done
+        all_complete = all(t["status"] == "completed" for t in state["tasks"])
+        if all_complete:
+            print("=" * 60)
+            print("PRD EXECUTION COMPLETE")
+            print("=" * 60)
+            print(f"All {total_count} tasks completed successfully.")
+            # Clean up state file
+            state_file.unlink()
+        else:
+            # Some tasks blocked
+            pending = [t for t in state["tasks"] if t["status"] == "pending"]
+            print("No more tasks are ready to execute.")
+            if pending:
+                print(f"Blocked tasks: {[t['id'] for t in pending]}")
+    else:
+        next_task = ready_tasks[0]
+        print("=" * 60)
+        print(f"NEXT TASK: {next_task['id']}")
+        print("=" * 60)
+        print()
+        print(next_task['description'])
+        print()
+        print("-" * 60)
+        print("When this task is complete, run:")
+        print(f"  orchestrator prd task-done {next_task['id']}")
+        print("-" * 60)
 
 
 def main():
@@ -2610,6 +2769,12 @@ Examples:
     prd_validate = prd_subparsers.add_parser('validate', help='Validate a PRD file without executing')
     prd_validate.add_argument('prd_file', help='Path to PRD YAML file')
     prd_validate.set_defaults(func=cmd_prd_validate)
+
+    # prd task-done (for sequential mode)
+    prd_task_done = prd_subparsers.add_parser('task-done', help='Mark a task as complete (sequential mode)')
+    prd_task_done.add_argument('task_id', help='ID of the completed task')
+    prd_task_done.add_argument('-d', '--dir', help='Working directory')
+    prd_task_done.set_defaults(func=cmd_prd_task_done)
 
     prd_parser.set_defaults(func=lambda args: prd_parser.print_help() if not args.prd_command else None)
 
