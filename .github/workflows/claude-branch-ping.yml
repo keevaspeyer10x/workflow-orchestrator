@@ -1,0 +1,48 @@
+# Claude Branch Ping Workflow (UNTRUSTED)
+#
+# This workflow runs when any claude/* branch is pushed. Since it runs on
+# untrusted code, it has minimal permissions and only notifies the coordinator.
+#
+# Security: This workflow ONLY reads the branch name and SHA, then dispatches
+# an event. It does NOT checkout code or run any scripts from the branch.
+#
+# See: docs/FINAL-merge-conflict-system-design.md Section 13.1
+
+name: Claude Branch Ping
+
+on:
+  push:
+    branches:
+      - 'claude/**'
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate branch name
+        id: validate
+        run: |
+          BRANCH="${{ github.ref_name }}"
+          # Only allow alphanumeric, underscore, hyphen, slash, dot
+          # Must start with alphanumeric, no consecutive dots
+          if [[ "$BRANCH" =~ ^[a-zA-Z0-9][a-zA-Z0-9/_.-]*$ ]] && \
+             [[ ! "$BRANCH" =~ \.\. ]] && \
+             [[ ${#BRANCH} -le 255 ]]; then
+            echo "valid=true" >> $GITHUB_OUTPUT
+          else
+            echo "::warning::Branch name contains invalid characters, skipping notification"
+            echo "valid=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Notify coordinator
+        if: steps.validate.outputs.valid == 'true'
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          event-type: claude-branch-update
+          # Use toJSON for proper escaping of user-controlled values
+          client-payload: '{"branch": ${{ toJSON(github.ref_name) }}, "sha": ${{ toJSON(github.sha) }}, "actor": ${{ toJSON(github.actor) }}, "timestamp": ${{ toJSON(github.event.head_commit.timestamp) }}}'

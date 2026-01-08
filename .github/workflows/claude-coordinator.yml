@@ -1,0 +1,173 @@
+# Claude Coordinator Workflow (TRUSTED)
+#
+# This workflow coordinates multiple AI agent branches, detecting conflicts
+# and managing merges to main. It runs on:
+#   - repository_dispatch: Triggered by claude-branch-ping when agents push
+#   - schedule: Every 5 minutes to catch any missed events
+#   - workflow_dispatch: Manual trigger for testing/debugging
+#
+# Security: Always checks out main branch (trusted code), never agent branches.
+#
+# See: docs/FINAL-merge-conflict-system-design.md Section 13.2
+
+name: Claude Coordinator
+
+on:
+  repository_dispatch:
+    types: [claude-branch-update]
+
+  # NOTE: Schedule removed to avoid excessive compute costs (was */5 * * * * = 288 runs/day)
+  # Event-driven via repository_dispatch is sufficient for normal operation.
+  # Re-enable with conservative frequency (e.g., '0 */6 * * *') only if events are being missed.
+
+  workflow_dispatch:
+    inputs:
+      force_resolve:
+        description: 'Force conflict resolution attempt'
+        type: boolean
+        default: false
+      dry_run:
+        description: 'Dry run (no PRs created)'
+        type: boolean
+        default: false
+      target_branch:
+        description: 'Specific branch to process (optional)'
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: read
+
+# Prevent multiple coordinators from running simultaneously
+concurrency:
+  group: claude-coordinator-${{ github.repository }}
+  cancel-in-progress: false
+
+env:
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  coordinate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout main branch (trusted code)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Fetch all branches
+        run: |
+          git fetch --all --prune
+          echo "=== Claude branches found ==="
+          git branch -r | grep 'origin/claude/' || echo "No claude branches found"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -e .
+          pip install pyyaml pydantic
+
+      - name: Load configuration
+        id: config
+        run: |
+          if [ -f ".claude/config.yaml" ]; then
+            echo "config_exists=true" >> $GITHUB_OUTPUT
+            echo "Configuration file found"
+          else
+            echo "config_exists=false" >> $GITHUB_OUTPUT
+            echo "No configuration file, using defaults"
+          fi
+
+      - name: Determine run mode
+        id: mode
+        run: |
+          # Validate branch name to prevent injection attacks
+          validate_branch() {
+            local branch="$1"
+            # Only allow alphanumeric, underscore, hyphen, slash, dot
+            # Must start with alphanumeric, no consecutive dots, no ..
+            if [[ "$branch" =~ ^[a-zA-Z0-9][a-zA-Z0-9/_.-]*$ ]] && \
+               [[ ! "$branch" =~ \.\. ]] && \
+               [[ ${#branch} -le 255 ]]; then
+              return 0
+            fi
+            return 1
+          }
+
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            BRANCH="${{ github.event.client_payload.branch }}"
+            SHA="${{ github.event.client_payload.sha }}"
+
+            # Validate branch name before using
+            if validate_branch "$BRANCH"; then
+              echo "mode=event" >> $GITHUB_OUTPUT
+              echo "trigger_branch=$BRANCH" >> $GITHUB_OUTPUT
+              echo "trigger_sha=$SHA" >> $GITHUB_OUTPUT
+              echo "Mode: event (triggered by branch push)"
+            else
+              echo "::error::Invalid branch name detected, possible injection attempt: $BRANCH"
+              exit 1
+            fi
+          elif [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "mode=scheduled" >> $GITHUB_OUTPUT
+            echo "Mode: scheduled (periodic check)"
+          else
+            echo "mode=manual" >> $GITHUB_OUTPUT
+            echo "Mode: manual (workflow_dispatch)"
+          fi
+
+      - name: Run coordinator
+        id: coordinate
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          COORDINATOR_MODE: ${{ steps.mode.outputs.mode }}
+          TRIGGER_BRANCH: ${{ steps.mode.outputs.trigger_branch }}
+          TRIGGER_SHA: ${{ steps.mode.outputs.trigger_sha }}
+          FORCE_RESOLVE: ${{ inputs.force_resolve || 'false' }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+          TARGET_BRANCH: ${{ inputs.target_branch || '' }}
+        run: |
+          python -m src.coordinator \
+            --mode="${COORDINATOR_MODE}" \
+            --force="${FORCE_RESOLVE}" \
+            --dry-run="${DRY_RUN}" \
+            ${TARGET_BRANCH:+--branch="$TARGET_BRANCH"} \
+            --output=github
+
+      - name: Upload coordinator logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coordinator-logs-${{ github.run_id }}
+          path: |
+            .claude/logs/
+            .claude/manifests/
+          retention-days: 30
+
+      - name: Post summary
+        if: always()
+        run: |
+          echo "## Coordinator Run Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Mode:** ${{ steps.mode.outputs.mode }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger Branch:** ${{ steps.mode.outputs.trigger_branch || 'N/A' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Run ID:** ${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f ".claude/logs/coordinator-summary.md" ]; then
+            cat .claude/logs/coordinator-summary.md >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No summary file generated" >> $GITHUB_STEP_SUMMARY
+          fi

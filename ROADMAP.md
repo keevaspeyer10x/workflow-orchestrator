@@ -1254,6 +1254,255 @@ This is a significant architectural change. May be better suited for a separate 
 
 ---
 
+### WF-011: Background Parallel Reviews During Workflow
+**Status:** Planned
+**Complexity:** High
+**Priority:** High
+**Source:** Session 6 - Phase 3 Security Remediation
+**Description:** Run external model reviews continuously in background during workflow execution, not just blocking at commit time.
+
+**Problem Solved:**
+Currently, external model reviews only run when explicitly invoked (e.g., via `pre_commit_review.py`). This means issues are found late in the process. Reviews should run continuously as code is written, providing faster feedback.
+
+**Desired Behavior:**
+1. When EXECUTE phase starts, begin background review daemon
+2. File watcher triggers reviews on save/change
+3. Results cached - don't re-review unchanged files
+4. Notification when review completes (terminal, sound, etc.)
+5. At commit time, use cached results if available
+
+**Implementation Notes:**
+```python
+# Background review daemon
+class ReviewDaemon:
+    def __init__(self, watch_paths: list[str]):
+        self.watcher = FileWatcher(watch_paths)
+        self.cache = ReviewCache()
+        self.executor = ThreadPoolExecutor(max_workers=3)
+
+    def start(self):
+        for change in self.watcher.watch():
+            if not self.cache.is_valid(change.path):
+                self.executor.submit(self.review_file, change.path)
+
+    def review_file(self, path: str):
+        result = run_external_review(path)
+        self.cache.store(path, result)
+        self.notify(result)
+```
+
+**Tasks:**
+- [ ] Create `ReviewDaemon` class with file watching
+- [ ] Implement `ReviewCache` with invalidation on file change
+- [ ] Add notification system (terminal bell, desktop notification)
+- [ ] Integrate with workflow EXECUTE phase
+- [ ] Add `--background-reviews` flag to enable
+- [ ] Add `orchestrator review-status` command to check background results
+
+---
+
+### CORE-019: Fix OpenAI/LiteLLM Model Configuration
+**Status:** Planned
+**Complexity:** Low
+**Priority:** High
+**Source:** Session 6 - Pre-commit review failures
+**Description:** Fix OpenAI model configuration in LiteLLM integration so external reviews work correctly.
+
+**Problem Solved:**
+When running `pre_commit_review.py`, OpenAI models fail with:
+```
+LLM Provider NOT provided. Pass in the LLM provider you are trying to call.
+You passed model=gpt-5.2-max
+```
+
+LiteLLM requires specific model ID formats (e.g., `openai/gpt-4o` not `gpt-5.2-max`).
+
+**Files to Update:** `src/review/models.py`, `src/review/orchestrator.py`
+
+**Implementation Notes:**
+```python
+# Current (broken)
+ModelSpec(provider="openai", model_id="gpt-5.2-max", ...)
+
+# Fixed
+ModelSpec(provider="openai", model_id="openai/gpt-4o", ...)
+
+# Or update LiteLLMAdapter to prepend provider
+def _get_litellm_model_id(self, spec: ModelSpec) -> str:
+    if "/" not in spec.model_id:
+        return f"{spec.provider}/{spec.model_id}"
+    return spec.model_id
+```
+
+**Tasks:**
+- [ ] Update model IDs in `get_default_config()` to use litellm format
+- [ ] Add model ID normalization in `LiteLLMAdapter`
+- [ ] Test all configured models work with litellm
+- [ ] Add fallback model configuration
+
+---
+
+### CORE-020: Use CLI Tools for External Reviews
+**Status:** Planned
+**Complexity:** Medium
+**Priority:** High
+**Source:** Session 6 - Review quality observation
+**Description:** Use Gemini CLI and Codex CLI for external reviews instead of API calls, as CLI tools have better repository context.
+
+**Problem Solved:**
+API-based reviews send diff content in the request, limiting context. CLI tools (like `gemini` CLI, `codex` CLI) can browse the full repository, understand file relationships, and provide more comprehensive reviews.
+
+**Current Behavior:**
+```python
+# API-based review - limited context
+response = litellm.completion(
+    model="gemini-2.5-pro",
+    messages=[{"role": "user", "content": diff_content}]
+)
+```
+
+**Desired Behavior:**
+```python
+# CLI-based review - full repo context
+result = subprocess.run(
+    ["gemini", "review", "--diff", diff_file],
+    capture_output=True
+)
+```
+
+**Implementation Notes:**
+```python
+class CLIReviewer:
+    def __init__(self, cli_tool: str):
+        self.cli_tool = cli_tool  # "gemini", "codex", "claude"
+
+    def is_available(self) -> bool:
+        return shutil.which(self.cli_tool) is not None
+
+    async def review(self, context: ChangeContext) -> ModelReview:
+        # Write diff to temp file
+        with tempfile.NamedTemporaryFile(suffix=".diff") as f:
+            f.write(context.diff_content.encode())
+            f.flush()
+
+            result = subprocess.run(
+                [self.cli_tool, "review", f.name],
+                capture_output=True,
+                text=True
+            )
+
+        return self._parse_output(result.stdout)
+
+# In ReviewerFactory
+def create(spec: ModelSpec) -> Reviewer:
+    cli = CLIReviewer(spec.provider)
+    if cli.is_available():
+        return cli  # Prefer CLI
+    return LiteLLMAdapter(spec)  # Fall back to API
+```
+
+**Tasks:**
+- [ ] Create `CLIReviewer` class
+- [ ] Add CLI detection to `ReviewerFactory`
+- [ ] Parse CLI output into `ReviewIssue` format
+- [ ] Handle CLI tool authentication (if required)
+- [ ] Add `--prefer-api` flag to force API mode
+- [ ] Document CLI tool setup requirements
+
+---
+
+### CORE-021: Model Availability Validation Testing
+**Status:** Planned
+**Complexity:** Medium
+**Priority:** High
+**Source:** Session 6 - Review reliability issues
+**Description:** Add comprehensive testing and validation for model availability before attempting reviews. Ensure correct methodology is used (LiteLLM API, OpenRouter, CLI, direct).
+
+**Problem Solved:**
+External model reviews fail silently or with cryptic errors when:
+1. Model IDs are incorrect or fictional (e.g., `gpt-5.2-max` doesn't exist)
+2. LiteLLM provider prefix is wrong
+3. API keys are missing or expired
+4. CLI tools are not installed
+5. OpenRouter routing fails
+
+**Current Behavior:**
+Reviews fail at runtime with errors like:
+```
+LLM Provider NOT provided. Pass in the LLM provider you are trying to call.
+You passed model=gpt-5.2-max
+```
+
+**Desired Behavior:**
+```python
+# Before any review starts
+validation = await orchestrator.validate_models()
+if not validation.all_available:
+    for model in validation.unavailable:
+        print(f"⚠ {model.id}: {model.error}")
+    print("\nAvailable alternatives:")
+    for alt in validation.alternatives:
+        print(f"  {alt.original} → {alt.replacement}")
+```
+
+**Implementation Notes:**
+```python
+class ModelValidator:
+    async def validate(self, spec: ModelSpec) -> ValidationResult:
+        # 1. Check model ID is real and supported
+        if spec.full_id in KNOWN_FICTIONAL_MODELS:
+            return ValidationResult(
+                valid=False,
+                error="fictional_model",
+                suggestion=KNOWN_FICTIONAL_MODELS[spec.full_id]
+            )
+
+        # 2. Check API key availability
+        key_name = f"{spec.provider.upper()}_API_KEY"
+        if not os.environ.get(key_name):
+            return ValidationResult(valid=False, error="missing_api_key")
+
+        # 3. Check CLI availability (if CLI preferred)
+        if self.prefer_cli and not shutil.which(spec.provider):
+            # Fall back to API
+            pass
+
+        # 4. Test actual connectivity (optional health check)
+        try:
+            await litellm.acompletion(
+                model=spec.litellm_id,
+                messages=[{"role": "user", "content": "test"}],
+                max_tokens=1
+            )
+        except Exception as e:
+            return ValidationResult(valid=False, error=str(e))
+
+        return ValidationResult(valid=True)
+
+# Add to ReviewOrchestrator.review()
+async def review(self, context: ChangeContext) -> ReviewResult:
+    # Validate all models first
+    validation = await self._validate_models()
+    if not validation.all_valid:
+        # Log warnings, use fallbacks
+        for model, result in validation.failures.items():
+            logger.warning(f"Model {model} unavailable: {result.error}")
+            if result.fallback:
+                self._use_fallback(model, result.fallback)
+```
+
+**Tasks:**
+- [ ] Create `ModelValidator` class in `src/review/validation.py`
+- [ ] Add model ID validation (known real vs fictional models)
+- [ ] Add API key detection for each provider
+- [ ] Add CLI tool detection
+- [ ] Add health check endpoint testing
+- [ ] Create test suite for validation logic
+- [ ] Add `--validate-models` flag to pre-commit review script
+- [ ] Document model configuration requirements
+
+---
+
 ### WF-005: Summary Before Approval Gates
 **Status:** Planned
 **Complexity:** Low

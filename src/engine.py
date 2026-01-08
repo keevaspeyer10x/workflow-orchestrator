@@ -850,13 +850,14 @@ class WorkflowEngine:
         if verification.type == VerificationType.FILE_EXISTS:
             # Substitute template variables in path
             file_path = self._substitute_template(verification.path)
-            # Path traversal protection
+            # Path traversal protection - use is_relative_to for proper security
             path = (self.working_dir / file_path).resolve()
-            if not str(path).startswith(str(self.working_dir)):
+            # Python 3.9+ - is_relative_to returns bool, doesn't raise
+            if not path.is_relative_to(self.working_dir.resolve()):
                 result["blocked"] = True
                 result["reason"] = "path_traversal"
                 return False, f"Path traversal blocked: {verification.path}", result
-            
+
             exists = path.exists()
             result["path"] = str(path)
             result["exists"] = exists

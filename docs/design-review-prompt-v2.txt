@@ -1,0 +1,111 @@
+DESIGN REVIEW REQUEST: Multi-Agent Coordination & Merge Conflict Resolution System
+
+CONTEXT:
+We're building a system to coordinate multiple AI coding agents (Claude Web/CLI instances) working on the same codebase simultaneously. The system automatically detects and resolves conflicts between their work, delivering unified PRs invisible to the user.
+
+TARGET SCALE: 2-50+ concurrent agents for full PRD execution
+
+ARCHITECTURE OVERVIEW:
+
+1. AGENT REGISTRATION
+- Agents work on branches: claude/<task>-<session-id>
+- Manifests stored as GitHub Action artifacts (not committed files)
+- Manifests verified against git diff ("derive, don't trust")
+
+2. SECURITY MODEL (Split GitHub Actions)
+- Workflow A "Branch Ping": Triggers on claude/** push, UNTRUSTED, no secrets
+- Workflow B "Coordinator": Runs from main branch, TRUSTED, has secrets
+- Agent branches treated as data, not trusted code
+
+3. CONFLICT DETECTION (Stage 0)
+- Step 1: git merge-tree for textual conflicts
+- Step 2: Create temp merge even if git says "clean"
+- Step 3: Build test (catches "clean but broken")
+- Step 4: Smoke test (targeted tests for modified files)
+- Step 5: Dependency check (package.json, requirements.txt conflicts)
+- Step 6: Semantic analysis (symbol overlap, domain overlap)
+
+4. RESOLUTION PIPELINE (8 Stages)
+- Stage 1: Context assembly (gather manifests, diffs, related files)
+- Stage 2: Intent extraction (primary intent, hard/soft constraints, evidence)
+- Stage 3: Interface harmonization (pick canonical interfaces, generate adapters)
+- Stage 4: Test synthesis (collect tests, deduplicate, fix imports)
+- Stage 5: Candidate generation (3 strategies: agent1-primary, agent2-primary, convention-primary)
+- Stage 6: Tiered validation (build -> lint -> targeted tests -> full suite only if high-risk)
+- Stage 7: Decision (auto-resolve if high confidence + no risk flags, else escalate)
+- Stage 8: Delivery (handle race condition with main, create PR, port losing features)
+
+5. ESCALATION SYSTEM
+- Plain-English options (30-second decisions)
+- GitHub Issues with A/B choices
+- Feature porting: losing architecture's feature adapted to winning architecture
+- Timeout: auto-select recommendation after 72 hours for low-risk
+
+6. PRD EXECUTION MODE
+- Wave-based resolution (cluster related conflicts)
+- Integration branch accumulates work
+- Checkpoint PRs at intervals
+- Configurable auto-merge to integration vs main
+
+7. LEARNING SYSTEM
+- Pattern memory ("rerere for agents") - remember similar conflict resolutions
+- Strategy performance tracking (which approaches work for which conflict types)
+- Self-critique (optional critic pass before delivery)
+- Feedback loop to agents (guidance about hot spots)
+
+KEY DESIGN DECISIONS FROM PRIOR REVIEWS:
+1. Split workflows for security (untrusted trigger -> trusted coordinator)
+2. Store manifests as artifacts, not committed files (avoids merge conflicts on manifests)
+3. Test merged result in Stage 0, not just individual branches
+4. "Derive, don't trust" - verify manifest against actual git diff
+5. Port losing features to winning architecture (don't orphan)
+6. Handle race condition with main before delivery
+7. Tiered validation to control costs (fast -> slow, bail early)
+8. Dedicated dependency resolver for package conflicts
+
+SPECIFIC AREAS FOR REVIEW:
+
+A) ARCHITECTURE
+- Is the split workflow security model sufficient? Any gaps?
+- Is storing manifests as artifacts the right choice vs. other options?
+- Will the conflict clustering scale to 50+ agents?
+
+B) RESOLUTION PIPELINE
+- Is the 8-stage pipeline over-engineered or are all stages necessary?
+- Is 3 candidates sufficient for diversity? Too few? Too many?
+- Are the tiered validation tiers correct (build -> lint -> targeted -> full)?
+
+C) INTENT EXTRACTION
+- How robust is LLM-based intent extraction? What happens when it's wrong?
+- Should there be human-in-the-loop for intent validation?
+- How to handle conflicting intents that are both valid?
+
+D) ESCALATION
+- Is plain-English escalation sufficient for technical decisions?
+- Is 72-hour timeout appropriate? Too long? Too short?
+- How to handle users who never respond?
+
+E) LEARNING
+- Is pattern memory worth the complexity?
+- How to bootstrap the learning system with no historical data?
+- How to prevent learning system from encoding bad patterns?
+
+F) EDGE CASES
+- Circular dependencies between agent work?
+- Agent that "completes" but broke something else?
+- Flaky tests causing inconsistent candidate validation?
+- What if all candidates fail validation?
+
+G) MISSING PIECES
+- What important aspects might be missing from this design?
+- What failure modes haven't been considered?
+- What operational concerns need addressing?
+
+Please provide:
+1. Critical issues that would cause system failure or security problems
+2. Design concerns that should be reconsidered
+3. Missing elements that are essential
+4. Suggestions for improvement
+5. Validation that specific design choices are sound
+
+Be specific with file/code references where possible and explain the reasoning behind any concerns.

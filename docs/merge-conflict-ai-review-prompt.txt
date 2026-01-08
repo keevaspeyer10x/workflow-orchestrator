@@ -1,0 +1,153 @@
+# Problem Statement: Intelligent Merge Conflict Resolution for Multi-Agent AI Coding
+
+## Context
+
+We're building a system where multiple AI coding agents (e.g., Claude, GPT-4, Codestral) work on the same codebase simultaneously, each assigned different tasks. When their work is merged, conflicts arise—not just textual git conflicts, but semantic conflicts where agents made different architectural decisions about the same problem space.
+
+Current git tooling treats conflicts as text problems. We want to treat them as intent reconciliation problems.
+
+## The Core Challenge
+
+When two agents produce conflicting code, a naive merge tool only sees:
+
+    <<<<<<< agent-1
+    function validateInput(data) {
+      return schema.parse(data);
+    }
+    =======
+    function sanitizeInput(data) {
+      return DOMPurify.sanitize(data);
+    }
+    >>>>>>> agent-2
+
+But the real question is: what was each agent trying to achieve, and how do we synthesize a solution that honors both intents?
+
+## What We Know About Each Agent's Work
+
+We can capture rich context from each agent:
+- Task description they were assigned
+- Reasoning trace (chain of thought during development)
+- Files they read before writing
+- Decisions they made and why
+- Tests they wrote
+- Assumptions they operated under
+
+## Proposed Architecture (High-Level)
+
+    CONFLICT DETECTED
+           |
+           v
+    +-------------------------------------+
+    | STAGE 1: Context Assembly           |
+    | - Gather reasoning traces           |
+    | - Pull architectural patterns       |
+    | - Identify surrounding code         |
+    +-------------------------------------+
+           |
+           v
+    +-------------------------------------+
+    | STAGE 2: Intent Extraction          |
+    | - What was each agent trying to do? |
+    | - Are intents compatible/conflict?  |
+    | - Fast-path if orthogonal           |
+    +-------------------------------------+
+           |
+           v
+    +-------------------------------------+
+    | STAGE 3: Test Synthesis             |
+    | - Merge both agents' tests          |
+    | - Add integration tests             |
+    | - Define success criteria           |
+    +-------------------------------------+
+           |
+           v
+    +-------------------------------------+
+    | STAGE 4: Candidate Generation       |
+    | - Generate 3+ resolution candidates |
+    | - Different strategies per candidate|
+    +-------------------------------------+
+           |
+           v
+    +-------------------------------------+
+    | STAGE 5: Validation and Selection   |
+    | - Run tests against all candidates  |
+    | - Score on readability, arch fit    |
+    | - Select winner                     |
+    +-------------------------------------+
+           |
+           v
+    +-------------------------------------+
+    | STAGE 6: Critic Refinement          |
+    | - Review for subtle issues          |
+    | - Iterate until approved            |
+    | - Escalate to human if stuck        |
+    +-------------------------------------+
+
+## Alternative Approaches Considered
+
+1. Rich Context Injection: Feed resolver everything that shaped each agent's decisions
+
+2. Intent Extraction Layer: Dedicated pass to distill high-level intent before resolution
+
+3. Multi-Stage Pipeline: Classifier -> Harmonizer -> Architect -> Synthesizer -> Validator
+
+4. Adversarial Debate: Agents argue for their approach, judge decides
+
+5. Test-First Resolution: Synthesize unified tests first, then generate code to pass them
+
+6. Architectural Referee: Resolver with codebase-wide pattern awareness
+
+7. Ensemble with Voting: Multiple resolution strategies, panel evaluates and votes
+
+8. Iterative Critic Refinement: Generate -> Critique -> Refine -> Critique loop
+
+## Open Questions
+
+1. Rebase vs Merge: Should we resolve conflicts during rebase (smaller, serial) or merge (bigger, holistic)? Or detect and choose dynamically?
+
+2. Intent Extraction Reliability: How do we validate that extracted intent is accurate? What if the extraction is wrong?
+
+3. Test Synthesis Completeness: How do we ensure synthesized tests actually cover the combined behavior, not just union of original tests?
+
+4. Candidate Diversity: How do we ensure generated candidates are meaningfully different, not just superficial variations?
+
+5. Human Escalation Criteria: What triggers escalation to human review? How do we avoid both over-escalating (annoying) and under-escalating (dangerous)?
+
+6. Performance: For large codebases with frequent conflicts, how do we keep resolution fast enough to not bottleneck CI/CD?
+
+7. Learning Loop: How should the system learn from past resolutions? What's the feedback signal?
+
+8. Partial Conflicts: What if agents' changes are 80% compatible but 20% conflicting? How do we avoid re-doing the compatible parts?
+
+## Existing Infrastructure
+
+We have a workflow orchestration system with:
+- Phased workflow execution with state machine
+- Event logging with actor attribution (which agent did what)
+- File-based state management with locking
+- Agent routing (can assign tasks to specific agents)
+- Command verification (can run tests as gates)
+- Manual approval gates (human checkpoints)
+- Learning/analytics system for pattern detection
+
+## What I'm Looking For
+
+1. Critique of the proposed architecture: What's missing? What's overcomplicated?
+
+2. Alternative approaches: Are there better ways to think about this problem?
+
+3. Specific failure modes: Where would this system likely break down?
+
+4. Rebase vs Merge recommendation: Given the multi-agent context, which strategy (or hybrid) makes more sense?
+
+5. Implementation priorities: If building incrementally, what's the highest-value starting point?
+
+6. Research pointers: Are there papers, projects, or existing tools that tackle similar problems?
+
+## Constraints
+
+- Must work with existing git workflows (can't require exotic VCS)
+- Should support any LLM as the resolution agent (not locked to one provider)
+- Must maintain audit trail for compliance/debugging
+- Should degrade gracefully (human can always take over)
+- Needs to handle codebases from small (1k LOC) to large (1M+ LOC)

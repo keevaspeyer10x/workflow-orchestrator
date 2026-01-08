@@ -1,0 +1,112 @@
+# Multi-Model Review Configuration
+# Gold-plated by default - we prefer more reviews over fewer
+
+# Self-review is always performed first (Claude has full context)
+self_review:
+  enabled: true
+  focus:
+    - edge_cases
+    - ux
+    - completeness
+
+# Bias toward more thorough reviews
+# Options: more_review (default), balanced, less_review
+bias: more_review
+
+# File count thresholds for tier selection
+# Lower = more reviews (these are intentionally low)
+thresholds:
+  simple_max_files: 2      # Only very small changes are "simple"
+  standard_max_files: 10   # Moderate changes get 2 reviewers
+  comprehensive_max_files: 20  # Most changes get 3+ reviewers
+
+# Tier definitions
+tiers:
+  # MINIMAL: Self-review only (very rare)
+  minimal:
+    conditions:
+      - files_changed <= 2
+      - no_security_files
+      - no_api_changes
+      - no_critical_paths
+    reviewers: []
+
+  # STANDARD: Self + GPT-5.2 Max
+  standard:
+    conditions:
+      - files_changed <= 10
+      - no_critical_paths
+    reviewers:
+      - model: openai/gpt-5.2-max
+        focus: [security, correctness]
+
+  # COMPREHENSIVE: Self + GPT-5.2 Max + Gemini + Codex
+  comprehensive:
+    conditions:
+      - files_changed <= 20
+      - OR complexity >= medium
+    reviewers:
+      - model: openai/gpt-5.2-max
+        focus: [security, correctness]
+      - model: google/gemini-3-pro
+        focus: [architecture, design]
+      - model: openai/codex
+        focus: [correctness, performance]
+    require_consensus: true
+
+  # CRITICAL: All models (gold-plated)
+  critical:
+    conditions:
+      - files_changed > 20
+      - OR touches_critical_paths
+      - OR is_merge_conflict_resolution
+      - OR is_security_related
+      - OR touches_api_surface
+    reviewers:
+      - model: openai/gpt-5.2-max
+        focus: [security, correctness]
+      - model: google/gemini-3-pro
+        focus: [architecture]
+      - model: xai/grok-4.1
+        focus: [operations, edge_cases]
+      - model: openai/codex
+        focus: [correctness, performance]
+    require_consensus: true
+    min_confidence: 0.8
+
+# Paths that always escalate to CRITICAL tier
+critical_paths:
+  - "**/auth/**"
+  - "**/security/**"
+  - "**/*payment*"
+  - "**/*billing*"
+  - "**/migrations/**"
+  - ".github/workflows/**"
+  - "**/secrets/**"
+  - "**/*credential*"
+  - "**/api/**"
+  - "**/core/**"
+
+# Model capabilities reference (for choosing focus areas)
+#
+# Model Strengths (from empirical testing):
+#
+# GPT-5.2 Max:
+#   - Best: Security analysis, correctness, actionable recommendations
+#   - Use for: Primary reviewer on all changes
+#
+# Gemini:
+#   - Best: Architecture insights, SPOF detection, concise unique findings
+#   - Use for: System design, complex changes
+#
+# Grok 4.1:
+#   - Best: Comprehensive breadth, operational concerns, edge cases
+#   - Use for: Critical tier, operations-heavy code
+#
+# Codex:
+#   - Best: Code correctness, performance, pragmatic suggestions
+#   - Use for: Implementation-focused reviews
+#
+# Claude (self):
+#   - Best: Edge cases, UX, full context awareness
+#   - Use for: Always (has conversation context)
