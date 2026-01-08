@@ -19,6 +19,7 @@ from .pattern_schema import (
     DEPRECATION_FAILURE_COUNT,
 )
 from .pattern_database import PatternDatabase
+from .pattern_hasher import PatternHasher
 
 __all__ = [
     # Enums
@@ -30,6 +31,8 @@ __all__ = [
     "ResolutionOutcome",
     # Database
     "PatternDatabase",
+    # Hasher
+    "PatternHasher",
     # Constants
     "ACTIVE_THRESHOLD",
     "SUGGESTING_THRESHOLD",
