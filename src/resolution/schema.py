@@ -307,3 +307,113 @@ class Resolution:
 
     # Timing
     resolved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# ============================================================================
+# Phase 5: Advanced Resolution Types
+# ============================================================================
+
+from enum import Enum
+
+
+class ValidationTier(Enum):
+    """Validation tiers for tiered validation."""
+    SMOKE = "smoke"           # Build only
+    LINT = "lint"             # Build + lint
+    TARGETED = "targeted"     # Build + lint + related tests
+    COMPREHENSIVE = "comprehensive"  # Full test suite
+
+
+@dataclass
+class FlakyTestRecord:
+    """Record of a test's flakiness history."""
+    test_name: str
+    outcomes: list[bool] = field(default_factory=list)  # True=pass, False=fail
+    last_updated: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def flakiness_score(self) -> float:
+        """Calculate flakiness score (0=stable, 1=very flaky)."""
+        if len(self.outcomes) < 2:
+            return 0.0
+
+        # Count transitions (pass->fail or fail->pass)
+        transitions = sum(
+            1 for i in range(1, len(self.outcomes))
+            if self.outcomes[i] != self.outcomes[i-1]
+        )
+
+        # Flakiness = transitions / (possible transitions)
+        max_transitions = len(self.outcomes) - 1
+        return transitions / max_transitions if max_transitions > 0 else 0.0
+
+
+@dataclass
+class CritiqueResult:
+    """Result of LLM self-critique."""
+    approved: bool = True
+    issues: list[str] = field(default_factory=list)
+    suggestions: list[str] = field(default_factory=list)
+
+    # Severity flags
+    has_security_issues: bool = False
+    has_critical_bugs: bool = False
+    has_performance_issues: bool = False
+    has_pattern_violations: bool = False
+
+    # Raw response
+    raw_response: str = ""
+
+
+@dataclass
+class DiversityResult:
+    """Result of diversity check."""
+    meets_threshold: bool = True
+    min_diversity: float = 0.0
+    avg_diversity: float = 0.0
+    pairwise_scores: dict = field(default_factory=dict)  # (id1, id2) -> score
+    recommendation: str = ""
+
+
+@dataclass
+class TieredValidationResult:
+    """Result of tiered validation for a candidate."""
+    candidate_id: str
+    tier_reached: ValidationTier = ValidationTier.SMOKE
+
+    # Tier 1: Smoke
+    build_passed: bool = False
+    build_time_ms: int = 0
+
+    # Tier 2: Lint
+    lint_score: float = 0.0
+    lint_issues: int = 0
+
+    # Tier 3: Targeted
+    targeted_tests_passed: int = 0
+    targeted_tests_failed: int = 0
+    targeted_tests_skipped: int = 0
+    targeted_test_time_ms: int = 0
+
+    # Tier 4: Comprehensive
+    full_tests_passed: int = 0
+    full_tests_failed: int = 0
+    full_tests_skipped: int = 0
+    full_test_time_ms: int = 0
+
+    # Flaky test info
+    flaky_tests_detected: list[str] = field(default_factory=list)
+    flaky_tests_retried: list[str] = field(default_factory=list)
+
+    @property
+    def passed_current_tier(self) -> bool:
+        """Check if candidate passed the tier it reached."""
+        if self.tier_reached == ValidationTier.SMOKE:
+            return self.build_passed
+        elif self.tier_reached == ValidationTier.LINT:
+            return self.build_passed and self.lint_score >= 0.5
+        elif self.tier_reached == ValidationTier.TARGETED:
+            return self.build_passed and self.targeted_tests_failed == 0
+        elif self.tier_reached == ValidationTier.COMPREHENSIVE:
+            return self.build_passed and self.full_tests_failed == 0
+        return False

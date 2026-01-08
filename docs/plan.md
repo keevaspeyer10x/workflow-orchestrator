@@ -1,132 +1,112 @@
-# Phase 2: Conflict Detection - Implementation Plan
+# Phase 5: Advanced Resolution - Implementation Plan
 
-## Overview
+**Goal:** Increase auto-resolve rate from ~60% to ~80% through multiple candidate generation, better validation, and robustness improvements.
 
-Phase 2 enhances the basic conflict detection from Phase 1 with a full detection pipeline that catches "clean but broken" merges and classifies conflicts accurately.
+## Components
 
-**Goal:** Accurate conflict classification
-**Deliverable:** System that accurately identifies and classifies conflicts
+### 1. Multiple Candidate Strategies (`multi_candidate.py`)
 
-## Current State (Phase 1 Complete)
+**Current State:** Phase 3 generates a single candidate using the "best" strategy.
+**Target:** Generate 3 candidates using DISTINCT strategies, then select the best.
 
-- `src/conflict/detector.py` - Basic `git merge-tree` detection
-- Returns `ConflictInfo` with `ConflictType`, `ConflictSeverity`, file list
-
-## Phase 2 Components
-
-### 1. Full Detection Pipeline (`src/conflict/pipeline.py`)
-
-Orchestrates the 6-step detection process:
-
-```
-Step 1: Textual conflict check (git merge-tree) - EXISTING
-Step 2: Create temporary merge - NEW
-Step 3: Build test (compile/typecheck) - NEW
-Step 4: Smoke test (targeted tests) - NEW
-Step 5: Dependency check - NEW
-Step 6: Semantic analysis - NEW
-```
-
-**Implementation:**
-- Create `DetectionPipeline` class that runs steps sequentially
-- Each step can short-circuit if it finds critical conflicts
-- Return enhanced `ConflictClassification` with all results
-
-### 2. Build/Test Runner (`src/conflict/build_tester.py`)
-
-Runs build and tests on merged code:
-
-- Create temp branch with merged result
-- Run project's build command (from config or auto-detect)
-- Run targeted tests for modified files
-- Clean up temp branch
+**Strategies:**
+- `agent1_primary` - Keep Agent 1's architecture, adapt Agent 2's features
+- `agent2_primary` - Keep Agent 2's architecture, adapt Agent 1's features
+- `convention_primary` - Match existing repo patterns, adapt both agents
+- `fresh_synthesis` (optional) - Re-implement from scratch (architectural conflicts only)
 
 **Configuration:**
-- Auto-detect build system (npm, pip, cargo, etc.)
-- Support custom build commands in `.claude/config.yaml`
+```yaml
+resolution:
+  max_candidates: 3
+  strategies: [agent1_primary, agent2_primary, convention_primary]
+  candidate_time_budget: 300  # seconds per candidate
+```
 
-### 3. Dependency Analyzer (`src/conflict/dependency.py`)
+### 2. Candidate Diversity Enforcement (`diversity.py`)
 
-Detects dependency conflicts:
+**Problem:** Candidates might be too similar if strategies produce similar outputs.
+**Solution:** Measure diversity and regenerate if below threshold.
 
-- Parse `package.json`, `requirements.txt`, `Cargo.toml`, etc.
-- Detect version conflicts between branches
-- Detect incompatible package combinations
-- Return `DependencyConflict` list
+**Implementation:**
+- `DiversityChecker` class computes similarity between candidate diffs
+- Uses Jaccard similarity on changed line sets
+- If diversity < `min_candidate_diversity` (0.3), regenerate with tweaked params
+- Max 3 regeneration attempts before proceeding anyway
 
-### 4. Semantic Analyzer (`src/conflict/semantic.py`)
+### 3. Validation Tiers (`validation_tiers.py`)
 
-Detects semantic conflicts:
+**Current State:** Phase 3 runs build + targeted tests.
+**Target:** Tiered validation with early elimination.
 
-- Module dependency graph overlap (imports)
-- Symbol/function overlap (same names, different implementations)
-- Domain overlap (auth, db, api based on file paths)
-- API surface changes (public function signatures)
+**Tiers:**
+| Tier | Name | Time | Action |
+|------|------|------|--------|
+| 1 | Smoke | ~seconds | Build only - eliminate non-compiling |
+| 2 | Lint | ~seconds | Score convention compliance |
+| 3 | Targeted | ~5 min | Tests for modified files only |
+| 4 | Comprehensive | ~varies | Full suite (high-risk only) |
 
-### 5. Conflict Clusterer (`src/conflict/clusterer.py`)
-
-Groups related conflicts for efficient resolution:
-
-- Build file overlap graph
-- Build domain overlap graph
-- Find connected components = clusters
-- Order clusters by dependencies
-
-### 6. Risk Flag Detection (enhance `detector.py`)
-
-Detect high-risk areas:
-- Security-related files (auth, crypto, secrets)
-- Database migrations
+**High-risk triggers for Tier 4:**
+- Security-related files
 - Public API changes
-- Configuration changes
+- Database migrations
+- Authentication/authorization
 
-## File Structure
+### 4. Flaky Test Handling (`flaky_handler.py`)
 
-```
-src/conflict/
-├── __init__.py         # Update exports
-├── detector.py         # Existing - enhance with risk flags
-├── pipeline.py         # NEW - orchestrates detection steps
-├── build_tester.py     # NEW - build/test on merged code
-├── dependency.py       # NEW - dependency conflict detection
-├── semantic.py         # NEW - semantic conflict detection
-└── clusterer.py        # NEW - conflict clustering
-```
+**Problem:** Flaky tests cause false failures and inconsistent results.
+**Solution:** Track flakiness, retry known flaky tests, adjust scoring.
+
+**Implementation:**
+- `FlakyTestHandler` with JSON-based persistence (`.flaky_tests.json`)
+- Track pass/fail history per test (last N runs)
+- Flakiness score = (inconsistent_runs / total_runs)
+- Retry mechanism: up to 3 retries for tests with flakiness > 0.3
+- Scoring adjustment: downweight flaky test failures
+- Quarantine: tests with flakiness > 0.8 are noted but not blocking
+
+### 5. Self-Critique (`self_critic.py`) - Optional
+
+**Purpose:** LLM-based review of winning candidate before delivery.
+**Implementation:**
+- Uses LiteLLM to query external models (GPT-5.2 Max preferred)
+- Checks: security issues, performance regressions, error handling, pattern consistency
+- Returns: APPROVED or ISSUES list
+- Blocking issues: security vulnerabilities, critical bugs
+- Config: `self_critique_enabled: false` (optional, adds latency)
+
+## Files to Create/Modify
+
+| File | Action | Description |
+|------|--------|-------------|
+| `src/resolution/multi_candidate.py` | CREATE | MultiCandidateGenerator class |
+| `src/resolution/diversity.py` | CREATE | DiversityChecker class |
+| `src/resolution/validation_tiers.py` | CREATE | TieredValidator class |
+| `src/resolution/flaky_handler.py` | CREATE | FlakyTestHandler class |
+| `src/resolution/self_critic.py` | CREATE | SelfCritic class |
+| `src/resolution/schema.py` | MODIFY | Add ValidationTier enum, FlakyTestRecord, CritiqueResult |
+| `src/resolution/pipeline.py` | MODIFY | Integrate new Phase 5 components |
+| `tests/resolution/test_phase5.py` | CREATE | Tests for all Phase 5 components |
 
 ## Implementation Order
 
-1. **Risk flag detection** - Enhance existing detector.py
-2. **Detection pipeline** - Orchestration framework
-3. **Build tester** - Critical for catching "clean but broken"
-4. **Dependency analyzer** - Common conflict source
-5. **Semantic analyzer** - Advanced detection
-6. **Conflict clusterer** - Scalability for many agents
-
-## Testing Strategy
-
-- Unit tests for each component
-- Integration test with mock git repo
-- Test "clean but broken" scenarios specifically
-
-## Configuration
-
-Add to `.claude/config.yaml`:
-
-```yaml
-conflict_detection:
-  build_command: "npm run build"  # or auto-detect
-  test_command: "npm test"
-  timeout_seconds: 300
-  semantic_analysis: true
-  dependency_check: true
-```
+1. **Schema additions** - Add new data models first
+2. **Multi-candidate generation** - Core feature, enables diversity checking
+3. **Diversity enforcement** - Works with multi-candidate
+4. **Validation tiers** - Enhance existing validator
+5. **Flaky test handling** - Integrate with validation
+6. **Self-critique** - Optional, add last
+7. **Pipeline integration** - Wire everything together
+8. **Tests** - Write tests for each component
 
 ## Success Criteria
 
-- [ ] Detect textual conflicts (existing)
-- [ ] Detect build failures in merged code
-- [ ] Detect test failures in merged code
-- [ ] Detect dependency version conflicts
-- [ ] Classify conflict severity accurately
-- [ ] Identify risk flags (security, auth, db)
-- [ ] Cluster conflicts by domain/files
+- [ ] Generates 3 candidates instead of 1
+- [ ] Candidates are measurably diverse (>0.3 Jaccard distance)
+- [ ] Validation uses tiered approach with early elimination
+- [ ] Flaky tests are detected and handled gracefully
+- [ ] Self-critique (when enabled) catches issues Claude missed
+- [ ] All 21+ existing resolution tests still pass
+- [ ] New tests cover Phase 5 functionality
+- [ ] External model review passes before commit

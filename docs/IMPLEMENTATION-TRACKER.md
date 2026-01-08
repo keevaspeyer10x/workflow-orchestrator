@@ -2,7 +2,7 @@
 
 **Design Document:** `docs/FINAL-merge-conflict-system-design.md`
 **Started:** January 2026
-**Current Phase:** 5 - Advanced Resolution (Next)
+**Current Phase:** 6 - PRD Mode & Scale (Next)
 
 ---
 
@@ -47,9 +47,9 @@ Canonical config: `.claude/review-config.yaml` - always check this for current m
 |-------|--------|---------------------|
 | 1. Foundation (MVP) | **COMPLETE** | N/A (fast-path only) |
 | 2. Conflict Detection | **COMPLETE** | N/A |
-| 3. Basic Resolution | **COMPLETE** (needs remediation) | ~60% |
+| 3. Basic Resolution | **COMPLETE** | ~60% |
 | 4. Escalation System | **COMPLETE** | N/A |
-| 5. Advanced Resolution | Not Started | ~80% |
+| 5. Advanced Resolution | **COMPLETE** | ~80% |
 | 6. PRD Mode & Scale | Not Started | N/A |
 | 7. Learning & Optimization | Not Started | N/A |
 
@@ -327,11 +327,36 @@ See: `docs/design-review-round3-synthesis.md` for full details.
 
 ### Checklist
 
-- [ ] Multiple candidate strategies
-- [ ] Full validation tiers
-- [ ] Candidate diversity enforcement
-- [ ] Self-critique (optional)
-- [ ] Flaky test handling
+- [x] Multiple candidate strategies (`src/resolution/multi_candidate.py`)
+- [x] Full validation tiers (`src/resolution/validation_tiers.py`)
+- [x] Candidate diversity enforcement (`src/resolution/diversity.py`)
+- [x] Self-critique (optional) (`src/resolution/self_critic.py`)
+- [x] Flaky test handling (`src/resolution/flaky_handler.py`)
+
+### Files Created
+
+| File | Status | Description |
+|------|--------|-------------|
+| `src/resolution/multi_candidate.py` | **DONE** | MultiCandidateGenerator - generates 3 candidates with distinct strategies |
+| `src/resolution/diversity.py` | **DONE** | DiversityChecker - ensures candidates are meaningfully different |
+| `src/resolution/validation_tiers.py` | **DONE** | TieredValidator - smoke/lint/targeted/comprehensive tiers |
+| `src/resolution/flaky_handler.py` | **DONE** | FlakyTestHandler - tracks flakiness, retries, adjusts scoring |
+| `src/resolution/self_critic.py` | **DONE** | SelfCritic - LLM-based critique via LiteLLM (optional) |
+| `src/resolution/schema.py` | **UPDATED** | Added ValidationTier, FlakyTestRecord, CritiqueResult, DiversityResult, TieredValidationResult |
+| `tests/resolution/test_phase5.py` | **DONE** | 32 tests covering all Phase 5 components |
+
+### Key Design Decisions
+
+1. **3 strategies by default**: agent1_primary, agent2_primary, convention_primary (fresh_synthesis optional)
+2. **Diversity threshold**: min 0.3 Jaccard distance between candidates
+3. **Tiered validation**: Smoke → Lint → Targeted → Comprehensive (high-risk only)
+4. **Flaky handling**: Track history, retry up to 3x, downweight flaky failures
+5. **Self-critique**: Optional LLM review for security/bugs (disabled by default)
+
+### Security Fixes Applied
+
+1. **Command validation whitelist** in `validation_tiers.py` - only allows known-safe commands
+2. **Prompt sanitization** in `self_critic.py` - prevents prompt injection via agent data
 
 ---
 
@@ -472,6 +497,30 @@ See: `docs/design-review-round3-synthesis.md` for full details.
 
 **Status:** Phase 3 Security Remediation COMPLETE. Ready for external model review and commit.
 
+### Session 7
+**Date:** January 2026
+**Work Done:**
+- Completed Phase 5: Advanced Resolution
+  - `src/resolution/multi_candidate.py` - MultiCandidateGenerator (3 strategies, configurable)
+  - `src/resolution/diversity.py` - DiversityChecker (Jaccard distance, min 0.3 threshold)
+  - `src/resolution/validation_tiers.py` - TieredValidator (smoke/lint/targeted/comprehensive)
+  - `src/resolution/flaky_handler.py` - FlakyTestHandler (history tracking, retries, score adjustment)
+  - `src/resolution/self_critic.py` - SelfCritic (LLM-based review via LiteLLM, optional)
+  - `src/resolution/schema.py` - Added ValidationTier, FlakyTestRecord, CritiqueResult, etc.
+  - `tests/resolution/test_phase5.py` - 32 new tests (TDD approach)
+- Fixed 2 security issues found in Phase 5 review:
+  - Added command validation whitelist in `validation_tiers.py`
+  - Added prompt sanitization in `self_critic.py`
+- All 53 resolution tests pass (21 Phase 3 + 32 Phase 5)
+- Used orchestrator workflow system throughout
+
+**Process Notes:**
+- Followed TDD: wrote tests first, then implementation
+- Security review caught issues before commit
+- Third-party reviews (external models) ran during REVIEW phase
+
+**Status:** Phase 5 COMPLETE. Ready to commit.
+
 ---
 
 ## Context Switch Guidelines
@@ -515,14 +564,19 @@ src/
 │   ├── semantic.py    # Symbol/domain analysis
 │   ├── dependency.py  # Package version conflicts
 │   └── clusterer.py   # Graph clustering
-├── resolution/        # Resolution pipeline (Phase 3) DONE
-│   ├── schema.py      # Data models (ConflictContext, Intent, etc.)
+├── resolution/        # Resolution pipeline (Phase 3 + 5) DONE
+│   ├── schema.py      # Data models (ConflictContext, Intent, ValidationTier, etc.)
 │   ├── pipeline.py    # Main orchestration
 │   ├── context.py     # Stage 1: Context assembly
 │   ├── intent.py      # Stage 2: Intent extraction
 │   ├── harmonizer.py  # Stage 3: Interface harmonization
-│   ├── candidate.py   # Candidate generation
-│   └── validator.py   # Build/test validation
+│   ├── candidate.py   # Single candidate generation (Phase 3)
+│   ├── validator.py   # Build/test validation (Phase 3)
+│   ├── multi_candidate.py  # Multi-candidate generation (Phase 5)
+│   ├── diversity.py   # Candidate diversity checking (Phase 5)
+│   ├── validation_tiers.py # Tiered validation (Phase 5)
+│   ├── flaky_handler.py    # Flaky test handling (Phase 5)
+│   └── self_critic.py      # LLM self-critique (Phase 5)
 ├── escalation/        # Human escalation (Phase 4) DONE
 │   ├── schema.py      # EscalationTrigger, Priority, Status, TimeoutPolicy
 │   ├── issue_creator.py # GitHub issue creation
