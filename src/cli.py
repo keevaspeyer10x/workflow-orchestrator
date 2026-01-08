@@ -2079,6 +2079,196 @@ def cmd_update_models(args):
 # PRD Commands (Phase 6)
 # ============================================================================
 
+# ============================================================================
+# Claude Squad Integration Commands (PRD-001)
+# ============================================================================
+
+def cmd_prd_check_squad(args):
+    """Check Claude Squad compatibility."""
+    from src.prd.squad_capabilities import CapabilityDetector
+
+    detector = CapabilityDetector()
+    caps = detector.detect()
+
+    print("Claude Squad Compatibility Check")
+    print("=" * 40)
+
+    if not caps.installed:
+        print("  Status: NOT INSTALLED")
+        print("  Install: https://github.com/smtg-ai/claude-squad")
+        sys.exit(1)
+
+    print(f"  Version: {caps.version or 'unknown'}")
+    print(f"  Status: {'Compatible' if caps.is_compatible else 'INCOMPATIBLE'}")
+    print()
+    print("Capabilities:")
+    print(f"  Commands: new={caps.supports_new}, list={caps.supports_list}, "
+          f"attach={caps.supports_attach}, kill={caps.supports_kill}")
+    print(f"  Flags: prompt_file={caps.supports_prompt_file}, branch={caps.supports_branch}, "
+          f"dir={caps.supports_dir}, autoyes={caps.supports_autoyes}")
+    print(f"  JSON output: {caps.supports_json_output}")
+
+    if caps.compatibility_issues:
+        print()
+        print("Issues:")
+        for issue in caps.compatibility_issues:
+            print(f"  - {issue}")
+        sys.exit(1)
+
+    print()
+    print("Ready for PRD execution with Claude Squad!")
+
+
+def cmd_prd_spawn(args):
+    """Spawn Claude Squad sessions for PRD tasks."""
+    import yaml
+    from src.prd.squad_adapter import ClaudeSquadAdapter, CapabilityError
+    from src.prd.backend_selector import BackendSelector, ExecutionMode
+
+    working_dir = Path(args.dir or '.')
+
+    # Check which backend to use
+    selector = BackendSelector.detect(working_dir)
+    mode = selector.select(
+        task_count=args.count or 1,
+        interactive=not args.batch,
+        prefer_remote=args.batch
+    )
+
+    if mode == ExecutionMode.MANUAL:
+        print("No execution backend available")
+        print("Install Claude Squad: https://github.com/smtg-ai/claude-squad")
+        sys.exit(1)
+
+    if mode == ExecutionMode.BATCH:
+        print("Batch mode selected - use 'orchestrator prd start' for GitHub Actions execution")
+        sys.exit(1)
+
+    # Interactive mode with Claude Squad
+    try:
+        adapter = ClaudeSquadAdapter(working_dir)
+    except CapabilityError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+    # If a PRD file is provided, spawn from it
+    if args.prd_file:
+        with open(args.prd_file) as f:
+            prd_data = yaml.safe_load(f)
+
+        tasks = []
+        for task in prd_data.get('tasks', [])[:args.count] if args.count else prd_data.get('tasks', []):
+            tasks.append({
+                'task_id': task['id'],
+                'prompt': task.get('description', ''),
+                'branch': f"claude/{task['id']}"
+            })
+
+        sessions = adapter.spawn_batch(tasks)
+        print(f"Spawned {len(sessions)} session(s)")
+        for s in sessions:
+            print(f"  {s.task_id}: {s.session_name} ({s.status})")
+    else:
+        print("Error: --prd-file required to spawn sessions")
+        sys.exit(1)
+
+
+def cmd_prd_sessions(args):
+    """List active Claude Squad sessions."""
+    from src.prd.squad_adapter import ClaudeSquadAdapter, CapabilityError
+    from datetime import datetime, timezone
+
+    working_dir = Path(args.dir or '.')
+
+    try:
+        adapter = ClaudeSquadAdapter(working_dir)
+    except CapabilityError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+    sessions = adapter.list_sessions()
+
+    if not sessions:
+        print("No active sessions")
+        return
+
+    print(f"{'TASK':<20} {'SESSION':<25} {'STATUS':<12} {'AGE':<10}")
+    print("-" * 70)
+
+    now = datetime.now(timezone.utc)
+    for s in sessions:
+        created = datetime.fromisoformat(s.created_at)
+        age_seconds = (now - created).total_seconds()
+        if age_seconds < 60:
+            age = f"{int(age_seconds)}s"
+        elif age_seconds < 3600:
+            age = f"{int(age_seconds // 60)}m"
+        else:
+            age = f"{int(age_seconds // 3600)}h"
+
+        print(f"{s.task_id:<20} {s.session_name:<25} {s.status:<12} {age:<10}")
+
+
+def cmd_prd_attach(args):
+    """Attach to a Claude Squad session."""
+    from src.prd.squad_adapter import ClaudeSquadAdapter, CapabilityError, SessionError
+
+    working_dir = Path(args.dir or '.')
+
+    try:
+        adapter = ClaudeSquadAdapter(working_dir)
+        adapter.attach(args.task_id)
+    except CapabilityError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+    except SessionError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+
+def cmd_prd_done(args):
+    """Mark a Claude Squad task as complete."""
+    from src.prd.squad_adapter import ClaudeSquadAdapter, CapabilityError, SessionError
+
+    working_dir = Path(args.dir or '.')
+
+    try:
+        adapter = ClaudeSquadAdapter(working_dir)
+        adapter.mark_complete(args.task_id, terminate_session=not args.keep_session)
+        print(f"Task {args.task_id} marked complete")
+        if not args.keep_session:
+            print("Session terminated")
+    except CapabilityError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+    except SessionError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+
+def cmd_prd_cleanup(args):
+    """Clean up orphaned Claude Squad sessions."""
+    from src.prd.squad_adapter import ClaudeSquadAdapter, CapabilityError
+
+    working_dir = Path(args.dir or '.')
+
+    try:
+        adapter = ClaudeSquadAdapter(working_dir)
+
+        # Clean orphaned sessions
+        cleaned = adapter.cleanup_orphaned()
+        print(f"Cleaned {cleaned} orphaned session(s)")
+
+        # Optionally clean old records
+        if args.days:
+            removed = adapter.registry.cleanup_old(days=args.days)
+            print(f"Removed {removed} old record(s) (>{args.days} days)")
+
+    except CapabilityError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+
 def cmd_prd_start(args):
     """Start PRD execution from a PRD file."""
     import asyncio
@@ -2775,6 +2965,43 @@ Examples:
     prd_task_done.add_argument('task_id', help='ID of the completed task')
     prd_task_done.add_argument('-d', '--dir', help='Working directory')
     prd_task_done.set_defaults(func=cmd_prd_task_done)
+
+    # Claude Squad Integration Commands (PRD-001)
+    # prd check-squad
+    prd_check_squad = prd_subparsers.add_parser('check-squad', help='Check Claude Squad compatibility')
+    prd_check_squad.set_defaults(func=cmd_prd_check_squad)
+
+    # prd spawn
+    prd_spawn = prd_subparsers.add_parser('spawn', help='Spawn Claude Squad sessions for tasks')
+    prd_spawn.add_argument('--prd-file', help='Path to PRD YAML file')
+    prd_spawn.add_argument('--count', type=int, help='Maximum number of tasks to spawn')
+    prd_spawn.add_argument('--batch', action='store_true', help='Prefer batch (GitHub Actions) mode')
+    prd_spawn.add_argument('-d', '--dir', help='Working directory')
+    prd_spawn.set_defaults(func=cmd_prd_spawn)
+
+    # prd sessions
+    prd_sessions = prd_subparsers.add_parser('sessions', help='List active Claude Squad sessions')
+    prd_sessions.add_argument('-d', '--dir', help='Working directory')
+    prd_sessions.set_defaults(func=cmd_prd_sessions)
+
+    # prd attach
+    prd_attach = prd_subparsers.add_parser('attach', help='Attach to a Claude Squad session')
+    prd_attach.add_argument('task_id', help='Task ID to attach to')
+    prd_attach.add_argument('-d', '--dir', help='Working directory')
+    prd_attach.set_defaults(func=cmd_prd_attach)
+
+    # prd done
+    prd_done = prd_subparsers.add_parser('done', help='Mark a Claude Squad task as complete')
+    prd_done.add_argument('task_id', help='Task ID to mark complete')
+    prd_done.add_argument('--keep-session', action='store_true', help='Keep the session running')
+    prd_done.add_argument('-d', '--dir', help='Working directory')
+    prd_done.set_defaults(func=cmd_prd_done)
+
+    # prd cleanup
+    prd_cleanup = prd_subparsers.add_parser('cleanup', help='Clean up orphaned Claude Squad sessions')
+    prd_cleanup.add_argument('--days', type=int, help='Also remove records older than N days')
+    prd_cleanup.add_argument('-d', '--dir', help='Working directory')
+    prd_cleanup.set_defaults(func=cmd_prd_cleanup)
 
     prd_parser.set_defaults(func=lambda args: prd_parser.print_help() if not args.prd_command else None)
 

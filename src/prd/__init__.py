@@ -4,7 +4,8 @@ PRD Mode - Full PRD execution with multiple concurrent agents.
 This module provides:
 - PRD decomposition into tasks
 - Wave-based conflict resolution
-- Multi-backend worker pool (local, Modal, Render, GitHub Actions, manual)
+- Claude Squad integration for interactive sessions (PRD-001)
+- Backend selection (interactive/batch/manual)
 - Integration branch management
 - Checkpoint PRs
 - Rollback capability
@@ -15,6 +16,11 @@ Usage:
     config = PRDConfig(enabled=True, worker_backend="auto")
     executor = PRDExecutor(config)
     result = await executor.execute_prd(prd_document)
+
+    # Or use Claude Squad for interactive sessions
+    from src.prd import ClaudeSquadAdapter, BackendSelector
+    adapter = ClaudeSquadAdapter(working_dir)
+    sessions = adapter.spawn_batch(tasks)
 """
 
 from .schema import (
@@ -42,6 +48,18 @@ from .integration import IntegrationBranchManager, MergeRecord, CheckpointPR
 from .wave_resolver import WaveResolver, WaveResolutionResult
 from .executor import PRDExecutor, PRDExecutionResult
 
+# Claude Squad Integration (PRD-001)
+from .session_registry import SessionRegistry, SessionRecord
+from .squad_capabilities import CapabilityDetector, SquadCapabilities
+from .squad_adapter import (
+    ClaudeSquadAdapter,
+    SquadConfig,
+    ClaudeSquadError,
+    CapabilityError,
+    SessionError,
+)
+from .backend_selector import BackendSelector, ExecutionMode
+
 __all__ = [
     # Enums
     "TaskStatus",
@@ -61,7 +79,7 @@ __all__ = [
     "JobMessage",
     # Queue
     "FileJobQueue",
-    # Worker pool
+    # Worker pool (deprecated - use BackendSelector)
     "WorkerPool",
     # Integration
     "IntegrationBranchManager",
@@ -73,4 +91,16 @@ __all__ = [
     # Executor
     "PRDExecutor",
     "PRDExecutionResult",
+    # Claude Squad Integration (PRD-001)
+    "SessionRegistry",
+    "SessionRecord",
+    "CapabilityDetector",
+    "SquadCapabilities",
+    "ClaudeSquadAdapter",
+    "SquadConfig",
+    "ClaudeSquadError",
+    "CapabilityError",
+    "SessionError",
+    "BackendSelector",
+    "ExecutionMode",
 ]
