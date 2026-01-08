@@ -48,7 +48,7 @@ tiers:
     reviewers:
       - model: openai/gpt-5.2-max
         focus: [security, correctness]
-      - model: google/gemini-2.5-pro
+      - model: google/gemini-3-pro
         focus: [architecture, design]
       - model: openai/codex
         focus: [correctness, performance]
@@ -65,7 +65,7 @@ tiers:
     reviewers:
       - model: openai/gpt-5.2-max
         focus: [security, correctness]
-      - model: google/gemini-2.5-pro
+      - model: google/gemini-3-pro
         focus: [architecture]
       - model: xai/grok-4.1
         focus: [operations, edge_cases]

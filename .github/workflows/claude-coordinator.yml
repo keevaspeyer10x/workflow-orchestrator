@@ -91,11 +91,33 @@ jobs:
       - name: Determine run mode
         id: mode
         run: |
+          # Validate branch name to prevent injection attacks
+          validate_branch() {
+            local branch="$1"
+            # Only allow alphanumeric, underscore, hyphen, slash, dot
+            # Must start with alphanumeric, no consecutive dots, no ..
+            if [[ "$branch" =~ ^[a-zA-Z0-9][a-zA-Z0-9/_.-]*$ ]] && \
+               [[ ! "$branch" =~ \.\. ]] && \
+               [[ ${#branch} -le 255 ]]; then
+              return 0
+            fi
+            return 1
+          }
+
           if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
-            echo "mode=event" >> $GITHUB_OUTPUT
-            echo "trigger_branch=${{ github.event.client_payload.branch }}" >> $GITHUB_OUTPUT
-            echo "trigger_sha=${{ github.event.client_payload.sha }}" >> $GITHUB_OUTPUT
-            echo "Mode: event (triggered by branch push)"
+            BRANCH="${{ github.event.client_payload.branch }}"
+            SHA="${{ github.event.client_payload.sha }}"
+
+            # Validate branch name before using
+            if validate_branch "$BRANCH"; then
+              echo "mode=event" >> $GITHUB_OUTPUT
+              echo "trigger_branch=$BRANCH" >> $GITHUB_OUTPUT
+              echo "trigger_sha=$SHA" >> $GITHUB_OUTPUT
+              echo "Mode: event (triggered by branch push)"
+            else
+              echo "::error::Invalid branch name detected, possible injection attempt: $BRANCH"
+              exit 1
+            fi
           elif [ "${{ github.event_name }}" = "schedule" ]; then
             echo "mode=scheduled" >> $GITHUB_OUTPUT
             echo "Mode: scheduled (periodic check)"

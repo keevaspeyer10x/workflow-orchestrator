@@ -122,7 +122,7 @@ class TestBuildTester:
         tester = BuildTester(base_branch="main")
 
         with patch('pathlib.Path.exists') as mock_exists:
-            mock_exists.side_effect = lambda: True  # package.json exists
+            mock_exists.return_value = True  # package.json exists
 
             cmd = tester._detect_build_command()
 

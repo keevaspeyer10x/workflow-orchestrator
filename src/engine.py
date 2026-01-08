@@ -852,18 +852,12 @@ class WorkflowEngine:
             file_path = self._substitute_template(verification.path)
             # Path traversal protection - use is_relative_to for proper security
             path = (self.working_dir / file_path).resolve()
-            try:
-                # Python 3.9+ - proper path containment check
-                if not path.is_relative_to(self.working_dir.resolve()):
-                    result["blocked"] = True
-                    result["reason"] = "path_traversal"
-                    return False, f"Path traversal blocked: {verification.path}", result
-            except ValueError:
-                # is_relative_to raises ValueError if not relative
+            # Python 3.9+ - is_relative_to returns bool, doesn't raise
+            if not path.is_relative_to(self.working_dir.resolve()):
                 result["blocked"] = True
                 result["reason"] = "path_traversal"
                 return False, f"Path traversal blocked: {verification.path}", result
-            
+
             exists = path.exists()
             result["path"] = str(path)
             result["exists"] = exists

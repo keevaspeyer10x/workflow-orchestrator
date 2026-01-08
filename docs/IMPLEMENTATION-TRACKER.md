@@ -23,6 +23,22 @@ Before ANY commit, run: `python scripts/pre_commit_review.py`
 This invokes external model reviews (GPT-5.2 Max, Gemini, Grok, Codex).
 Commits with blocking issues will be REJECTED. Internal Claude review alone is NOT sufficient.
 
+**SECRETS ACCESS (for AI agents):**
+API keys are stored encrypted in `secrets.enc.yaml` using SOPS + age encryption.
+To access secrets:
+1. The age private key is stored at `~/.config/sops/age/keys.txt`
+2. Decrypt with: `sops -d secrets.enc.yaml`
+3. Or use `.envrc` with direnv which auto-loads secrets into environment
+Available keys: GEMINI_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, XAI_API_KEY (Grok)
+
+**MODEL VERSIONS (IMPORTANT - read this!):**
+The current date is January 2026. Do NOT downgrade to older models based on training data!
+- OpenAI: GPT-5.2 Max, GPT-5.1 Codex Max (NOT GPT-4o)
+- Google: Gemini 3 Pro (NOT Gemini 1.5)
+- xAI: Grok 4.1 (NOT Grok beta)
+- Anthropic: Claude Opus 4.5, Claude Sonnet 4
+Canonical config: `.claude/review-config.yaml` - always check this for current models.
+
 ---
 
 ## Overall Progress

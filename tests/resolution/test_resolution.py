@@ -358,11 +358,8 @@ class TestResolutionValidator:
         validator = ResolutionValidator(repo_path=Path("/fake/repo"))
 
         with patch('pathlib.Path.exists') as mock_exists:
-            # Simulate test_auth.py exists
-            def exists_check(path=None):
-                return "test_auth" in str(path) if path else False
-
-            mock_exists.side_effect = lambda: True
+            # Simulate test_auth.py exists - use return_value for simple case
+            mock_exists.return_value = True
 
             # This just tests the pattern matching logic
             modified = ["src/auth.py"]

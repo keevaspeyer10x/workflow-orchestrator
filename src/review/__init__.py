@@ -2,7 +2,13 @@
 Multi-model Code Review System
 
 This module provides automated code reviews using multiple AI models.
-It supports two execution modes:
+It supports two execution modes:"""
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+__doc__ += """
 
 1. CLI Mode (PRIMARY - recommended):
    - Uses Codex CLI + Gemini CLI directly
@@ -117,7 +123,8 @@ async def run_review(
             router = ReviewRouter()
             if router.get_method() in [ReviewMethod.CLI, ReviewMethod.HYBRID]:
                 return await router.run_review(review_type, context)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"CLI review failed, attempting API fallback: {e}")
             if not fallback_to_api:
                 raise
 
