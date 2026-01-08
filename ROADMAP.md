@@ -1417,6 +1417,70 @@ AI can work completely outside the orchestrator, creating code without any proce
 
 ---
 
+### WF-016: Integrate Learning System with Git Merge Conflicts
+**Status:** Planned
+**Complexity:** Medium
+**Priority:** High
+**Source:** Phase 7 Learning - Identified gap in learning system scope
+**Description:** Use the pattern memory and strategy tracker for regular git merge conflicts, not just multi-agent PRD scenarios.
+
+**Problem Solved:**
+The learning system (PatternMemory, StrategyTracker, FeedbackLoop) is currently only invoked during PRD multi-agent execution via WaveResolver. Regular git merge conflicts during normal development don't benefit from historical learning. This limits the system's usefulness.
+
+**Desired Behavior:**
+```
+git pull → CONFLICT detected
+         ↓
+Consult PatternMemory for similar conflicts
+         ↓
+Suggest resolution strategy based on historical win rates
+         ↓
+Apply resolution (or present options to user)
+         ↓
+Record outcome to improve future suggestions
+```
+
+**Implementation:**
+- Create `git-merge-with-learning` wrapper command
+- Hook into `git pull` / `git merge` detection
+- Extract conflict context (files, conflict type, code patterns)
+- Query PatternMemory.suggest_resolution()
+- Present StrategyTracker recommendations
+- After resolution, record outcome via FeedbackLoop
+
+**Integration Points:**
+```python
+# New command in CLI
+def cmd_smart_merge(branch: str):
+    """Merge with learning system assistance."""
+    result = subprocess.run(["git", "merge", branch], capture_output=True)
+
+    if "CONFLICT" in result.stdout:
+        conflicts = parse_git_conflicts()
+        for conflict in conflicts:
+            suggestion = pattern_memory.suggest_resolution(
+                conflict_type=conflict.type,
+                files_involved=conflict.files,
+                intent_categories=extract_intents(conflict),
+            )
+            if suggestion and suggestion.confidence > 0.7:
+                print(f"Suggested: {suggestion.strategy} ({suggestion.confidence:.0%})")
+                apply_suggestion(conflict, suggestion)
+```
+
+**Files:** `src/cli.py`, `src/git_integration.py` (new)
+
+**Tasks:**
+- [ ] Create git conflict parser to extract conflict context
+- [ ] Add `orchestrator smart-merge` command
+- [ ] Integrate with PatternMemory.suggest_resolution()
+- [ ] Integrate with StrategyTracker.recommend()
+- [ ] Add outcome recording after conflict resolution
+- [ ] Add `--auto-resolve` flag for high-confidence suggestions
+- [ ] Add `--learn-only` flag to record without suggesting
+
+---
+
 ### CORE-019: Fix OpenAI/LiteLLM Model Configuration
 **Status:** Planned
 **Complexity:** Low
