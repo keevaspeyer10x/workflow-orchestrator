@@ -20,7 +20,9 @@ Reference: https://www.anthropic.com/engineering/effective-harnesses-for-long-ru
   - May need explicit "break this into chunks" workflow step
   - Consider: context-aware chunking based on token limits
 
-- [ ]  ** Integrate Mastra **
+- [ ]  **Integrate Mastra**
+
+- [ ]  **Port to Codex** - may be better with long context
 
 ## Still To Consider
 
