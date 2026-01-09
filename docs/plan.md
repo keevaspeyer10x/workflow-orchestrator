@@ -1,153 +1,222 @@
-# Auto-Load API Keys Before REVIEW Phase
+# Implementation Plan: Step Enforcement with Hard Gates and Evidence Validation
 
-## Problem
-API keys (OPENROUTER_API_KEY, GEMINI_API_KEY, etc.) were not automatically loaded from SOPS-encrypted secrets, requiring manual `eval $(sops -d ...)` commands.
+## Overview
 
-## Solution
-1. Add `ensure_api_keys_loaded()` function in `src/review/router.py`
-2. Auto-load keys from SecretsManager into environment in ReviewRouter.__init__
-3. Update APIExecutor to also try SecretsManager as fallback
+Add a step enforcement system that ensures workflow compliance through three mechanisms:
+1. **Hard Gates**: Commands run by orchestrator (not LLM), cannot be skipped
+2. **Evidence Requirements**: Structured output proving engagement with the step
+3. **Skip Reasoning Validation**: Substantive justification required when skipping
 
-## Files Changed
-- `src/review/router.py` - Add ensure_api_keys_loaded(), call in __init__
-- `src/review/api_executor.py` - Use get_secret() as fallback
+## Problem Statement
 
-## Implementation Complete
-- [x] Add ensure_api_keys_loaded() to router.py
-- [x] Call in ReviewRouter.__init__
-- [x] Update APIExecutor to use get_secret()
-- [x] Tests pass (58 tests)
+Claude Code sometimes skips steps or executes them superficially when working autonomously. The current system relies on the LLM to self-enforce, which is unreliable. We need external enforcement.
 
----
+## Design Principles
 
-# CORE-023-P3: Conflict Resolution Learning & Config
+1. **Trust for judgment, verify for compliance** - Let Claude exercise judgment on substantive work, but enforce procedural steps externally
+2. **Hard gates for verifiable steps** - If a bash script can verify it, the orchestrator should run it
+3. **Evidence for soft steps** - Require structured artifacts that prove thinking happened
+4. **Conscious skipping** - Allow skips but require substantive reasoning
 
-## Source of Truth
+## Architecture Changes
 
-**Primary document:** `docs/archive/2026-01-09_core-023-full-plan-all-parts.md`
+### 1. New Step Type Enum (`schema.py`)
 
-This implementation follows the source document exactly. Any deviations will be explicitly noted with justification.
-
----
-
-## Part 3 Scope (source lines 971-975)
-
-> ### Part 3: Learning & Config - THIRD
-> - LEARN phase integration
-> - ROADMAP auto-suggestions
-> - Config file system
-
----
-
-## 1. Learning Integration (source lines 67-101)
-
-### Logging (lines 70-77)
-
-Source specifies:
 ```python
-log_event(EventType.CONFLICT_RESOLVED, {
-    "file": "src/cli.py",
-    "strategy": "sequential_merge",
-    "confidence": 0.85,
-    "resolution_time_ms": 1250,
-})
+class StepType(str, Enum):
+    """Type of step determining enforcement mechanism."""
+    LLM_WORK = "llm_work"           # Full latitude, no structure required
+    EVIDENCE_REQUIRED = "evidence"   # Must produce structured evidence artifact
+    HARD_GATE = "hard_gate"          # Orchestrator runs command, cannot skip
 ```
 
-**Implementation:** Add `CONFLICT_RESOLVED` to `EventType` enum in `src/schema.py`, create logging utility that produces exactly this format.
+### 2. Evidence Schema Support (`schema.py`)
 
-### LEARN Phase → ROADMAP (lines 80-101)
-
-Source specifies the flow:
-```
-LEARN phase detects:
-  "src/cli.py conflicts in 4 of last 10 sessions"
-       ↓
-Automatically adds to ROADMAP.md:
-       ↓
-  #### AI-SUGGESTED: Reduce cli.py conflicts
-  **Status:** Suggested
-  **Source:** AI analysis (LEARN phase, 2026-01-09)
-  **Evidence:** cli.py conflicted in 4/10 sessions
-
-  **Recommendation:** Extract argument parsing to separate module
-  to reduce merge conflict surface area.
-       ↓
-User is INFORMED (not asked):
-  "ℹ️  Added AI suggestion to ROADMAP: Reduce cli.py conflicts"
+Add to `ChecklistItemDef`:
+```python
+class ChecklistItemDef(BaseModel):
+    # ... existing fields ...
+    step_type: StepType = StepType.LLM_WORK
+    evidence_schema: Optional[str] = None  # Name of Pydantic model for evidence
+    evidence_prompt: Optional[str] = None  # Prompt for generating evidence
 ```
 
-**Implementation:** Extend `src/learning_engine.py` to:
-1. Detect conflict patterns from `.workflow_log.jsonl`
-2. Auto-add suggestions to ROADMAP.md in the exact format above
-3. Print info message to user (don't prompt)
+### 3. Evidence Models (`src/enforcement/evidence.py`)
 
----
+New module with Pydantic models for common evidence types:
+```python
+class CodeAnalysisEvidence(BaseModel):
+    files_reviewed: list[str]
+    patterns_identified: list[str]
+    concerns_raised: list[str]
+    approach_decision: str
 
-## 2. Config File System (source lines 167-178)
+class EdgeCaseEvidence(BaseModel):
+    cases_considered: list[str]
+    how_handled: dict[str, str]
+    cases_deferred: list[str]
 
-Source specifies (from Grok review):
+class SpecReviewEvidence(BaseModel):
+    requirements_extracted: list[str]
+    ambiguities_found: list[str]
+    assumptions_made: list[str]
 ```
-- Add `~/.orchestrator/config.yaml` for:
-  - Sensitive globs: `['secrets/*', '*.pem', '.env*']`
-  - Generated file policy: `delete | ours | theirs | regenerate`
-  - LLM toggle: `disable_llm: true` for air-gapped environments
-- Default skip LLM for >10MB files or >50 conflicts (cost/timeout protection)
+
+### 4. Skip Decision Model (`src/enforcement/skip.py`)
+
+```python
+class SkipDecision(BaseModel):
+    action: Literal["completed", "skipped"]
+    evidence: Optional[dict] = None  # Required if completed
+    skip_reasoning: Optional[str] = None  # Required if skipped
+    context_considered: Optional[list[str]] = None
+
+    @model_validator(mode='after')
+    def validate_decision(self):
+        if self.action == "skipped":
+            if not self.skip_reasoning:
+                raise ValueError("Must explain why step was skipped")
+            if len(self.skip_reasoning) < 50:
+                raise ValueError("Skip reasoning too shallow - minimum 50 chars")
+            # Check for shallow patterns
+            shallow = ["not needed", "not applicable", "n/a", "obvious", "already done"]
+            if self.skip_reasoning.lower().strip() in shallow:
+                raise ValueError(f"Skip reasoning too shallow: '{self.skip_reasoning}'")
+        return self
 ```
 
-**Implementation:** Create `src/user_config.py` with exactly these capabilities.
+### 5. Hard Gate Executor (`src/enforcement/gates.py`)
 
----
+```python
+class HardGateExecutor:
+    """Executes hard gate commands directly via subprocess."""
 
-## 3. Success Criteria (source lines 939-950)
+    def execute(self, command: str, working_dir: Path) -> GateResult:
+        """Run command and return result. Cannot be skipped."""
+        result = subprocess.run(
+            shlex.split(command),
+            cwd=working_dir,
+            capture_output=True,
+            text=True,
+            timeout=300
+        )
+        return GateResult(
+            success=result.returncode == 0,
+            exit_code=result.returncode,
+            stdout=result.stdout,
+            stderr=result.stderr
+        )
+```
 
-### Configuration
-- [x] `~/.orchestrator/config.yaml` for policies
-- [x] Sensitive globs configurable
-- [x] LLM disable option for air-gapped environments
-- [x] Skip LLM for >10MB files or >50 conflicts
+### 6. Engine Integration (`engine.py`)
 
-### Integration
-- [x] Resolutions logged with full telemetry
-- [x] Patterns auto-generate ROADMAP suggestions
+Modify `complete_item` to check step type:
+```python
+def complete_item(self, item_id: str, evidence: Optional[dict] = None, ...):
+    item_def = self.get_item_def(item_id)
 
-*(Note: Status conflict warning, exit codes, and --json output were completed in P1)*
+    if item_def.step_type == StepType.HARD_GATE:
+        # Run command directly - this is NOT an LLM call
+        result = self.gate_executor.execute(item_def.verification.command)
+        if not result.success:
+            # Feed error back for potential LLM fix
+            return False, f"Gate failed: {result.stderr}"
+        # Auto-complete on success
+        ...
 
----
+    elif item_def.step_type == StepType.EVIDENCE_REQUIRED:
+        if not evidence:
+            return False, "This step requires evidence artifact"
+        # Validate against schema
+        validated = self.validate_evidence(item_def.evidence_schema, evidence)
+        # Check for shallow evidence
+        self.check_evidence_depth(validated)
+        ...
+```
 
-## 6. Implementation Complete
+### 7. Audit Trail Enhancement (`schema.py`)
 
-**All success criteria met.** CORE-023-P3 implemented exactly per source plan.
+Add new event types and enhanced logging:
+```python
+class EventType(str, Enum):
+    # ... existing ...
+    GATE_EXECUTED = "gate_executed"
+    EVIDENCE_VALIDATED = "evidence_validated"
+    SKIP_VALIDATED = "skip_validated"
+    SHALLOW_RESPONSE_REJECTED = "shallow_response_rejected"
+```
 
-### Files Created/Modified
-- `src/schema.py` - Added CONFLICT_RESOLVED, CONFLICT_ESCALATED EventTypes
-- `src/resolution/logger.py` - NEW: Resolution logging utility
-- `src/user_config.py` - NEW: User config system (~/.orchestrator/config.yaml)
-- `src/learning_engine.py` - Extended with pattern detection + ROADMAP suggestions
-- `src/git_conflict_resolver.py` - Integrated logging
-- `src/resolution/llm_resolver.py` - Integrated config + logging
+## File Changes Summary
 
-### Tests Created
-- `tests/test_resolution_logger.py` - 9 tests
-- `tests/test_user_config.py` - 21 tests
-- `tests/test_conflict_patterns.py` - 12 tests
+| File | Change |
+|------|--------|
+| `src/schema.py` | Add `StepType` enum, evidence fields to `ChecklistItemDef` |
+| `src/enforcement/__init__.py` | New module |
+| `src/enforcement/evidence.py` | Evidence Pydantic models |
+| `src/enforcement/skip.py` | Skip decision validation |
+| `src/enforcement/gates.py` | Hard gate executor |
+| `src/engine.py` | Integrate enforcement in `complete_item`, `skip_item` |
+| `src/cli.py` | Add evidence parameter to complete command |
+| `src/default_workflow.yaml` | Update items to use new step types |
 
-**Total: 42 new tests, all passing.**
+## Workflow YAML Changes
 
----
+Example of updated item definitions:
+```yaml
+- id: "analyze_code"
+  name: "Analyze existing code"
+  step_type: "evidence"
+  evidence_schema: "CodeAnalysisEvidence"
+  skippable: false
 
-## 4. Implementation
+- id: "run_tests"
+  name: "Run tests"
+  step_type: "hard_gate"
+  verification:
+    type: "command"
+    command: "{{test_command}}"
+  # Note: hard gates are never skippable
 
-| Task | Source Reference | File(s) |
-|------|------------------|---------|
-| Add CONFLICT_RESOLVED EventType | lines 72 | `src/schema.py` |
-| Resolution logging | lines 70-77 | `src/resolution/logger.py` |
-| Config file system | lines 167-172 | `src/user_config.py` |
-| Conflict pattern detection | lines 84-87 | `src/learning_engine.py` |
-| ROADMAP auto-suggestions | lines 89-100 | `src/learning_engine.py` |
-| Integrate logging into resolvers | lines 70-77 | `src/git_conflict_resolver.py`, `src/resolution/llm_resolver.py` |
+- id: "implement_feature"
+  name: "Implement the feature"
+  step_type: "llm_work"
+  # Full latitude, no evidence required
+```
 
----
+## Migration Strategy
 
-## 5. Deviations from Source
+1. New fields have sensible defaults (`step_type: llm_work`)
+2. Existing workflows continue to work unchanged
+3. Gradually update `default_workflow.yaml` to use new types
+4. Add step_type to items that should be gates/evidence
 
-**None planned.** Implementation will follow the source document. If any deviation becomes necessary during implementation, it will be documented here with justification before proceeding.
+## Testing Plan
+
+1. Unit tests for evidence validation
+2. Unit tests for skip reasoning validation
+3. Unit tests for hard gate execution
+4. Integration test: workflow with mixed step types
+5. Test shallow response rejection
+
+## Questions for User
+
+1. **Evidence storage**: Should evidence artifacts be stored in a separate file (e.g., `.workflow_evidence.json`) or in the main state file?
+
+2. **Gate retry behavior**: When a hard gate fails, should we:
+   - a) Feed error to Claude and let it fix, then retry gate
+   - b) Block workflow until manually resolved
+   - c) Configurable per-gate
+
+3. **Skip threshold**: Should there be a maximum number of skips per phase before escalation?
+
+4. **Evidence schemas**: Should users be able to define custom evidence schemas in their workflow YAML, or use predefined ones only?
+
+## Implementation Order
+
+1. Add `StepType` enum and fields to schema (non-breaking)
+2. Create enforcement module with evidence/skip validation
+3. Add hard gate executor
+4. Integrate into engine
+5. Update CLI with evidence parameter
+6. Update default_workflow.yaml with step types
+7. Add tests

@@ -13,7 +13,8 @@ from .schema import (
     PhaseStatus,
     WorkflowStatus,
     EventType,
-    VerificationType
+    VerificationType,
+    StepType,
 )
 
 from .engine import WorkflowEngine
@@ -32,7 +33,21 @@ from .review import (
     get_default_config as get_default_review_config,
 )
 
-__version__ = "1.1.0"
+# Step enforcement system
+from .enforcement import (
+    SkipDecision,
+    CodeAnalysisEvidence,
+    EdgeCaseEvidence,
+    SpecReviewEvidence,
+    TestPlanEvidence,
+    GateResult,
+    HardGateExecutor,
+    validate_skip_reasoning,
+    validate_evidence_depth,
+    get_evidence_schema,
+)
+
+__version__ = "1.2.0"
 __all__ = [
     # Workflow
     "WorkflowDef",
@@ -46,6 +61,7 @@ __all__ = [
     "WorkflowStatus",
     "EventType",
     "VerificationType",
+    "StepType",
 
     # Review
     "ReviewOrchestrator",
@@ -56,4 +72,16 @@ __all__ = [
     "review_changes",
     "get_review_tier",
     "get_default_review_config",
+
+    # Enforcement
+    "SkipDecision",
+    "CodeAnalysisEvidence",
+    "EdgeCaseEvidence",
+    "SpecReviewEvidence",
+    "TestPlanEvidence",
+    "GateResult",
+    "HardGateExecutor",
+    "validate_skip_reasoning",
+    "validate_evidence_depth",
+    "get_evidence_schema",
 ]

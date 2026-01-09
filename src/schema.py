@@ -10,6 +10,22 @@ from datetime import datetime, timezone
 from enum import Enum
 
 
+class StepType(str, Enum):
+    """
+    Type of step determining enforcement mechanism.
+
+    Ordered from most strict to most flexible:
+    - gate: Orchestrator runs command directly, cannot be skipped
+    - required: LLM must complete, cannot be skipped
+    - documented: LLM can skip with reasoning, must provide evidence if completed
+    - flexible: LLM can skip with reasoning, no evidence required
+    """
+    GATE = "gate"
+    REQUIRED = "required"
+    DOCUMENTED = "documented"
+    FLEXIBLE = "flexible"
+
+
 class VerificationType(str, Enum):
     """Types of verification that can be performed on checklist items."""
     FILE_EXISTS = "file_exists"
@@ -82,7 +98,12 @@ class ChecklistItemDef(BaseModel):
     verification: VerificationConfig = Field(default_factory=VerificationConfig)
     agent: Optional[str] = None  # Which agent should handle this (e.g., "manus", "claude_code")
     notes: list[str] = Field(default_factory=list)  # Operating notes for this item
-    
+
+    # Step enforcement fields
+    step_type: StepType = StepType.FLEXIBLE  # Default to flexible for backwards compatibility
+    evidence_schema: Optional[str] = None  # Name of Pydantic model for evidence (e.g., "CodeAnalysisEvidence")
+    evidence_prompt: Optional[str] = None  # Custom prompt for generating evidence
+
     @field_validator('id')
     @classmethod
     def id_must_be_valid(cls, v):
@@ -91,16 +112,37 @@ class ChecklistItemDef(BaseModel):
         return v
 
     @model_validator(mode='after')
-    def manual_gates_not_skippable(self):
+    def enforce_step_type_rules(self):
         """
-        Security: Manual gate items should not be skippable by default.
-        This prevents bypassing human approval steps.
+        Enforce rules based on step type:
+        - gate: Must have command verification, cannot be skipped
+        - required: Cannot be skipped
+        - documented: Should have evidence_schema
+        - flexible: No special requirements
         """
+        # Gate steps must have command verification and cannot be skipped
+        if self.step_type == StepType.GATE:
+            self.skippable = False
+            self.required = True
+            if self.verification.type not in [VerificationType.COMMAND, VerificationType.FILE_EXISTS]:
+                # Allow file_exists for gates that check for artifacts
+                pass  # Don't enforce command - allow flexibility
+
+        # Required steps cannot be skipped
+        elif self.step_type == StepType.REQUIRED:
+            self.skippable = False
+            self.required = True
+
+        # Documented steps should have evidence schema (warn if missing)
+        elif self.step_type == StepType.DOCUMENTED:
+            # evidence_schema is recommended but not required
+            pass
+
+        # Manual gates remain non-skippable
         if self.verification.type == VerificationType.MANUAL_GATE:
-            # Force manual gates to be non-skippable unless explicitly overridden
-            # by setting skip_conditions (which still requires a valid reason)
             if self.skippable and not self.skip_conditions:
                 self.skippable = False
+
         return self
 
 
@@ -170,10 +212,14 @@ class ItemState(BaseModel):
     completed_at: Optional[datetime] = None
     skipped_at: Optional[datetime] = None
     skip_reason: Optional[str] = None
+    skip_context_considered: Optional[list[str]] = None  # What was considered before skipping
     notes: Optional[str] = None
     verification_result: Optional[dict] = None
     retry_count: int = 0
     files_modified: Optional[list[str]] = None  # WF-006: Track files modified during item completion
+    # Step enforcement fields
+    evidence: Optional[dict] = None  # Structured evidence artifact for documented steps
+    gate_result: Optional[dict] = None  # Result of hard gate execution
 
 
 class PhaseState(BaseModel):
@@ -240,6 +286,15 @@ class EventType(str, Enum):
     # Conflict resolution events (CORE-023-P3)
     CONFLICT_RESOLVED = "conflict_resolved"
     CONFLICT_ESCALATED = "conflict_escalated"
+    # Step enforcement events
+    GATE_EXECUTED = "gate_executed"
+    GATE_PASSED = "gate_passed"
+    GATE_FAILED = "gate_failed"
+    GATE_RETRY = "gate_retry"
+    EVIDENCE_VALIDATED = "evidence_validated"
+    EVIDENCE_REJECTED = "evidence_rejected"
+    SKIP_VALIDATED = "skip_validated"
+    SKIP_REJECTED = "skip_rejected"
 
 
 class WorkflowEvent(BaseModel):
