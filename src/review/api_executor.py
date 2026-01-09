@@ -52,12 +52,13 @@ class APIExecutor:
         if not self.api_key:
             raise ValueError("OPENROUTER_API_KEY environment variable not set")
 
-    def execute(self, review_type: str) -> ReviewResult:
+    def execute(self, review_type: str, context_override: Optional[str] = None) -> ReviewResult:
         """
         Execute a review using OpenRouter API.
 
         Args:
             review_type: One of security, consistency, quality, holistic
+            context_override: Optional custom prompt to use instead of auto-collected context
 
         Returns:
             ReviewResult with findings
@@ -65,11 +66,15 @@ class APIExecutor:
         start_time = time.time()
 
         try:
-            # Collect context
-            context = self.context_collector.collect(review_type)
-
-            # Build prompt
-            prompt = self._build_prompt(review_type, context)
+            # Use context_override if provided, otherwise collect normally
+            if context_override:
+                prompt = context_override
+                context = None
+            else:
+                # Collect context
+                context = self.context_collector.collect(review_type)
+                # Build prompt
+                prompt = self._build_prompt(review_type, context)
 
             # Get model
             tool = get_tool(review_type)
@@ -97,7 +102,7 @@ class APIExecutor:
             )
 
             # Add truncation warning if applicable
-            if context.truncated:
+            if context and context.truncated:
                 result.summary = (result.summary or "") + f"\n\n⚠️ {context.truncation_warning}"
 
             return result

@@ -115,12 +115,17 @@ class ReviewRouter:
 
         return "\n".join(lines)
 
-    def execute_review(self, review_type: str) -> ReviewResult:
+    def execute_review(
+        self,
+        review_type: str,
+        context_override: Optional[str] = None,
+    ) -> ReviewResult:
         """
         Execute a review using the appropriate method.
 
         Args:
-            review_type: One of security, consistency, quality, holistic
+            review_type: One of security, consistency, quality, holistic, critique
+            context_override: Optional custom prompt/context to use instead of auto-collected context
 
         Returns:
             ReviewResult with findings
@@ -131,11 +136,11 @@ class ReviewRouter:
         logger.info(f"Executing {review_type} review using {self._method.value} method")
 
         if self._method == ReviewMethod.CLI:
-            return self._execute_cli(review_type)
+            return self._execute_cli(review_type, context_override)
         elif self._method == ReviewMethod.AIDER:
-            return self._execute_aider(review_type)
+            return self._execute_aider(review_type, context_override)
         elif self._method == ReviewMethod.API:
-            return self._execute_api(review_type)
+            return self._execute_api(review_type, context_override)
         else:
             return ReviewResult(
                 review_type=review_type,
@@ -145,25 +150,27 @@ class ReviewRouter:
                 error="No review method available. Install aider-chat, CLIs, or set OPENROUTER_API_KEY."
             )
 
-    def _execute_cli(self, review_type: str) -> ReviewResult:
+    def _execute_cli(self, review_type: str, context_override: Optional[str] = None) -> ReviewResult:
         """Execute review using CLI tools."""
         from .cli_executor import CLIExecutor
 
         if self._cli_executor is None:
             self._cli_executor = CLIExecutor(self.working_dir)
 
+        # CLI tools don't support context_override - they use full repo access
         return self._cli_executor.execute(review_type)
 
-    def _execute_aider(self, review_type: str) -> ReviewResult:
+    def _execute_aider(self, review_type: str, context_override: Optional[str] = None) -> ReviewResult:
         """Execute review using Aider with OpenRouter."""
         from .aider_executor import AiderExecutor
 
         if self._aider_executor is None:
             self._aider_executor = AiderExecutor(self.working_dir)
 
+        # Aider uses full repo access, context_override not applicable
         return self._aider_executor.execute(review_type)
 
-    def _execute_api(self, review_type: str) -> ReviewResult:
+    def _execute_api(self, review_type: str, context_override: Optional[str] = None) -> ReviewResult:
         """Execute review using OpenRouter API."""
         from .api_executor import APIExecutor
 
@@ -174,7 +181,7 @@ class ReviewRouter:
                 base_branch=self.base_branch
             )
 
-        return self._api_executor.execute(review_type)
+        return self._api_executor.execute(review_type, context_override=context_override)
 
     def execute_all_reviews(self) -> dict[str, ReviewResult]:
         """
