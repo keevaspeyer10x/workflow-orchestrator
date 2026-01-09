@@ -83,11 +83,12 @@ Option D (simple subprocess) is even simpler for non-interactive batch execution
 ---
 
 #### CORE-023-P1: Conflict Resolution - Core (No LLM)
-**Status:** IN PROGRESS
+**Status:** COMPLETED (2026-01-09)
 **Complexity:** Medium
 **Priority:** CRITICAL - Blocks parallel execution
 **Source:** User request - Cannot run multiple Claude Code instances in parallel without this
 **Plan:** `docs/plan.md`
+**Implementation:** `src/git_conflict_resolver.py`, CLI in `src/cli.py`
 
 **Description:** Part 1 of `orchestrator resolve` - conflict detection, fast resolution (rerere, 3-way merge), and interactive escalation. No LLM in Part 1.
 
