@@ -308,11 +308,14 @@ def on_context_restore():
     print("Session restored from checkpoint")
 ```
 
-**Detection Challenge:**
-Claude Code doesn't expose context size or compaction events directly. Options:
-- Estimate from conversation length (token count heuristic)
-- Hook into Claude Code's summarization if API available
-- User-triggered checkpoint when they notice slowdown
+**Detection:**
+Claude Code shows a warning when ~10% context remains. Options:
+- **Use the warning as trigger** - When user sees "context running low", run `orchestrator checkpoint --emergency`
+- **Hook integration** - If Claude Code exposes this via hooks, auto-trigger checkpoint
+- **Proactive heuristic** - Estimate from conversation length, checkpoint at ~70-80% before warning appears
+- **User-triggered** - Manual `orchestrator checkpoint` when things feel slow
+
+The 10% warning is late but usable - ideally we checkpoint earlier so there's time for proper handover.
 
 **Tasks:**
 - [ ] Design memory file schema (.workflow_memory.yaml)
