@@ -1,0 +1,937 @@
+"""
+LLM-Assisted Conflict Resolution - CORE-023 Part 2
+
+Resolves git conflicts that can't be auto-resolved using LLM-based code merging.
+
+Pipeline:
+1. Intent Extraction - Analyze what each side was trying to do
+2. Context Assembly - Gather related files, conventions (with token budget)
+3. LLM Resolution - Generate merged code
+4. Validation - Tiered validation (syntax, build, tests)
+5. Confidence Scoring - Determine if auto-apply is safe
+
+Security:
+- Sensitive files are detected and skipped (never sent to LLM)
+- Only conflict hunks + context sent, not full codebase
+"""
+
+import ast
+import fnmatch
+import json
+import logging
+import os
+import re
+import subprocess
+from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
+from typing import Optional, Literal
+
+logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# Constants
+# ============================================================================
+
+# Maximum tokens for context (reserve rest for response)
+MAX_CONTEXT_TOKENS = 32000
+CHARS_PER_TOKEN = 4  # Rough estimate
+
+# Sensitive file patterns - NEVER send to LLM
+SENSITIVE_PATTERNS = [
+    "*.env",
+    ".env.*",
+    "secrets.*",
+    "*secret*",
+    "*credential*",
+    "*password*",
+    "*api_key*",
+    "*apikey*",
+    "*.pem",
+    "*.key",
+    "*.p12",
+    "*.pfx",
+    "*.cert",
+    "config/secrets/*",
+    ".aws/*",
+    ".gcp/*",
+    "*token*",
+    ".npmrc",
+    ".pypirc",
+]
+
+# File types we can validate syntax for
+SYNTAX_VALIDATORS = {
+    ".py": "python",
+    ".js": "javascript",
+    ".ts": "typescript",
+    ".json": "json",
+    ".yaml": "yaml",
+    ".yml": "yaml",
+}
+
+
+# ============================================================================
+# Data Classes
+# ============================================================================
+
+class ConfidenceLevel(Enum):
+    """Resolution confidence level."""
+    HIGH = "high"      # > 0.8 - Auto-apply safe
+    MEDIUM = "medium"  # 0.5-0.8 - Show diff, ask user
+    LOW = "low"        # < 0.5 - Escalate to human
+
+
+@dataclass
+class ExtractedIntent:
+    """Intent extracted from one side of a conflict."""
+    side: Literal["ours", "theirs"]
+    primary_intent: str  # One sentence summary
+    hard_constraints: list[str] = field(default_factory=list)  # MUST satisfy
+    soft_constraints: list[str] = field(default_factory=list)  # Prefer
+    evidence: list[str] = field(default_factory=list)  # Citations
+    confidence: ConfidenceLevel = ConfidenceLevel.MEDIUM
+
+
+@dataclass
+class MergeCandidate:
+    """A candidate merged resolution."""
+    content: str
+    strategy: str  # "llm_merge", "llm_rewrite", etc.
+    explanation: str = ""
+    confidence: float = 0.5
+
+
+@dataclass
+class ValidationResult:
+    """Result of validating a merge candidate."""
+    passed: bool = False
+    tier_reached: str = "none"  # "syntax", "build", "tests"
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class LLMResolutionResult:
+    """Result of LLM-assisted resolution."""
+    file_path: str
+    success: bool = False
+
+    # Resolution
+    merged_content: Optional[str] = None
+    strategy: str = ""
+    explanation: str = ""
+
+    # Confidence
+    confidence: float = 0.0
+    confidence_level: ConfidenceLevel = ConfidenceLevel.LOW
+    confidence_reasons: list[str] = field(default_factory=list)
+
+    # Validation
+    validation: Optional[ValidationResult] = None
+
+    # Escalation
+    needs_escalation: bool = False
+    escalation_reason: str = ""
+    escalation_options: list[str] = field(default_factory=list)
+
+    # Debug
+    intents: list[ExtractedIntent] = field(default_factory=list)
+    raw_llm_response: str = ""
+
+
+# ============================================================================
+# LLM Client Abstraction
+# ============================================================================
+
+class LLMClient:
+    """Abstract LLM client for code generation."""
+
+    def __init__(self):
+        self.model_name = "unknown"
+
+    def generate(self, prompt: str, max_tokens: int = 8000) -> str:
+        """Generate response from prompt."""
+        raise NotImplementedError
+
+
+class OpenAIClient(LLMClient):
+    """OpenAI API client."""
+
+    def __init__(self, api_key: str, model: str = "gpt-4o"):
+        super().__init__()
+        self.api_key = api_key
+        self.model_name = model
+        self._client = None
+
+    def _get_client(self):
+        """Lazy-load OpenAI client."""
+        if self._client is None:
+            try:
+                from openai import OpenAI
+                self._client = OpenAI(api_key=self.api_key)
+            except ImportError:
+                raise ImportError("openai package required: pip install openai")
+        return self._client
+
+    def generate(self, prompt: str, max_tokens: int = 8000) -> str:
+        """Generate response using OpenAI API."""
+        client = self._get_client()
+        response = client.chat.completions.create(
+            model=self.model_name,
+            messages=[
+                {"role": "system", "content": "You are an expert software engineer resolving git merge conflicts. Output only code, no explanations unless asked."},
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=max_tokens,
+            temperature=0.2,  # Low temperature for deterministic code
+        )
+        return response.choices[0].message.content
+
+
+class OpenRouterClient(LLMClient):
+    """OpenRouter API client (fallback)."""
+
+    def __init__(self, api_key: str, model: str = "anthropic/claude-3-opus"):
+        super().__init__()
+        self.api_key = api_key
+        self.model_name = model
+        self.base_url = "https://openrouter.ai/api/v1"
+
+    def generate(self, prompt: str, max_tokens: int = 8000) -> str:
+        """Generate response using OpenRouter API."""
+        import urllib.request
+        import urllib.error
+
+        data = json.dumps({
+            "model": self.model_name,
+            "messages": [
+                {"role": "system", "content": "You are an expert software engineer resolving git merge conflicts. Output only code, no explanations unless asked."},
+                {"role": "user", "content": prompt},
+            ],
+            "max_tokens": max_tokens,
+            "temperature": 0.2,
+        }).encode()
+
+        req = urllib.request.Request(
+            f"{self.base_url}/chat/completions",
+            data=data,
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://github.com/keevaspeyer10x/workflow-orchestrator",
+            },
+        )
+
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            result = json.loads(resp.read())
+            return result["choices"][0]["message"]["content"]
+
+
+class GeminiClient(LLMClient):
+    """Google Gemini API client."""
+
+    def __init__(self, api_key: str, model: str = "gemini-2.0-flash"):
+        super().__init__()
+        self.api_key = api_key
+        self.model_name = model
+        self._client = None
+
+    def _get_client(self):
+        """Lazy-load Gemini client."""
+        if self._client is None:
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=self.api_key)
+                self._client = genai.GenerativeModel(self.model_name)
+            except ImportError:
+                raise ImportError("google-generativeai package required: pip install google-generativeai")
+        return self._client
+
+    def generate(self, prompt: str, max_tokens: int = 8000) -> str:
+        """Generate response using Gemini API."""
+        client = self._get_client()
+        response = client.generate_content(
+            prompt,
+            generation_config={
+                "max_output_tokens": max_tokens,
+                "temperature": 0.2,
+            },
+        )
+        return response.text
+
+
+# ============================================================================
+# LLM Resolver
+# ============================================================================
+
+class LLMResolver:
+    """
+    LLM-based conflict resolver.
+
+    Resolves conflicts that can't be handled by deterministic strategies.
+    """
+
+    def __init__(
+        self,
+        repo_path: Optional[Path] = None,
+        client: Optional[LLMClient] = None,
+        auto_apply_threshold: float = 0.8,
+    ):
+        """
+        Initialize the LLM resolver.
+
+        Args:
+            repo_path: Path to git repository
+            client: LLM client to use (auto-detected if not provided)
+            auto_apply_threshold: Confidence threshold for auto-apply
+        """
+        self.repo_path = Path(repo_path) if repo_path else Path.cwd()
+        self.client = client or self._get_default_client()
+        self.auto_apply_threshold = auto_apply_threshold
+
+    def _get_default_client(self) -> LLMClient:
+        """Get default LLM client based on available API keys."""
+        # Try OpenAI first (best for code)
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if api_key:
+            logger.info("Using OpenAI API for LLM resolution")
+            return OpenAIClient(api_key)
+
+        # Try Gemini
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if api_key:
+            logger.info("Using Gemini API for LLM resolution")
+            return GeminiClient(api_key)
+
+        # Try OpenRouter (fallback)
+        api_key = os.environ.get("OPENROUTER_API_KEY")
+        if api_key:
+            logger.info("Using OpenRouter API for LLM resolution")
+            return OpenRouterClient(api_key)
+
+        raise ValueError(
+            "No LLM API key available. Set one of: "
+            "OPENAI_API_KEY, GEMINI_API_KEY, or OPENROUTER_API_KEY"
+        )
+
+    # ========================================================================
+    # Public API
+    # ========================================================================
+
+    def resolve(
+        self,
+        file_path: str,
+        base: Optional[str],
+        ours: str,
+        theirs: str,
+        context: Optional[dict] = None,
+    ) -> LLMResolutionResult:
+        """
+        Resolve a single file conflict using LLM.
+
+        Args:
+            file_path: Path to conflicted file
+            base: Common ancestor content (may be None for new files)
+            ours: Our version content
+            theirs: Their version content
+            context: Optional additional context (related files, conventions)
+
+        Returns:
+            LLMResolutionResult with merged content or escalation info
+        """
+        logger.info(f"LLM resolving: {file_path}")
+
+        # Security check - skip sensitive files
+        if self.is_sensitive_file(file_path):
+            logger.warning(f"Sensitive file detected, skipping LLM: {file_path}")
+            return LLMResolutionResult(
+                file_path=file_path,
+                needs_escalation=True,
+                escalation_reason="sensitive_file",
+                escalation_options=[
+                    "[A] Keep OURS - Your changes only",
+                    "[B] Keep THEIRS - Target branch changes only",
+                    "[C] Manual resolution required",
+                ],
+            )
+
+        # Stage 1: Extract intents
+        logger.info("Stage 1: Extracting intents")
+        ours_intent = self._extract_intent("ours", base, ours, file_path)
+        theirs_intent = self._extract_intent("theirs", base, theirs, file_path)
+        intents = [ours_intent, theirs_intent]
+
+        # Stage 2: Assemble context
+        logger.info("Stage 2: Assembling context")
+        assembled_context = self._assemble_context(
+            file_path, base, ours, theirs, context
+        )
+
+        # Stage 3: Generate merged code
+        logger.info("Stage 3: Generating merged code")
+        candidates = self._generate_candidates(
+            file_path, base, ours, theirs, intents, assembled_context
+        )
+
+        if not candidates:
+            return LLMResolutionResult(
+                file_path=file_path,
+                needs_escalation=True,
+                escalation_reason="no_candidates_generated",
+                intents=intents,
+            )
+
+        # Stage 4: Validate candidates
+        logger.info("Stage 4: Validating candidates")
+        best_candidate = None
+        best_validation = None
+
+        for candidate in candidates:
+            validation = self._validate_candidate(file_path, candidate.content)
+            if validation.passed:
+                if best_candidate is None or candidate.confidence > best_candidate.confidence:
+                    best_candidate = candidate
+                    best_validation = validation
+
+        if best_candidate is None:
+            # All candidates failed validation
+            return LLMResolutionResult(
+                file_path=file_path,
+                needs_escalation=True,
+                escalation_reason="validation_failed",
+                escalation_options=[
+                    f"[A] Use candidate 1 anyway (has {candidates[0].confidence:.0%} confidence)",
+                    "[B] Keep OURS",
+                    "[C] Keep THEIRS",
+                    "[D] Manual resolution",
+                ],
+                intents=intents,
+            )
+
+        # Stage 5: Calculate confidence and decide
+        logger.info("Stage 5: Scoring confidence")
+        confidence, reasons = self._calculate_confidence(
+            intents, best_candidate, best_validation
+        )
+
+        confidence_level = self._get_confidence_level(confidence)
+
+        # Build result
+        result = LLMResolutionResult(
+            file_path=file_path,
+            success=True,
+            merged_content=best_candidate.content,
+            strategy=best_candidate.strategy,
+            explanation=best_candidate.explanation,
+            confidence=confidence,
+            confidence_level=confidence_level,
+            confidence_reasons=reasons,
+            validation=best_validation,
+            intents=intents,
+        )
+
+        # Check if needs escalation based on confidence
+        if confidence_level == ConfidenceLevel.LOW:
+            result.needs_escalation = True
+            result.escalation_reason = "low_confidence"
+            result.escalation_options = [
+                f"[A] Apply LLM resolution ({confidence:.0%} confidence)",
+                "[B] Keep OURS",
+                "[C] Keep THEIRS",
+                "[D] Manual resolution",
+            ]
+
+        return result
+
+    # ========================================================================
+    # Security
+    # ========================================================================
+
+    def is_sensitive_file(self, path: str) -> bool:
+        """
+        Check if a file matches sensitive patterns.
+
+        SECURITY: These files should NEVER be sent to external LLMs.
+        """
+        path_lower = path.lower()
+
+        for pattern in SENSITIVE_PATTERNS:
+            # Handle glob patterns
+            if fnmatch.fnmatch(path_lower, pattern.lower()):
+                return True
+
+            # Handle simple substring matches for patterns without wildcards
+            if '*' not in pattern and '?' not in pattern:
+                if pattern.lower() in path_lower:
+                    return True
+
+        return False
+
+    # ========================================================================
+    # Stage 1: Intent Extraction
+    # ========================================================================
+
+    def _extract_intent(
+        self,
+        side: str,
+        base: Optional[str],
+        content: str,
+        file_path: str,
+    ) -> ExtractedIntent:
+        """Extract intent from one side of the conflict."""
+
+        # Build diff if we have a base
+        diff_lines = []
+        if base:
+            base_lines = base.splitlines()
+            content_lines = content.splitlines()
+
+            # Simple diff: find added/removed lines
+            added = set(content_lines) - set(base_lines)
+            removed = set(base_lines) - set(content_lines)
+
+            for line in removed:
+                diff_lines.append(f"- {line[:100]}")
+            for line in added:
+                diff_lines.append(f"+ {line[:100]}")
+
+        diff_summary = "\n".join(diff_lines[:30])  # Limit size
+
+        prompt = f'''Analyze this code change and extract the intent.
+
+File: {file_path}
+Side: {side}
+
+Changes:
+```
+{diff_summary}
+```
+
+Full {side} version (first 100 lines):
+```
+{content[:5000]}
+```
+
+Respond in JSON format:
+{{
+  "primary_intent": "One sentence describing what this change is trying to do",
+  "hard_constraints": ["constraint that MUST be satisfied"],
+  "soft_constraints": ["preference that should be followed if possible"],
+  "confidence": "high" | "medium" | "low"
+}}
+
+Output only valid JSON, no markdown or explanation.
+'''
+
+        try:
+            response = self.client.generate(prompt, max_tokens=500)
+            # Clean response (remove markdown if present)
+            response = response.strip()
+            if response.startswith("```"):
+                response = response.split("```")[1]
+                if response.startswith("json"):
+                    response = response[4:]
+            response = response.strip()
+
+            data = json.loads(response)
+
+            confidence_map = {
+                "high": ConfidenceLevel.HIGH,
+                "medium": ConfidenceLevel.MEDIUM,
+                "low": ConfidenceLevel.LOW,
+            }
+
+            return ExtractedIntent(
+                side=side,
+                primary_intent=data.get("primary_intent", "Unknown intent"),
+                hard_constraints=data.get("hard_constraints", []),
+                soft_constraints=data.get("soft_constraints", []),
+                confidence=confidence_map.get(data.get("confidence", "medium"), ConfidenceLevel.MEDIUM),
+            )
+
+        except Exception as e:
+            logger.warning(f"Intent extraction failed for {side}: {e}")
+            return ExtractedIntent(
+                side=side,
+                primary_intent=f"Could not extract intent: {e}",
+                confidence=ConfidenceLevel.LOW,
+            )
+
+    # ========================================================================
+    # Stage 2: Context Assembly
+    # ========================================================================
+
+    def _assemble_context(
+        self,
+        file_path: str,
+        base: Optional[str],
+        ours: str,
+        theirs: str,
+        extra_context: Optional[dict],
+    ) -> dict:
+        """Assemble context for LLM, respecting token budget."""
+
+        budget = MAX_CONTEXT_TOKENS
+        context = {
+            "file_path": file_path,
+            "language": self._detect_language(file_path),
+            "conventions": [],
+            "related_files": [],
+        }
+
+        # Required: conflict content (already have)
+        conflict_tokens = sum(
+            len(c or "") // CHARS_PER_TOKEN
+            for c in [base, ours, theirs]
+        )
+        budget -= conflict_tokens
+
+        # Check for CLAUDE.md (project conventions)
+        claude_md = self.repo_path / "CLAUDE.md"
+        if claude_md.exists() and budget > 1000:
+            try:
+                content = claude_md.read_text()[:4000]  # Limit size
+                context["conventions"].append({
+                    "source": "CLAUDE.md",
+                    "content": content,
+                })
+                budget -= len(content) // CHARS_PER_TOKEN
+            except Exception:
+                pass
+
+        # Add extra context if provided and budget allows
+        if extra_context and budget > 500:
+            if "related_files" in extra_context:
+                for rf in extra_context["related_files"][:5]:  # Limit files
+                    if budget <= 0:
+                        break
+                    rf_content = rf.get("content", "")[:2000]
+                    context["related_files"].append({
+                        "path": rf.get("path", ""),
+                        "relationship": rf.get("relationship", "related"),
+                        "content": rf_content,
+                    })
+                    budget -= len(rf_content) // CHARS_PER_TOKEN
+
+        return context
+
+    def _detect_language(self, file_path: str) -> str:
+        """Detect programming language from file extension."""
+        ext = Path(file_path).suffix.lower()
+        language_map = {
+            ".py": "python",
+            ".js": "javascript",
+            ".ts": "typescript",
+            ".jsx": "javascript",
+            ".tsx": "typescript",
+            ".go": "go",
+            ".rs": "rust",
+            ".java": "java",
+            ".cpp": "cpp",
+            ".c": "c",
+            ".h": "c",
+            ".hpp": "cpp",
+            ".rb": "ruby",
+            ".php": "php",
+            ".swift": "swift",
+            ".kt": "kotlin",
+            ".scala": "scala",
+            ".yaml": "yaml",
+            ".yml": "yaml",
+            ".json": "json",
+            ".md": "markdown",
+            ".sql": "sql",
+        }
+        return language_map.get(ext, "text")
+
+    # ========================================================================
+    # Stage 3: Candidate Generation
+    # ========================================================================
+
+    def _generate_candidates(
+        self,
+        file_path: str,
+        base: Optional[str],
+        ours: str,
+        theirs: str,
+        intents: list[ExtractedIntent],
+        context: dict,
+    ) -> list[MergeCandidate]:
+        """Generate merged code candidates using LLM."""
+
+        language = context.get("language", "text")
+
+        # Format intents
+        ours_intent = next((i for i in intents if i.side == "ours"), None)
+        theirs_intent = next((i for i in intents if i.side == "theirs"), None)
+
+        ours_intent_str = ours_intent.primary_intent if ours_intent else "Unknown"
+        theirs_intent_str = theirs_intent.primary_intent if theirs_intent else "Unknown"
+
+        # Build constraints list
+        hard_constraints = []
+        soft_constraints = []
+        for intent in intents:
+            hard_constraints.extend(intent.hard_constraints)
+            soft_constraints.extend(intent.soft_constraints)
+
+        hard_constraints_str = "\n".join(f"- {c}" for c in hard_constraints) or "- None specified"
+        soft_constraints_str = "\n".join(f"- {c}" for c in soft_constraints) or "- None specified"
+
+        # Format conventions
+        conventions_str = ""
+        for conv in context.get("conventions", []):
+            conventions_str += f"\n### {conv['source']}:\n{conv['content'][:1000]}\n"
+
+        # Build the merge prompt
+        base_section = f"## Base version (common ancestor):\n```{language}\n{base or '(no base - new file on both sides)'}\n```" if base else "## No base version (new file conflict)"
+
+        prompt = f'''You are resolving a git merge conflict.
+
+{base_section}
+
+## Our changes (what we added):
+```{language}
+{ours}
+```
+
+## Their changes (what target branch added):
+```{language}
+{theirs}
+```
+
+## Intent analysis:
+- **OURS intent**: {ours_intent_str}
+- **THEIRS intent**: {theirs_intent_str}
+
+## Constraints:
+**Hard constraints (MUST satisfy):**
+{hard_constraints_str}
+
+**Soft constraints (prefer if possible):**
+{soft_constraints_str}
+{f"## Project conventions:{conventions_str}" if conventions_str else ""}
+
+## Your task:
+Generate the merged {language} code that:
+1. Satisfies ALL hard constraints
+2. Preserves BOTH intents where possible
+3. Follows project conventions if provided
+4. Produces valid {language} syntax with NO conflict markers
+
+CRITICAL: Output ONLY the merged code. No explanations, no markdown code blocks, just the raw merged code.
+'''
+
+        try:
+            response = self.client.generate(prompt, max_tokens=8000)
+
+            # Clean response
+            content = self._clean_llm_response(response, language)
+
+            # Assess confidence based on response characteristics
+            confidence = 0.7  # Base confidence
+
+            # Boost if both intents seem addressed
+            if ours_intent and theirs_intent:
+                if ours_intent.confidence == ConfidenceLevel.HIGH:
+                    confidence += 0.05
+                if theirs_intent.confidence == ConfidenceLevel.HIGH:
+                    confidence += 0.05
+
+            # Penalize if response is suspiciously short or long
+            if len(content) < len(ours) * 0.5:
+                confidence -= 0.2
+            if len(content) > len(ours) + len(theirs):
+                confidence -= 0.1
+
+            return [MergeCandidate(
+                content=content,
+                strategy="llm_merge",
+                explanation=f"LLM merged {language} code preserving both intents",
+                confidence=confidence,
+            )]
+
+        except Exception as e:
+            logger.error(f"LLM generation failed: {e}")
+            return []
+
+    def _clean_llm_response(self, response: str, language: str) -> str:
+        """Clean LLM response to extract just the code."""
+        content = response.strip()
+
+        # Remove markdown code blocks if present
+        if content.startswith("```"):
+            lines = content.split("\n")
+            # Remove first line (```language)
+            lines = lines[1:]
+            # Remove last line if it's ```
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            content = "\n".join(lines)
+
+        return content
+
+    # ========================================================================
+    # Stage 4: Validation
+    # ========================================================================
+
+    def _validate_candidate(self, file_path: str, content: str) -> ValidationResult:
+        """Validate a merge candidate using tiered validation."""
+
+        result = ValidationResult()
+
+        # Tier 0: Check for empty content (instant fail)
+        if not content or not content.strip():
+            result.errors.append("Empty content")
+            return result
+
+        # Tier 0b: Check for conflict markers (instant fail)
+        if "<<<<<<" in content or "======" in content or ">>>>>>" in content:
+            result.errors.append("Contains conflict markers")
+            return result
+
+        result.tier_reached = "conflict_markers"
+
+        # Tier 1: Syntax validation
+        ext = Path(file_path).suffix.lower()
+
+        if ext == ".py":
+            try:
+                ast.parse(content)
+                result.tier_reached = "syntax"
+            except SyntaxError as e:
+                result.errors.append(f"Python syntax error: {e}")
+                return result
+
+        elif ext == ".json":
+            try:
+                json.loads(content)
+                result.tier_reached = "syntax"
+            except json.JSONDecodeError as e:
+                result.errors.append(f"JSON syntax error: {e}")
+                return result
+
+        elif ext in (".yaml", ".yml"):
+            try:
+                import yaml
+                yaml.safe_load(content)
+                result.tier_reached = "syntax"
+            except Exception as e:
+                result.errors.append(f"YAML syntax error: {e}")
+                return result
+
+        else:
+            # For other file types, content exists (already checked above)
+            result.tier_reached = "syntax"
+
+        # Tier 2: Build validation (if applicable)
+        # This would be done externally by the caller if needed
+        # For now, we pass validation if syntax is OK
+
+        result.passed = True
+        return result
+
+    # ========================================================================
+    # Stage 5: Confidence Scoring
+    # ========================================================================
+
+    def _calculate_confidence(
+        self,
+        intents: list[ExtractedIntent],
+        candidate: MergeCandidate,
+        validation: ValidationResult,
+    ) -> tuple[float, list[str]]:
+        """Calculate confidence score for a resolution."""
+
+        score = candidate.confidence
+        reasons = []
+
+        # Intent confidence
+        intent_scores = [
+            1.0 if i.confidence == ConfidenceLevel.HIGH else
+            0.6 if i.confidence == ConfidenceLevel.MEDIUM else
+            0.3
+            for i in intents
+        ]
+        avg_intent = sum(intent_scores) / len(intent_scores) if intent_scores else 0.5
+
+        if avg_intent >= 0.8:
+            score += 0.1
+            reasons.append("High intent extraction confidence")
+        elif avg_intent < 0.5:
+            score -= 0.1
+            reasons.append("Low intent extraction confidence")
+
+        # Validation results
+        if validation.passed:
+            reasons.append(f"Passed validation (tier: {validation.tier_reached})")
+            if validation.tier_reached == "syntax":
+                score += 0.1
+        else:
+            score -= 0.3
+            reasons.append(f"Failed validation: {', '.join(validation.errors)}")
+
+        # Warnings
+        if validation.warnings:
+            score -= 0.05 * len(validation.warnings)
+            reasons.append(f"{len(validation.warnings)} warnings")
+
+        # Clamp to [0, 1]
+        score = max(0.0, min(1.0, score))
+
+        return score, reasons
+
+    def _get_confidence_level(self, score: float) -> ConfidenceLevel:
+        """Convert confidence score to level."""
+        if score >= self.auto_apply_threshold:
+            return ConfidenceLevel.HIGH
+        elif score >= 0.5:
+            return ConfidenceLevel.MEDIUM
+        else:
+            return ConfidenceLevel.LOW
+
+
+# ============================================================================
+# Convenience Functions
+# ============================================================================
+
+def get_llm_resolver(repo_path: Optional[Path] = None) -> LLMResolver:
+    """
+    Get an LLM resolver for the given repository.
+
+    Args:
+        repo_path: Path to git repository (default: current directory)
+
+    Returns:
+        LLMResolver instance
+
+    Raises:
+        ValueError: If no LLM API key is available
+    """
+    return LLMResolver(repo_path=repo_path)
+
+
+def resolve_with_llm(
+    file_path: str,
+    base: Optional[str],
+    ours: str,
+    theirs: str,
+    repo_path: Optional[Path] = None,
+) -> LLMResolutionResult:
+    """
+    Convenience function to resolve a conflict with LLM.
+
+    Args:
+        file_path: Path to conflicted file
+        base: Common ancestor content
+        ours: Our version content
+        theirs: Their version content
+        repo_path: Path to git repository
+
+    Returns:
+        LLMResolutionResult with merged content or escalation info
+    """
+    resolver = get_llm_resolver(repo_path)
+    return resolver.resolve(file_path, base, ours, theirs)

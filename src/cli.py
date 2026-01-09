@@ -58,6 +58,11 @@ from src.git_conflict_resolver import (
     check_conflicts,
     format_escalation_for_user,
 )
+from src.resolution.llm_resolver import (
+    LLMResolver,
+    LLMResolutionResult,
+    ConfidenceLevel,
+)
 
 VERSION = "2.0.0"
 
@@ -387,38 +392,113 @@ def cmd_resolve(args):
         print("PREVIEW MODE - No changes will be made")
         print()
 
-        # Analyze what would happen
+        # Analyze what would happen with Part 1 strategies
         results = resolver.resolve_all(strategy=args.strategy or "auto")
 
         if results.resolved_count > 0:
-            print(f"Auto-resolvable: {results.resolved_count} file(s)")
+            print(f"Auto-resolvable (Part 1): {results.resolved_count} file(s)")
             for r in results.results:
                 if r.success:
                     print(f"  ✓ {r.file_path} ({r.strategy}, confidence: {r.confidence:.0%})")
 
-        if results.escalated_count > 0:
+        # If --use-llm is set, analyze escalated files with LLM
+        use_llm = getattr(args, 'use_llm', False)
+        llm_results = {}
+
+        if use_llm and results.escalated_count > 0:
+            print()
+            print("Analyzing with LLM (CORE-023-P2)...")
+            try:
+                llm_resolver = LLMResolver(
+                    repo_path=working_dir,
+                    auto_apply_threshold=args.auto_apply_threshold,
+                )
+
+                for r in results.results:
+                    if r.needs_escalation:
+                        conflict = resolver.get_conflict_info(r.file_path)
+                        llm_result = llm_resolver.resolve(
+                            file_path=r.file_path,
+                            base=conflict.base,
+                            ours=conflict.ours,
+                            theirs=conflict.theirs,
+                        )
+                        llm_results[r.file_path] = llm_result
+
+                # Show LLM analysis results
+                print()
+                llm_resolvable = sum(1 for lr in llm_results.values() if lr.success and not lr.needs_escalation)
+                llm_needs_confirm = sum(1 for lr in llm_results.values() if lr.success and lr.confidence_level == ConfidenceLevel.MEDIUM)
+                llm_escalated = sum(1 for lr in llm_results.values() if lr.needs_escalation)
+
+                if llm_resolvable > 0:
+                    print(f"LLM auto-resolvable (high confidence): {llm_resolvable} file(s)")
+                    for fp, lr in llm_results.items():
+                        if lr.success and lr.confidence_level == ConfidenceLevel.HIGH:
+                            print(f"  ✓ {fp} (LLM, confidence: {lr.confidence:.0%})")
+
+                if llm_needs_confirm > 0:
+                    print()
+                    print(f"LLM resolvable (needs confirmation): {llm_needs_confirm} file(s)")
+                    for fp, lr in llm_results.items():
+                        if lr.success and lr.confidence_level == ConfidenceLevel.MEDIUM:
+                            print(f"  ? {fp} (LLM, confidence: {lr.confidence:.0%})")
+
+                if llm_escalated > 0:
+                    print()
+                    print(f"Still need manual decision: {llm_escalated} file(s)")
+                    for fp, lr in llm_results.items():
+                        if lr.needs_escalation:
+                            print(f"  ! {fp} ({lr.escalation_reason})")
+
+            except ValueError as e:
+                print(f"  LLM unavailable: {e}")
+                print("  Set OPENAI_API_KEY, GEMINI_API_KEY, or OPENROUTER_API_KEY to enable")
+
+        elif results.escalated_count > 0:
             print()
             print(f"Need manual decision: {results.escalated_count} file(s)")
             for r in results.results:
                 if r.needs_escalation:
                     print(f"  ? {r.file_path}")
+            if not use_llm:
+                print()
+                print("  TIP: Use --use-llm to attempt LLM-based resolution")
 
         print()
         print("-" * 60)
         print("To apply resolutions: orchestrator resolve --apply")
         if args.strategy:
             print(f"                       (using strategy: {args.strategy})")
+        if use_llm:
+            print("                       (with --use-llm for LLM assistance)")
         print("-" * 60)
 
         # Exit code 3 = preview only
         sys.exit(3)
 
     # Apply mode
+    use_llm = getattr(args, 'use_llm', False)
+    confirm_all = getattr(args, 'confirm_all', False)
+
     print(f"APPLYING RESOLUTIONS (strategy: {args.strategy or 'auto'})")
+    if use_llm:
+        print(f"  LLM assistance: enabled (threshold: {args.auto_apply_threshold:.0%})")
     print()
 
     results = resolver.resolve_all(strategy=args.strategy or "auto")
     applied, failed = 0, 0
+
+    # Initialize LLM resolver if needed
+    llm_resolver = None
+    if use_llm:
+        try:
+            llm_resolver = LLMResolver(
+                repo_path=working_dir,
+                auto_apply_threshold=args.auto_apply_threshold,
+            )
+        except ValueError as e:
+            print(f"WARNING: LLM unavailable ({e}), falling back to interactive mode")
 
     # Handle successful auto-resolutions
     for result in results.results:
@@ -430,7 +510,82 @@ def cmd_resolve(args):
                 print(f"  ✗ {result.file_path} failed to apply")
                 failed += 1
         elif result.needs_escalation:
-            # Interactive mode
+            # Try LLM resolution first if enabled
+            if llm_resolver:
+                conflict = resolver.get_conflict_info(result.file_path)
+                llm_result = llm_resolver.resolve(
+                    file_path=result.file_path,
+                    base=conflict.base,
+                    ours=conflict.ours,
+                    theirs=conflict.theirs,
+                )
+
+                if llm_result.success and llm_result.merged_content:
+                    # Check if we should auto-apply or ask for confirmation
+                    auto_apply = (
+                        llm_result.confidence_level == ConfidenceLevel.HIGH
+                        and not confirm_all
+                    )
+
+                    if auto_apply:
+                        # High confidence - auto-apply
+                        full_path = working_dir / result.file_path
+                        full_path.write_text(llm_result.merged_content)
+                        subprocess.run(
+                            ["git", "add", result.file_path],
+                            cwd=working_dir,
+                            capture_output=True
+                        )
+                        print(f"  ✓ {result.file_path} resolved (LLM, {llm_result.confidence:.0%} confidence)")
+                        applied += 1
+                        continue
+
+                    # Medium/Low confidence or confirm_all - show diff and ask
+                    print()
+                    print("=" * 60)
+                    print(f"LLM RESOLUTION: {result.file_path}")
+                    print("=" * 60)
+                    print(f"Confidence: {llm_result.confidence:.0%} ({llm_result.confidence_level.value})")
+                    print(f"Strategy: {llm_result.strategy}")
+                    if llm_result.confidence_reasons:
+                        print("Reasons:")
+                        for reason in llm_result.confidence_reasons:
+                            print(f"  - {reason}")
+                    print()
+                    print("Preview of merged content (first 30 lines):")
+                    print("-" * 40)
+                    preview_lines = llm_result.merged_content.split('\n')[:30]
+                    for i, line in enumerate(preview_lines, 1):
+                        print(f"  {i:3d}│ {line}")
+                    if len(llm_result.merged_content.split('\n')) > 30:
+                        print(f"  ... ({len(llm_result.merged_content.split(chr(10))) - 30} more lines)")
+                    print("-" * 40)
+                    print()
+                    print("Options:")
+                    print("  [A] Apply LLM resolution")
+                    print("  [B] Keep OURS")
+                    print("  [C] Keep THEIRS")
+                    print("  [D] Open in editor")
+                    print()
+
+                    choice = input("Enter choice [A/B/C/D] (default: A): ").strip().upper() or "A"
+
+                    if choice == "A":
+                        full_path = working_dir / result.file_path
+                        full_path.write_text(llm_result.merged_content)
+                        subprocess.run(
+                            ["git", "add", result.file_path],
+                            cwd=working_dir,
+                            capture_output=True
+                        )
+                        print(f"  ✓ {result.file_path} resolved (LLM accepted)")
+                        applied += 1
+                        continue
+
+                elif llm_result.needs_escalation:
+                    print(f"  LLM could not resolve {result.file_path}: {llm_result.escalation_reason}")
+
+            # Fall back to interactive mode (no LLM or user rejected)
             print()
             print(format_escalation_for_user(result))
             print()
@@ -469,7 +624,6 @@ def cmd_resolve(args):
                 # Open in editor
                 editor = os.environ.get("EDITOR", "vim")
                 file_path = working_dir / result.file_path
-                import subprocess
                 subprocess.run([editor, str(file_path)])
                 # After editing, stage the file
                 subprocess.run(["git", "add", result.file_path], cwd=working_dir)
@@ -3141,6 +3295,14 @@ Examples:
                                 help='Auto-commit after resolving all conflicts')
     resolve_parser.add_argument('--abort', action='store_true',
                                 help='Abort the current merge or rebase')
+    resolve_parser.add_argument('--use-llm', action='store_true',
+                                help='Use LLM for complex conflict resolution (CORE-023-P2)')
+    resolve_parser.add_argument('--auto-apply-threshold', type=float, default=0.8,
+                                help='Confidence threshold for auto-applying LLM resolutions (default: 0.8)')
+    resolve_parser.add_argument('--confirm-all', action='store_true',
+                                help='Require confirmation for all LLM resolutions regardless of confidence')
+    resolve_parser.add_argument('--dir', '-d', default='.',
+                                help='Working directory (default: current directory)')
     resolve_parser.set_defaults(func=cmd_resolve)
 
     # Complete command

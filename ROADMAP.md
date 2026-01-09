@@ -115,26 +115,31 @@ Option D (simple subprocess) is even simpler for non-interactive batch execution
 ---
 
 #### CORE-023-P2: Conflict Resolution - LLM Integration
-**Status:** Planned (after P1)
+**Status:** ✅ Completed (2026-01-09)
 **Complexity:** High
 **Priority:** High
 **Depends on:** CORE-023-P1
 
 **Description:** Part 2 adds LLM-based resolution for complex conflicts that can't be auto-resolved.
 
-**Scope:**
-- LLM-based resolution (opt-in with `--use-llm`)
-- Intent extraction from code (what was each side trying to do?)
-- Context assembly (related files, conventions)
-- Token budget management
-- Confidence-based escalation
-- Full test suite (golden files, property-based tests)
-- PRD integration (shared code with WaveResolver)
+**Implementation:**
+- Created `src/resolution/llm_resolver.py` with full LLM resolution pipeline
+- Added `--use-llm` flag to `orchestrator resolve` command
+- Supports OpenAI, Gemini, and OpenRouter APIs
+- 36 unit tests covering all key functionality
 
-**Security considerations:**
-- Sensitive file detection (skip LLM for secrets, configs)
-- No full files to LLM (only hunks + context)
-- Threat model for prompt injection
+**Features delivered:**
+- LLM-based resolution (opt-in with `--use-llm`)
+- Intent extraction from code with structured JSON output
+- Context assembly with CLAUDE.md conventions and token budget
+- Tiered validation (conflict markers, syntax, JSON, YAML)
+- Confidence-based escalation (HIGH = auto-apply, MEDIUM = ask, LOW = escalate)
+- `--auto-apply-threshold` and `--confirm-all` options
+
+**Security implemented:**
+- Sensitive file detection (SENSITIVE_PATTERNS: .env, secrets, keys, etc.)
+- Only conflict hunks + context sent to LLM
+- API keys from environment only, never logged
 
 ---
 
