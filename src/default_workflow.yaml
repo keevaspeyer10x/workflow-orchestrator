@@ -139,8 +139,7 @@ phases:
       - id: "initial_plan"
         name: "Generate initial plan"
         description: "Create a detailed plan of action and save it to {{docs_dir}}/plan.md. Include decision on whether to use Claude Code (default: yes) or handle directly (only for trivial tasks)."
-        required: true
-        skippable: false
+        step_type: "required"
         verification:
           type: "file_exists"
           path: "{{docs_dir}}/plan.md"
@@ -148,8 +147,7 @@ phases:
       - id: "risk_analysis"
         name: "Risk & Impact Analysis"
         description: "Document potential risks and their impact in {{docs_dir}}/risk_analysis.md"
-        required: true
-        skippable: true
+        step_type: "documented"
         skip_conditions: ["simple_bug_fix", "trivial_change"]
         verification:
           type: "file_exists"
@@ -158,8 +156,8 @@ phases:
       - id: "define_test_cases"
         name: "Define Test Cases"
         description: "Outline the test cases that will be used to verify the feature in {{tests_dir}}/test_cases.md. For UI changes, include visual/screenshot test cases."
-        required: true
-        skippable: false
+        step_type: "required"
+        evidence_schema: "TestPlanEvidence"
         verification:
           type: "file_exists"
           path: "{{tests_dir}}/test_cases.md"
@@ -167,8 +165,7 @@ phases:
       - id: "user_approval"
         name: "Get User Approval"
         description: "The user must approve the plan before execution can begin."
-        required: true
-        skippable: false
+        step_type: "gate"
         verification:
           type: "manual_gate"
           description: "User must run 'orchestrator approve-item user_approval' to proceed."
@@ -197,8 +194,7 @@ phases:
       - id: "write_tests"
         name: "Write tests (RED phase)"
         description: "Write test code from test_cases.md BEFORE implementation. Tests should fail initially - this verifies they actually test something. TDD: Red-Green-Refactor."
-        required: true
-        skippable: false
+        step_type: "required"
         notes:
           - "[caution] Write tests BEFORE implementation code. Tests that pass before code is written are not testing anything."
           - "[tip] Run tests after writing - they SHOULD fail. If they pass, the test is not testing new functionality."
@@ -207,16 +203,15 @@ phases:
       - id: "implement_code"
         name: "Implement feature code (GREEN phase)"
         description: "Write the minimal application code to make tests pass. TDD: Red-Green-Refactor."
-        required: true
-        skippable: false
+        step_type: "required"
+        evidence_schema: "CodeAnalysisEvidence"
         notes:
           - "[tip] Write just enough code to make the failing tests pass. Refactor later."
 
       - id: "all_tests_pass"
         name: "Ensure all tests pass"
         description: "Run the test suite and ensure all tests pass after implementation."
-        required: true
-        skippable: false
+        step_type: "gate"
         verification:
           type: "command"
           command: "{{test_command}}"
@@ -242,8 +237,7 @@ phases:
       - id: "security_review"
         name: "Security Review [Codex]"
         description: "MANDATORY. Uses Codex/GPT-5.1 to check for OWASP Top 10, injection attacks, auth issues, SSRF, hardcoded secrets. Run in BACKGROUND."
-        required: true
-        skippable: false
+        step_type: "required"
         skip_conditions: ["documentation_only"]
         notes:
           - "[model] Codex (gpt-5.1-codex-max) - code-specialized security analysis"
@@ -252,8 +246,7 @@ phases:
       - id: "quality_review"
         name: "Code Quality Review [Codex]"
         description: "MANDATORY. Uses Codex/GPT-5.1 to check for code smells, edge cases, error handling, test coverage gaps. Run in BACKGROUND."
-        required: true
-        skippable: false
+        step_type: "required"
         skip_conditions: ["documentation_only"]
         notes:
           - "[model] Codex (gpt-5.1-codex-max) - code-specialized quality analysis"
@@ -262,8 +255,7 @@ phases:
       - id: "consistency_review"
         name: "Codebase Consistency Review [Gemini]"
         description: "MANDATORY. Uses Gemini 3 Pro (1M context) to check if new code fits existing patterns, uses existing utilities, follows conventions. Run in BACKGROUND."
-        required: true
-        skippable: false
+        step_type: "required"
         skip_conditions: ["documentation_only"]
         notes:
           - "[model] Gemini 3 Pro (gemini-3-pro-preview) - 1M context for full codebase"
@@ -273,8 +265,7 @@ phases:
       - id: "holistic_review"
         name: "Holistic Senior Engineer Review [Gemini]"
         description: "MANDATORY. Uses Gemini 3 Pro as a 'skeptical senior engineer' - would you approve this PR? What concerns you? What questions would you ask? Run in BACKGROUND."
-        required: true
-        skippable: false
+        step_type: "required"
         skip_conditions: ["documentation_only"]
         notes:
           - "[model] Gemini 3 Pro (gemini-3-pro-preview) - fresh eyes review"
@@ -284,8 +275,7 @@ phases:
       - id: "vibe_coding_review"
         name: "Vibe-Coding Issues Review [Grok]"
         description: "MANDATORY. Uses Grok 3 to catch AI-specific issues: hallucinated APIs, plausible-but-wrong logic, tests that don't test, cargo cult code. Third model perspective. Run in BACKGROUND."
-        required: true
-        skippable: false
+        step_type: "required"
         skip_conditions: ["documentation_only"]
         notes:
           - "[model] Grok 3 - catches AI-generation blindspots"
@@ -296,8 +286,7 @@ phases:
       - id: "collect_review_results"
         name: "Collect All Review Results"
         description: "Wait for all 5 background reviews to complete. Aggregate findings. Report which models were used and any issues found. Block if any CRITICAL issues."
-        required: true
-        skippable: false
+        step_type: "gate"
         notes:
           - "[gate] Do not proceed until ALL 5 reviews have completed"
           - "[report] List each review with: model used, duration, issues found"
@@ -314,8 +303,7 @@ phases:
       - id: "full_test_suite"
         name: "Run full test suite"
         description: "Ensure no regressions were introduced during review."
-        required: true
-        skippable: false
+        step_type: "gate"
         verification:
           type: "command"
           command: "{{test_command}}"
@@ -324,15 +312,13 @@ phases:
       - id: "visual_regression_test"
         name: "Visual/Screenshot Regression Test"
         description: "For UI changes: capture screenshots and compare against baseline. Verify no unintended visual changes."
-        required: true
-        skippable: true
+        step_type: "documented"
         skip_conditions: ["no_ui_changes", "backend_only", "api_only"]
 
       - id: "manual_smoke_test"
         name: "Manual Smoke Test"
         description: "Manually test the core functionality to ensure it works as expected."
-        required: true
-        skippable: true
+        step_type: "gate"
         verification:
           type: "manual_gate"
           description: "User to confirm manual smoke test passed."
@@ -388,14 +374,12 @@ phases:
       - id: "root_cause_analysis"
         name: "Root Cause Analysis"
         description: "MANDATORY: Perform and document root cause analysis. Why did this issue occur? What was the underlying cause, not just the symptom? Document in LEARNINGS.md."
-        required: true
-        skippable: false
+        step_type: "required"
 
       - id: "document_learnings"
         name: "Document Learnings"
         description: "Create or update LEARNINGS.md with: 1) Problem summary, 2) Root cause analysis, 3) Fix applied, 4) Systemic insights, 5) Prevention measures."
-        required: true
-        skippable: false
+        step_type: "required"
         verification:
           type: "file_exists"
           path: "LEARNINGS.md"
@@ -403,8 +387,7 @@ phases:
       - id: "propose_actions"
         name: "Propose Recommended Actions"
         description: "Based on learnings, propose specific actions to prevent recurrence. List each action clearly: 1) What to change, 2) Which file(s) affected, 3) Whether it's immediate (apply now) or roadmap (future). Present to user for approval."
-        required: true
-        skippable: false
+        step_type: "required"
         notes:
           - "[tip] Be specific: 'Reorder EXECUTE items in workflow.yaml' not 'improve workflow'"
           - "[tip] Categorize: APPLY NOW (small, safe) vs ROADMAP (large, needs design)"
@@ -413,8 +396,7 @@ phases:
       - id: "approve_actions"
         name: "User Approval of Proposed Actions"
         description: "User reviews proposed actions and approves which ones to apply. User may reject, modify, or defer actions. Only approved actions proceed to implementation."
-        required: true
-        skippable: false
+        step_type: "gate"
         verification:
           type: "manual_gate"
           description: "User must review proposed actions and run 'orchestrator approve-item approve_actions' to confirm which actions to apply."

@@ -22,7 +22,13 @@ logger = logging.getLogger(__name__)
 from .schema import (
     WorkflowDef, WorkflowState, PhaseState, ItemState,
     WorkflowEvent, EventType, ItemStatus, PhaseStatus, WorkflowStatus,
-    VerificationType, ChecklistItemDef
+    VerificationType, ChecklistItemDef, StepType
+)
+from .enforcement import (
+    HardGateExecutor,
+    validate_skip_reasoning,
+    validate_evidence_depth,
+    get_evidence_schema,
 )
 
 # Template pattern for {{variable}} substitution
@@ -45,6 +51,9 @@ class WorkflowEngine:
         self.log_file = self.working_dir / ".workflow_log.jsonl"
         self.workflow_def: Optional[WorkflowDef] = None
         self.state: Optional[WorkflowState] = None
+        # Step enforcement
+        self.gate_executor = HardGateExecutor()
+        self.max_gate_retries = 3
     
     # ========================================================================
     # Template Substitution
@@ -502,59 +511,118 @@ class WorkflowEngine:
         
         return item_state
     
-    def complete_item(self, item_id: str, notes: Optional[str] = None, skip_verification: bool = False) -> Tuple[bool, str]:
+    def complete_item(
+        self,
+        item_id: str,
+        notes: Optional[str] = None,
+        skip_verification: bool = False,
+        evidence: Optional[dict] = None
+    ) -> Tuple[bool, str]:
         """
         Attempt to complete an item. Runs verification if configured.
+
+        For gate steps: Executes the command via HardGateExecutor.
+        For documented steps: Validates evidence if provided.
+
+        Args:
+            item_id: The item to complete
+            notes: Optional notes about completion
+            skip_verification: Skip verification (not applicable to gate steps)
+            evidence: Evidence artifact for documented steps
+
         Returns (success, message).
         """
         item_def, item_state, error = self._validate_item_in_current_phase(item_id)
         if error:
             raise ValueError(error)
-        
+
         if item_state.status == ItemStatus.COMPLETED:
             return True, "Item already completed"
-        
+
         if item_state.status == ItemStatus.SKIPPED:
             return False, "Item was skipped, cannot complete"
-        
-        # Run verification if configured and not skipped
-        if not skip_verification and item_def.verification.type != VerificationType.NONE:
-            # Handle manual gates specially
-            if item_def.verification.type == VerificationType.MANUAL_GATE:
-                return False, f"Item '{item_id}' requires manual approval. Use 'orchestrator approve-item {item_id}' to approve."
-            
-            success, message, result = self._run_verification(item_def)
-            item_state.verification_result = result
-            
-            if not success:
-                item_state.status = ItemStatus.FAILED
-                item_state.retry_count += 1
-                self.save_state()
+
+        # Handle step type enforcement
+        step_type = item_def.step_type
+
+        # Gate steps: Run command via HardGateExecutor
+        if step_type == StepType.GATE:
+            if item_def.verification.type == VerificationType.COMMAND:
+                gate_success, gate_message = self._execute_gate(item_def, item_state)
+                if not gate_success:
+                    return False, gate_message
+            # If gate passed, continue to mark as completed
+
+        # Documented steps: Validate evidence if provided
+        elif step_type == StepType.DOCUMENTED:
+            if evidence:
+                # Validate evidence against schema
+                if item_def.evidence_schema:
+                    is_valid, error_msg = validate_evidence_depth(
+                        item_def.evidence_schema, evidence
+                    )
+                    if not is_valid:
+                        self.log_event(WorkflowEvent(
+                            event_type=EventType.EVIDENCE_REJECTED,
+                            workflow_id=self.state.workflow_id,
+                            phase_id=self.state.current_phase_id,
+                            item_id=item_id,
+                            message=f"Evidence validation failed: {error_msg}",
+                            details={"evidence": evidence, "error": error_msg}
+                        ))
+                        return False, f"Evidence validation failed: {error_msg}"
+
+                # Store validated evidence
+                item_state.evidence = evidence
                 self.log_event(WorkflowEvent(
-                    event_type=EventType.VERIFICATION_FAILED,
+                    event_type=EventType.EVIDENCE_VALIDATED,
                     workflow_id=self.state.workflow_id,
                     phase_id=self.state.current_phase_id,
                     item_id=item_id,
-                    message=f"Verification failed: {message}",
+                    message="Evidence validated and stored",
+                    details={"evidence_schema": item_def.evidence_schema}
+                ))
+
+        # Run standard verification if configured and not skipped
+        # (Skip for gate steps since we already ran the gate)
+        if step_type != StepType.GATE:
+            if not skip_verification and item_def.verification.type != VerificationType.NONE:
+                # Handle manual gates specially
+                if item_def.verification.type == VerificationType.MANUAL_GATE:
+                    return False, f"Item '{item_id}' requires manual approval. Use 'orchestrator approve-item {item_id}' to approve."
+
+                success, message, result = self._run_verification(item_def)
+                item_state.verification_result = result
+
+                if not success:
+                    item_state.status = ItemStatus.FAILED
+                    item_state.retry_count += 1
+                    self.save_state()
+                    self.log_event(WorkflowEvent(
+                        event_type=EventType.VERIFICATION_FAILED,
+                        workflow_id=self.state.workflow_id,
+                        phase_id=self.state.current_phase_id,
+                        item_id=item_id,
+                        message=f"Verification failed: {message}",
+                        details=result
+                    ))
+                    return False, f"Verification failed: {message}"
+
+                self.log_event(WorkflowEvent(
+                    event_type=EventType.VERIFICATION_PASSED,
+                    workflow_id=self.state.workflow_id,
+                    phase_id=self.state.current_phase_id,
+                    item_id=item_id,
+                    message="Verification passed",
                     details=result
                 ))
-                return False, f"Verification failed: {message}"
-            
-            self.log_event(WorkflowEvent(
-                event_type=EventType.VERIFICATION_PASSED,
-                workflow_id=self.state.workflow_id,
-                phase_id=self.state.current_phase_id,
-                item_id=item_id,
-                message="Verification passed",
-                details=result
-            ))
-        
+
         # Mark as completed
         item_state.status = ItemStatus.COMPLETED
         item_state.completed_at = datetime.now(timezone.utc)
         if notes:
             item_state.notes = notes
-        
+
         self.save_state()
         self.log_event(WorkflowEvent(
             event_type=EventType.ITEM_COMPLETED,
@@ -562,30 +630,145 @@ class WorkflowEngine:
             phase_id=self.state.current_phase_id,
             item_id=item_id,
             message=f"Completed item: {item_id}",
-            details={"notes": notes}
+            details={"notes": notes, "step_type": step_type.value, "has_evidence": evidence is not None}
         ))
-        
+
         return True, "Item completed successfully"
+
+    def _execute_gate(self, item_def: ChecklistItemDef, item_state: ItemState) -> Tuple[bool, str]:
+        """
+        Execute a hard gate command.
+
+        Returns (success, message).
+        """
+        command = self._substitute_template(item_def.verification.command, sanitize_for_shell=True)
+
+        self.log_event(WorkflowEvent(
+            event_type=EventType.GATE_EXECUTED,
+            workflow_id=self.state.workflow_id,
+            phase_id=self.state.current_phase_id,
+            item_id=item_def.id,
+            message=f"Executing gate: {command}",
+            details={"command": command}
+        ))
+
+        result = self.gate_executor.execute(command, self.working_dir)
+
+        # Store gate result
+        item_state.gate_result = {
+            "success": result.success,
+            "exit_code": result.exit_code,
+            "stdout": result.stdout[:OUTPUT_TRUNCATE_LENGTH] if result.stdout else "",
+            "stderr": result.stderr[:OUTPUT_TRUNCATE_LENGTH] if result.stderr else "",
+            "command": command,
+            "duration_seconds": result.duration_seconds,
+            "error": result.error
+        }
+
+        if result.success:
+            self.log_event(WorkflowEvent(
+                event_type=EventType.GATE_PASSED,
+                workflow_id=self.state.workflow_id,
+                phase_id=self.state.current_phase_id,
+                item_id=item_def.id,
+                message=f"Gate passed: {item_def.id}",
+                details=item_state.gate_result
+            ))
+            return True, "Gate passed"
+        else:
+            item_state.retry_count += 1
+            self.save_state()
+
+            self.log_event(WorkflowEvent(
+                event_type=EventType.GATE_FAILED,
+                workflow_id=self.state.workflow_id,
+                phase_id=self.state.current_phase_id,
+                item_id=item_def.id,
+                message=f"Gate failed: {item_def.id}",
+                details=item_state.gate_result
+            ))
+
+            error_detail = result.stderr or result.error or "Unknown error"
+            return False, f"Gate failed (exit code {result.exit_code}): {error_detail}"
     
-    def skip_item(self, item_id: str, reason: str) -> Tuple[bool, str]:
-        """Skip an item with a documented reason."""
+    def skip_item(
+        self,
+        item_id: str,
+        reason: str,
+        context_considered: Optional[list[str]] = None
+    ) -> Tuple[bool, str]:
+        """
+        Skip an item with a documented reason.
+
+        For gate and required steps: Cannot be skipped.
+        For documented and flexible steps: Validates skip reasoning.
+
+        Args:
+            item_id: The item to skip
+            reason: Substantive reason for skipping
+            context_considered: Optional list of factors considered before skipping
+
+        Returns (success, message).
+        """
         item_def, item_state, error = self._validate_item_in_current_phase(item_id)
         if error:
             raise ValueError(error)
-        
+
+        # Check step type enforcement
+        step_type = item_def.step_type
+
+        # Gate steps cannot be skipped
+        if step_type == StepType.GATE:
+            return False, f"Item {item_id} is a gate step and cannot be skipped"
+
+        # Required steps cannot be skipped
+        if step_type == StepType.REQUIRED:
+            return False, f"Item {item_id} is a required step and cannot be skipped"
+
+        # Check skippable flag (for backwards compatibility and manual gates)
         if not item_def.skippable:
             return False, f"Item {item_id} is not skippable"
-        
+
         if item_state.status in [ItemStatus.COMPLETED, ItemStatus.SKIPPED]:
             return False, f"Item {item_id} is already {item_state.status.value}"
-        
-        if not reason or len(reason.strip()) < MIN_SKIP_REASON_LENGTH:
-            return False, f"Skip reason must be at least {MIN_SKIP_REASON_LENGTH} characters"
-        
+
+        # Validate skip reasoning
+        # For documented steps: Use strict validation
+        # For flexible steps: Use basic length check (backwards compatible)
+        if step_type == StepType.DOCUMENTED:
+            is_valid, error_msg = validate_skip_reasoning(reason)
+            if not is_valid:
+                self.log_event(WorkflowEvent(
+                    event_type=EventType.SKIP_REJECTED,
+                    workflow_id=self.state.workflow_id,
+                    phase_id=self.state.current_phase_id,
+                    item_id=item_id,
+                    message=f"Skip reasoning rejected: {error_msg}",
+                    details={"reason": reason, "error": error_msg}
+                ))
+                return False, f"Skip reasoning rejected: {error_msg}"
+        else:
+            # Basic length check for flexible steps (backwards compatible)
+            if not reason or len(reason.strip()) < MIN_SKIP_REASON_LENGTH:
+                return False, f"Skip reason must be at least {MIN_SKIP_REASON_LENGTH} characters"
+
+        # Log successful validation for documented steps
+        if step_type == StepType.DOCUMENTED:
+            self.log_event(WorkflowEvent(
+                event_type=EventType.SKIP_VALIDATED,
+                workflow_id=self.state.workflow_id,
+                phase_id=self.state.current_phase_id,
+                item_id=item_id,
+                message="Skip reasoning validated",
+                details={"reason_length": len(reason)}
+            ))
+
         item_state.status = ItemStatus.SKIPPED
         item_state.skipped_at = datetime.now(timezone.utc)
         item_state.skip_reason = reason
-        
+        if context_considered:
+            item_state.skip_context_considered = context_considered
+
         self.save_state()
         self.log_event(WorkflowEvent(
             event_type=EventType.ITEM_SKIPPED,
@@ -593,9 +776,13 @@ class WorkflowEngine:
             phase_id=self.state.current_phase_id,
             item_id=item_id,
             message=f"Skipped item: {item_id}",
-            details={"reason": reason}
+            details={
+                "reason": reason,
+                "step_type": step_type.value,
+                "context_considered": context_considered
+            }
         ))
-        
+
         return True, f"Item {item_id} skipped"
 
     # ========================================================================
