@@ -6,6 +6,7 @@ Command-line interface for managing AI workflow enforcement.
 """
 
 import argparse
+import os
 import sys
 import json
 from pathlib import Path
@@ -51,6 +52,11 @@ from src.secrets import (
     init_secrets_interactive,
     CONFIG_FILE,
     SIMPLE_SECRETS_FILE,
+)
+from src.git_conflict_resolver import (
+    GitConflictResolver,
+    check_conflicts,
+    format_escalation_for_user,
 )
 
 VERSION = "2.0.0"
@@ -268,8 +274,42 @@ def cmd_init(args):
 def cmd_status(args):
     """Show current workflow status."""
     engine = get_engine(args)
+    working_dir = Path(args.dir or '.')
 
-    if args.json:
+    # CORE-023: Check for git conflicts and show warning
+    has_conflict, conflict_files = check_conflicts(working_dir)
+    if has_conflict:
+        try:
+            resolver = GitConflictResolver(repo_path=working_dir)
+            conflict_type = "REBASE" if resolver.is_rebase_conflict() else "MERGE"
+        except ValueError:
+            conflict_type = "MERGE"
+
+        if args.json:
+            # Add conflict info to JSON
+            status_json = engine.get_status_json()
+            status_json['git_conflict'] = {
+                'has_conflicts': True,
+                'conflict_type': conflict_type.lower(),
+                'files': conflict_files,
+            }
+            print(json.dumps(status_json, indent=2, default=str))
+        else:
+            # Show conflict warning before regular status
+            print("=" * 60)
+            print(f"GIT {conflict_type} CONFLICT DETECTED")
+            print("=" * 60)
+            print(f"{len(conflict_files)} file(s) in conflict:")
+            for f in conflict_files[:5]:
+                print(f"  - {f}")
+            if len(conflict_files) > 5:
+                print(f"  ... and {len(conflict_files) - 5} more")
+            print()
+            print("Run `orchestrator resolve` to resolve conflicts")
+            print("=" * 60)
+            print()
+            print(engine.get_recitation_text())
+    elif args.json:
         # WF-015: Use the new get_status_json for proper JSON output
         print(json.dumps(engine.get_status_json(), indent=2, default=str))
     else:
@@ -293,6 +333,178 @@ def cmd_verify_write_allowed(args):
     else:
         print(f"✗ {reason}")
         sys.exit(1)
+
+
+def cmd_resolve(args):
+    """CORE-023: Resolve git merge/rebase conflicts."""
+    working_dir = Path(args.dir or '.')
+
+    # Handle abort first
+    if args.abort:
+        try:
+            resolver = GitConflictResolver(repo_path=working_dir)
+            if not resolver.has_conflicts():
+                print("No conflicts to abort.")
+                sys.exit(0)
+
+            if resolver.abort():
+                conflict_type = "rebase" if resolver.is_rebase_conflict() else "merge"
+                print(f"✓ {conflict_type.title()} aborted successfully")
+                sys.exit(0)
+            else:
+                print(f"✗ Failed to abort")
+                sys.exit(2)
+        except ValueError as e:
+            print(f"Error: {e}")
+            sys.exit(2)
+
+    # Check for conflicts
+    try:
+        resolver = GitConflictResolver(repo_path=working_dir)
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(2)
+
+    if not resolver.has_conflicts():
+        print("No git conflicts detected.")
+        sys.exit(0)
+
+    # Get conflict info
+    conflict_type = "rebase" if resolver.is_rebase_conflict() else "merge"
+    files = resolver.get_conflicted_files()
+
+    print("=" * 60)
+    print(f"GIT {conflict_type.upper()} CONFLICT DETECTED")
+    print("=" * 60)
+    print()
+    print(f"{len(files)} file(s) in conflict:")
+    for f in files:
+        print(f"  - {f}")
+    print()
+
+    # Preview mode (default)
+    if not args.apply:
+        print("PREVIEW MODE - No changes will be made")
+        print()
+
+        # Analyze what would happen
+        results = resolver.resolve_all(strategy=args.strategy or "auto")
+
+        if results.resolved_count > 0:
+            print(f"Auto-resolvable: {results.resolved_count} file(s)")
+            for r in results.results:
+                if r.success:
+                    print(f"  ✓ {r.file_path} ({r.strategy}, confidence: {r.confidence:.0%})")
+
+        if results.escalated_count > 0:
+            print()
+            print(f"Need manual decision: {results.escalated_count} file(s)")
+            for r in results.results:
+                if r.needs_escalation:
+                    print(f"  ? {r.file_path}")
+
+        print()
+        print("-" * 60)
+        print("To apply resolutions: orchestrator resolve --apply")
+        if args.strategy:
+            print(f"                       (using strategy: {args.strategy})")
+        print("-" * 60)
+
+        # Exit code 3 = preview only
+        sys.exit(3)
+
+    # Apply mode
+    print(f"APPLYING RESOLUTIONS (strategy: {args.strategy or 'auto'})")
+    print()
+
+    results = resolver.resolve_all(strategy=args.strategy or "auto")
+    applied, failed = 0, 0
+
+    # Handle successful auto-resolutions
+    for result in results.results:
+        if result.success:
+            if resolver.apply_resolution(result):
+                print(f"  ✓ {result.file_path} resolved ({result.strategy})")
+                applied += 1
+            else:
+                print(f"  ✗ {result.file_path} failed to apply")
+                failed += 1
+        elif result.needs_escalation:
+            # Interactive mode
+            print()
+            print(format_escalation_for_user(result))
+            print()
+
+            # Get user choice
+            choice = input("Enter choice [A/B/C/D] (default: A): ").strip().upper() or "A"
+
+            if choice == "A":
+                # Keep ours
+                ours_result = resolver.resolve_file(result.file_path, strategy="ours")
+                if ours_result.success and resolver.apply_resolution(ours_result):
+                    print(f"  ✓ {result.file_path} resolved (ours)")
+                    applied += 1
+                else:
+                    print(f"  ✗ {result.file_path} failed: {ours_result.validation_error}")
+                    failed += 1
+            elif choice == "B":
+                # Keep theirs
+                theirs_result = resolver.resolve_file(result.file_path, strategy="theirs")
+                if theirs_result.success and resolver.apply_resolution(theirs_result):
+                    print(f"  ✓ {result.file_path} resolved (theirs)")
+                    applied += 1
+                else:
+                    print(f"  ✗ {result.file_path} failed: {theirs_result.validation_error}")
+                    failed += 1
+            elif choice == "C":
+                # Keep both
+                both_result = resolver.resolve_file(result.file_path, strategy="both")
+                if both_result.resolved_content and resolver.apply_resolution(both_result):
+                    print(f"  ✓ {result.file_path} resolved (both - may need cleanup)")
+                    applied += 1
+                else:
+                    print(f"  ✗ {result.file_path} failed: {both_result.validation_error}")
+                    failed += 1
+            elif choice == "D":
+                # Open in editor
+                editor = os.environ.get("EDITOR", "vim")
+                file_path = working_dir / result.file_path
+                import subprocess
+                subprocess.run([editor, str(file_path)])
+                # After editing, stage the file
+                subprocess.run(["git", "add", result.file_path], cwd=working_dir)
+                print(f"  ✓ {result.file_path} manually resolved")
+                applied += 1
+            else:
+                print(f"  ? {result.file_path} skipped (invalid choice)")
+        else:
+            # Failed resolution
+            print(f"  ✗ {result.file_path} failed: {result.validation_error}")
+            failed += 1
+
+    print()
+    print("=" * 60)
+    print(f"RESOLUTION SUMMARY")
+    print("=" * 60)
+    print(f"  Applied: {applied}")
+    print(f"  Failed:  {failed}")
+
+    # Auto-commit if requested
+    if args.commit and failed == 0 and applied > 0:
+        print()
+        if resolver.continue_operation():
+            print("✓ Merge/rebase completed successfully")
+        else:
+            print("✗ Failed to complete merge/rebase")
+            print("  You may need to run 'git commit' or 'git rebase --continue' manually")
+
+    # Exit codes
+    if failed > 0:
+        sys.exit(1)  # Partial success
+    elif applied > 0:
+        sys.exit(0)  # All resolved
+    else:
+        sys.exit(2)  # No files processed
 
 
 def cmd_complete(args):
@@ -2918,6 +3130,18 @@ Examples:
     verify_write_parser = subparsers.add_parser('verify-write-allowed',
         help='Check if writing implementation code is allowed in current phase')
     verify_write_parser.set_defaults(func=cmd_verify_write_allowed)
+
+    # Resolve command (CORE-023)
+    resolve_parser = subparsers.add_parser('resolve', help='Resolve git merge/rebase conflicts')
+    resolve_parser.add_argument('--apply', action='store_true',
+                                help='Apply resolutions (default is preview mode)')
+    resolve_parser.add_argument('--strategy', '-s', choices=['auto', 'ours', 'theirs'],
+                                help='Resolution strategy (default: auto)')
+    resolve_parser.add_argument('--commit', action='store_true',
+                                help='Auto-commit after resolving all conflicts')
+    resolve_parser.add_argument('--abort', action='store_true',
+                                help='Abort the current merge or rebase')
+    resolve_parser.set_defaults(func=cmd_resolve)
 
     # Complete command
     complete_parser = subparsers.add_parser('complete', help='Mark an item as complete')

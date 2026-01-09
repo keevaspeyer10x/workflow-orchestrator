@@ -114,6 +114,7 @@ orchestrator finish
 | `orchestrator handoff` | Generate handoff prompt |
 | `orchestrator checkpoint` | Create checkpoint |
 | `orchestrator resume` | Resume from checkpoint |
+| `orchestrator resolve` | Resolve git merge/rebase conflicts |
 | `orchestrator setup` | Enable automatic updates for this repo |
 | `orchestrator setup --remove` | Disable automatic updates |
 | `orchestrator config set KEY VALUE` | Set configuration value |
@@ -181,6 +182,35 @@ Resume from a checkpoint:
 orchestrator checkpoints  # List available
 orchestrator resume --from cp_xxx
 ```
+
+## Conflict Resolution
+
+When git is in a merge or rebase conflict state, use `orchestrator resolve`:
+
+```bash
+# Preview what would be resolved (safe, no changes)
+orchestrator resolve
+
+# Apply automatic resolutions
+orchestrator resolve --apply
+
+# Force a specific strategy for all files
+orchestrator resolve --apply --strategy ours    # Keep our changes
+orchestrator resolve --apply --strategy theirs  # Accept target branch
+
+# Auto-commit after resolution
+orchestrator resolve --apply --commit
+
+# Abort the merge/rebase entirely
+orchestrator resolve --abort
+```
+
+**Resolution Philosophy: Rebase-First**
+- Target branch is truth
+- Adapt our changes to work with target
+- When in doubt, escalate to user with analysis and recommendation
+
+**Note:** `orchestrator status` will show a conflict warning if git has unresolved conflicts.
 
 ## Secrets Management
 
