@@ -4,7 +4,7 @@ LLM-Assisted Conflict Resolution - CORE-023 Part 2
 Resolves git conflicts that can't be auto-resolved using LLM-based code merging.
 
 Pipeline:
-1. Intent Extraction - Analyze what each side was trying to do
+1. Intent Extraction - Uses IntentExtractor.extract_from_diff_with_llm()
 2. Context Assembly - Gather related files, conventions (with token budget)
 3. LLM Resolution - Generate merged code
 4. Validation - Tiered validation (syntax, build, tests)
@@ -13,6 +13,10 @@ Pipeline:
 Security:
 - Sensitive files are detected and skipped (never sent to LLM)
 - Only conflict hunks + context sent, not full codebase
+
+Note: This module integrates with the existing resolution infrastructure:
+- Uses IntentExtractor from src/resolution/intent.py for intent extraction
+- Uses ExtractedIntent from src/resolution/schema.py
 """
 
 import ast
@@ -26,6 +30,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Optional, Literal
+
+# Import from existing infrastructure
+from .schema import ExtractedIntent, Constraint
+from .intent import IntentExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -83,15 +91,8 @@ class ConfidenceLevel(Enum):
     LOW = "low"        # < 0.5 - Escalate to human
 
 
-@dataclass
-class ExtractedIntent:
-    """Intent extracted from one side of a conflict."""
-    side: Literal["ours", "theirs"]
-    primary_intent: str  # One sentence summary
-    hard_constraints: list[str] = field(default_factory=list)  # MUST satisfy
-    soft_constraints: list[str] = field(default_factory=list)  # Prefer
-    evidence: list[str] = field(default_factory=list)  # Citations
-    confidence: ConfidenceLevel = ConfidenceLevel.MEDIUM
+# Note: ExtractedIntent is now imported from schema.py
+# It uses agent_id (we pass "ours"/"theirs") and Constraint objects
 
 
 @dataclass
@@ -291,6 +292,9 @@ class LLMResolver:
         self.client = client or self._get_default_client()
         self.auto_apply_threshold = auto_apply_threshold
 
+        # Create IntentExtractor with LLM client for Phase 5 extraction
+        self.intent_extractor = IntentExtractor(llm_client=self.client)
+
     def _get_default_client(self) -> LLMClient:
         """Get default LLM client based on available API keys."""
         # Try OpenAI first (best for code)
@@ -470,7 +474,7 @@ class LLMResolver:
         return False
 
     # ========================================================================
-    # Stage 1: Intent Extraction
+    # Stage 1: Intent Extraction (delegates to IntentExtractor)
     # ========================================================================
 
     def _extract_intent(
@@ -480,84 +484,18 @@ class LLMResolver:
         content: str,
         file_path: str,
     ) -> ExtractedIntent:
-        """Extract intent from one side of the conflict."""
+        """
+        Extract intent from one side of the conflict.
 
-        # Build diff if we have a base
-        diff_lines = []
-        if base:
-            base_lines = base.splitlines()
-            content_lines = content.splitlines()
-
-            # Simple diff: find added/removed lines
-            added = set(content_lines) - set(base_lines)
-            removed = set(base_lines) - set(content_lines)
-
-            for line in removed:
-                diff_lines.append(f"- {line[:100]}")
-            for line in added:
-                diff_lines.append(f"+ {line[:100]}")
-
-        diff_summary = "\n".join(diff_lines[:30])  # Limit size
-
-        prompt = f'''Analyze this code change and extract the intent.
-
-File: {file_path}
-Side: {side}
-
-Changes:
-```
-{diff_summary}
-```
-
-Full {side} version (first 100 lines):
-```
-{content[:5000]}
-```
-
-Respond in JSON format:
-{{
-  "primary_intent": "One sentence describing what this change is trying to do",
-  "hard_constraints": ["constraint that MUST be satisfied"],
-  "soft_constraints": ["preference that should be followed if possible"],
-  "confidence": "high" | "medium" | "low"
-}}
-
-Output only valid JSON, no markdown or explanation.
-'''
-
-        try:
-            response = self.client.generate(prompt, max_tokens=500)
-            # Clean response (remove markdown if present)
-            response = response.strip()
-            if response.startswith("```"):
-                response = response.split("```")[1]
-                if response.startswith("json"):
-                    response = response[4:]
-            response = response.strip()
-
-            data = json.loads(response)
-
-            confidence_map = {
-                "high": ConfidenceLevel.HIGH,
-                "medium": ConfidenceLevel.MEDIUM,
-                "low": ConfidenceLevel.LOW,
-            }
-
-            return ExtractedIntent(
-                side=side,
-                primary_intent=data.get("primary_intent", "Unknown intent"),
-                hard_constraints=data.get("hard_constraints", []),
-                soft_constraints=data.get("soft_constraints", []),
-                confidence=confidence_map.get(data.get("confidence", "medium"), ConfidenceLevel.MEDIUM),
-            )
-
-        except Exception as e:
-            logger.warning(f"Intent extraction failed for {side}: {e}")
-            return ExtractedIntent(
-                side=side,
-                primary_intent=f"Could not extract intent: {e}",
-                confidence=ConfidenceLevel.LOW,
-            )
+        Delegates to IntentExtractor.extract_from_diff_with_llm() which uses
+        the shared infrastructure from src/resolution/intent.py.
+        """
+        return self.intent_extractor.extract_from_diff_with_llm(
+            side=side,
+            base_content=base,
+            side_content=content,
+            file_path=file_path,
+        )
 
     # ========================================================================
     # Stage 2: Context Assembly
@@ -663,19 +601,19 @@ Output only valid JSON, no markdown or explanation.
 
         language = context.get("language", "text")
 
-        # Format intents
-        ours_intent = next((i for i in intents if i.side == "ours"), None)
-        theirs_intent = next((i for i in intents if i.side == "theirs"), None)
+        # Format intents (agent_id is "ours" or "theirs")
+        ours_intent = next((i for i in intents if i.agent_id == "ours"), None)
+        theirs_intent = next((i for i in intents if i.agent_id == "theirs"), None)
 
         ours_intent_str = ours_intent.primary_intent if ours_intent else "Unknown"
         theirs_intent_str = theirs_intent.primary_intent if theirs_intent else "Unknown"
 
-        # Build constraints list
+        # Build constraints list (Constraint objects have .description)
         hard_constraints = []
         soft_constraints = []
         for intent in intents:
-            hard_constraints.extend(intent.hard_constraints)
-            soft_constraints.extend(intent.soft_constraints)
+            hard_constraints.extend(c.description for c in intent.hard_constraints)
+            soft_constraints.extend(c.description for c in intent.soft_constraints)
 
         hard_constraints_str = "\n".join(f"- {c}" for c in hard_constraints) or "- None specified"
         soft_constraints_str = "\n".join(f"- {c}" for c in soft_constraints) or "- None specified"
@@ -733,11 +671,11 @@ CRITICAL: Output ONLY the merged code. No explanations, no markdown code blocks,
             # Assess confidence based on response characteristics
             confidence = 0.7  # Base confidence
 
-            # Boost if both intents seem addressed
+            # Boost if both intents seem addressed (schema uses string confidence)
             if ours_intent and theirs_intent:
-                if ours_intent.confidence == ConfidenceLevel.HIGH:
+                if ours_intent.confidence == "high":
                     confidence += 0.05
-                if theirs_intent.confidence == ConfidenceLevel.HIGH:
+                if theirs_intent.confidence == "high":
                     confidence += 0.05
 
             # Penalize if response is suspiciously short or long
@@ -848,10 +786,10 @@ CRITICAL: Output ONLY the merged code. No explanations, no markdown code blocks,
         score = candidate.confidence
         reasons = []
 
-        # Intent confidence
+        # Intent confidence (schema uses string: "high", "medium", "low")
         intent_scores = [
-            1.0 if i.confidence == ConfidenceLevel.HIGH else
-            0.6 if i.confidence == ConfidenceLevel.MEDIUM else
+            1.0 if i.confidence == "high" else
+            0.6 if i.confidence == "medium" else
             0.3
             for i in intents
         ]

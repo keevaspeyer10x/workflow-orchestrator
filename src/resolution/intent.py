@@ -37,10 +37,13 @@ class IntentExtractor:
     Extracts and compares agent intents.
 
     Phase 3 (Basic): Uses heuristic extraction from manifests and code.
-    Phase 5 (Advanced): Will use LLM for deeper understanding.
+    Phase 5 (Advanced): Uses LLM for deeper understanding.
     """
 
-    def __init__(self):
+    def __init__(self, llm_client=None):
+        # Optional LLM client for Phase 5 advanced extraction
+        self.llm_client = llm_client
+
         # Keywords indicating hard constraints
         self.hard_constraint_patterns = [
             (r"must\s+\w+", "must requirement"),
@@ -447,3 +450,181 @@ class IntentExtractor:
             return "medium"
 
         return "medium"
+
+    # ========================================================================
+    # Phase 5: LLM-based Intent Extraction (for CLI ours/theirs scenarios)
+    # ========================================================================
+
+    def extract_from_diff_with_llm(
+        self,
+        side: str,
+        base_content: Optional[str],
+        side_content: str,
+        file_path: str,
+    ) -> ExtractedIntent:
+        """
+        Extract intent from a diff using LLM.
+
+        Used by CLI conflict resolution (ours/theirs scenarios) where we don't
+        have agent manifests, only code diffs.
+
+        Args:
+            side: "ours" or "theirs"
+            base_content: Common ancestor content (may be None for new files)
+            side_content: This side's content
+            file_path: Path to the file
+
+        Returns:
+            ExtractedIntent with LLM-extracted information
+        """
+        import json
+
+        if not self.llm_client:
+            # Fall back to heuristic extraction
+            return self._extract_from_diff_heuristic(side, base_content, side_content, file_path)
+
+        # Build diff summary
+        diff_lines = []
+        if base_content:
+            base_lines = base_content.splitlines()
+            side_lines = side_content.splitlines()
+            added = set(side_lines) - set(base_lines)
+            removed = set(base_lines) - set(side_lines)
+            for line in list(removed)[:15]:
+                diff_lines.append(f"- {line[:100]}")
+            for line in list(added)[:15]:
+                diff_lines.append(f"+ {line[:100]}")
+
+        diff_summary = "\n".join(diff_lines[:30])
+
+        prompt = f'''Analyze this code change and extract the intent.
+
+File: {file_path}
+Side: {side}
+
+Changes:
+```
+{diff_summary}
+```
+
+Full {side} version (first 100 lines):
+```
+{side_content[:5000]}
+```
+
+Respond in JSON format:
+{{
+  "primary_intent": "One sentence describing what this change is trying to do",
+  "hard_constraints": ["constraint that MUST be satisfied"],
+  "soft_constraints": ["preference that should be followed if possible"],
+  "confidence": "high" | "medium" | "low"
+}}
+
+Output only valid JSON, no markdown or explanation.
+'''
+
+        try:
+            response = self.llm_client.generate(prompt, max_tokens=500)
+
+            # Clean response
+            response = response.strip()
+            if response.startswith("```"):
+                response = response.split("```")[1]
+                if response.startswith("json"):
+                    response = response[4:]
+            response = response.strip()
+
+            data = json.loads(response)
+
+            # Convert to Constraint objects
+            hard_constraints = [
+                Constraint(
+                    description=c,
+                    constraint_type="hard",
+                    evidence=f"LLM extracted from {file_path}",
+                    source="inferred",
+                )
+                for c in data.get("hard_constraints", [])
+            ]
+            soft_constraints = [
+                Constraint(
+                    description=c,
+                    constraint_type="soft",
+                    evidence=f"LLM extracted from {file_path}",
+                    source="inferred",
+                )
+                for c in data.get("soft_constraints", [])
+            ]
+
+            confidence = data.get("confidence", "medium")
+            if confidence not in ("high", "medium", "low"):
+                confidence = "medium"
+
+            return ExtractedIntent(
+                agent_id=side,  # Use "ours" or "theirs" as agent_id
+                primary_intent=data.get("primary_intent", "Unknown intent"),
+                hard_constraints=hard_constraints,
+                soft_constraints=soft_constraints,
+                confidence=confidence,
+                confidence_reasons=["LLM-based extraction"],
+            )
+
+        except Exception as e:
+            logger.warning(f"LLM intent extraction failed for {side}: {e}")
+            return self._extract_from_diff_heuristic(side, base_content, side_content, file_path)
+
+    def _extract_from_diff_heuristic(
+        self,
+        side: str,
+        base_content: Optional[str],
+        side_content: str,
+        file_path: str,
+    ) -> ExtractedIntent:
+        """
+        Fallback heuristic extraction when LLM is unavailable.
+
+        Uses pattern matching to extract constraints from code.
+        """
+        hard_constraints = []
+        soft_constraints = []
+
+        # Analyze the side content for constraints
+        for pattern, constraint_type in self.hard_constraint_patterns:
+            matches = re.findall(pattern, side_content, re.IGNORECASE)
+            for match in matches[:3]:  # Limit to avoid noise
+                hard_constraints.append(Constraint(
+                    description=match,
+                    constraint_type="hard",
+                    evidence=f"Pattern match in {file_path}",
+                    source="code",
+                ))
+
+        for pattern, constraint_type in self.soft_constraint_patterns:
+            matches = re.findall(pattern, side_content, re.IGNORECASE)
+            for match in matches[:3]:
+                soft_constraints.append(Constraint(
+                    description=match,
+                    constraint_type="soft",
+                    evidence=f"Pattern match in {file_path}",
+                    source="code",
+                ))
+
+        # Try to infer primary intent from changes
+        primary_intent = f"Changes to {file_path}"
+        if base_content:
+            added_lines = len(side_content.splitlines()) - len(base_content.splitlines())
+            if added_lines > 10:
+                primary_intent = f"Adds significant code to {file_path}"
+            elif added_lines < -10:
+                primary_intent = f"Removes code from {file_path}"
+            else:
+                primary_intent = f"Modifies {file_path}"
+
+        return ExtractedIntent(
+            agent_id=side,
+            primary_intent=primary_intent,
+            hard_constraints=hard_constraints,
+            soft_constraints=soft_constraints,
+            confidence="low",  # Heuristic = low confidence
+            confidence_reasons=["Heuristic extraction (no LLM)"],
+        )

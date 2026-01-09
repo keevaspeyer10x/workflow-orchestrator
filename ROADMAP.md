@@ -162,6 +162,37 @@ Option D (simple subprocess) is even simpler for non-interactive batch execution
 
 ---
 
+#### CORE-023-T1: Golden File Tests for Conflict Resolution
+**Status:** Planned
+**Complexity:** Low
+**Priority:** Medium
+**Source:** CORE-023-P2 implementation review
+
+**Description:** Add golden file tests for known conflict patterns to catch edge cases.
+
+**Scope:**
+- Create `tests/golden/` directory with known conflict patterns
+- Add 5-10 common patterns: import conflicts, function edits, config files
+- Property-based tests (Hypothesis) for fuzzing edge cases
+- Regression test framework for capturing real-world failures
+
+---
+
+#### CORE-023-T2: PRD WaveResolver Integration
+**Status:** Planned
+**Complexity:** Low
+**Priority:** Medium (when PRD conflicts are actively used)
+**Depends on:** CORE-023-P2
+
+**Description:** Integrate LLM resolution with PRD WaveResolver for multi-agent conflicts.
+
+**Scope:**
+- Add LLM resolution option to `WaveResolver.resolve_in_waves()`
+- Pass PRD context (manifests, task descriptions) to `LLMResolver`
+- Test with multi-agent conflict scenarios
+
+---
+
 #### CORE-026: Review Failure Resilience & API Key Recovery
 **Status:** Planned
 **Complexity:** Medium
