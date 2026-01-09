@@ -391,6 +391,19 @@ phases:
         required: false
         skippable: true
 
+      - id: "update_documentation"
+        name: "Update User-Facing Documentation"
+        description: "Review and update user-facing documentation based on changes made. Consider: CHANGELOG.md, README.md, API docs."
+        required: true
+        skippable: true
+        skip_conditions: ["internal_refactor_only", "no_user_facing_changes"]
+        notes:
+          - "[changelog] Update CHANGELOG.md using Keep a Changelog format (Added/Changed/Fixed/Removed/Security)"
+          - "[readme] Update README.md if: new features, setup changes, usage changes, new dependencies"
+          - "[api] Update API documentation if public interfaces changed"
+          - "[tip] The commit message often contains good starting content for changelog entries"
+          - "[caution] Don't skip this for user-facing changes - outdated docs frustrate users"
+
       - id: "commit_and_sync"
         name: "Commit and Sync Changes"
         description: "Ask user if they are ready to commit and sync to main. If approved: 1) Run git status/diff, 2) Auto-generate commit message from workflow task and changes, 3) Stage relevant files (exclude .env, secrets, workflow state), 4) Commit and push."

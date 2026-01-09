@@ -995,6 +995,68 @@ Error analysis runs on already-scrubbed transcripts (CORE-024), so no secrets ar
 
 ---
 
+#### WF-025: Documentation Update Step in LEARN Phase
+**Status:** Planned
+**Complexity:** Low
+**Priority:** Medium
+**Source:** User request - Ensure user-facing documentation is updated as part of workflow completion
+
+**Description:** Add a documentation update step to the LEARN phase that prompts for user-facing documentation updates (CHANGELOG, README, API docs) based on the type of changes made.
+
+**Problem Solved:**
+Currently, the LEARN phase focuses on internal learnings (what went wrong, how to prevent it) but doesn't ensure user-facing documentation is updated. This leads to:
+- Outdated CHANGELOGs that don't reflect recent changes
+- README files missing new features or setup changes
+- Undocumented public APIs
+
+**Proposed Workflow Item:**
+
+```yaml
+- id: "update_documentation"
+  name: "Update User-Facing Documentation"
+  description: "Review and update user-facing documentation based on changes made."
+  required: true
+  skippable: true
+  skip_conditions: ["internal_refactor_only", "no_user_facing_changes"]
+  notes:
+    - "[changelog] Update CHANGELOG.md using Keep a Changelog format (Added/Changed/Fixed/Removed/Security)"
+    - "[readme] Update README.md if: new features, setup changes, usage changes, new dependencies"
+    - "[api] Update API documentation if public interfaces changed"
+    - "[tip] Commit message often contains good changelog content"
+```
+
+**Documentation Types & When to Update:**
+
+| Documentation | When to Update | Format/Standard |
+|--------------|----------------|-----------------|
+| **CHANGELOG.md** | Any user-facing change | [Keep a Changelog](https://keepachangelog.com/) |
+| **README.md** | New features, setup changes, usage patterns | Project-specific |
+| **API docs** | New/changed public interfaces | OpenAPI, docstrings, or markdown |
+| **Migration guides** | Breaking changes | Step-by-step upgrade instructions |
+
+**Auto-Detection Ideas:**
+- Parse git diff for new exported functions → suggest API doc update
+- Detect new CLI commands → suggest README update
+- Detect version bump in pyproject.toml/package.json → prompt for CHANGELOG
+- Check if CHANGELOG.md was modified → if not, warn before commit
+
+**Integration with commit_and_sync:**
+The existing `commit_and_sync` item could be enhanced to:
+1. Check if CHANGELOG.md was updated (warn if not for non-trivial changes)
+2. Auto-generate changelog entry draft from commit message
+3. Include documentation files in the commit
+
+**Tasks:**
+- [x] Add `update_documentation` item to LEARN phase in workflow.yaml
+- [x] Update bundled default workflow
+- [ ] Add detection logic for "user-facing change" vs "internal refactor"
+- [ ] Add CHANGELOG.md template/format guidance
+- [ ] Add auto-detection for missing documentation updates
+- [ ] Integrate warning into `commit_and_sync` step
+- [ ] Document in CLAUDE.md
+
+---
+
 #### CONTEXT-001: Context Documents System (North Star, Architecture, UI Style Guide)
 **Status:** Planned
 **Complexity:** Medium
