@@ -278,57 +278,14 @@ Instead of fighting compaction, embrace it. Design workflows for shorter session
 - New session starts with handoff context
 - Never hit compaction because sessions are short
 
-**Recommendation:** Combination of A + C
+**Note:** The right approach is not yet decided. Options above are exploratory - requires proper design and planning to understand tradeoffs, Claude Code capabilities/hooks, and what's practically achievable.
 
-1. **Continuous memory file** (Option C) - Always-current state
-2. **Pre-compaction checkpoint** (Option A) - Catch what memory file misses
-3. **Post-compaction injection** - Load memory file + checkpoint into new context
-
-**Implementation:**
-
-```python
-# Hook that runs periodically or on tool calls
-def check_context_health():
-    usage = estimate_context_usage()
-
-    if usage > 0.85:
-        # Approaching danger zone
-        checkpoint = create_emergency_checkpoint()
-        update_memory_file(checkpoint)
-        warn_user("Context 85% full, checkpoint saved")
-
-    if usage > 0.95:
-        # Imminent compaction
-        trigger_handover()
-
-# After compaction detected (context suddenly small)
-def on_context_restore():
-    memory = load_memory_file()
-    checkpoint = load_latest_checkpoint()
-    inject_context(memory, checkpoint)
-    print("Session restored from checkpoint")
-```
-
-**Detection:**
-Claude Code shows a warning when ~10% context remains. Options:
-- **Use the warning as trigger** - When user sees "context running low", run `orchestrator checkpoint --emergency`
-- **Hook integration** - If Claude Code exposes this via hooks, auto-trigger checkpoint
-- **Proactive heuristic** - Estimate from conversation length, checkpoint at ~70-80% before warning appears
-- **User-triggered** - Manual `orchestrator checkpoint` when things feel slow
-
-The 10% warning is late but usable - ideally we checkpoint earlier so there's time for proper handover.
+**Known:** Claude Code warns when ~10% context remains. This could serve as a trigger, though ideally we'd checkpoint earlier.
 
 **Tasks:**
-- [ ] Design memory file schema (.workflow_memory.yaml)
-- [ ] Implement continuous memory file updates
-- [ ] Add context size estimation heuristic
-- [ ] Implement pre-compaction checkpoint trigger
-- [ ] Create handover document generator
-- [ ] Add post-compaction context injection
-- [ ] Test with artificially long sessions
-- [ ] Add `orchestrator checkpoint --emergency` for manual trigger
-- [ ] Integrate with SessionStart hook for auto-restore
-- [ ] Document compaction survival in CLAUDE.md
+- [ ] Research Claude Code compaction behavior and available hooks
+- [ ] Design and plan approach (evaluate options A-D)
+- [ ] Prototype and test chosen approach
 
 **Why This Is Critical:**
 Without solving compaction, zero-human-review workflows will always fail on complex tasks. The agent simply cannot maintain coherence across long sessions. This is a fundamental blocker for autonomous AI coding.
