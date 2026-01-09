@@ -20,8 +20,47 @@ from .result import ReviewResult
 from .prompts import get_prompt, get_tool, REVIEW_PROMPTS
 from .setup import ReviewSetup, check_review_setup as _check_setup
 from .registry import get_all_review_types
+from ..secrets import get_secret
 
 logger = logging.getLogger(__name__)
+
+
+# API keys to auto-load from secrets if not in environment
+API_KEYS_TO_LOAD = [
+    "OPENROUTER_API_KEY",
+    "OPENAI_API_KEY",
+    "GEMINI_API_KEY",
+    "XAI_API_KEY",
+]
+
+
+def ensure_api_keys_loaded() -> dict[str, bool]:
+    """
+    Load API keys from SecretsManager into environment if not already set.
+
+    This allows SOPS-encrypted secrets to be used by CLI tools and litellm
+    without requiring manual 'eval $(sops -d ...)' commands.
+
+    Returns:
+        Dict of key_name -> was_loaded (True if loaded from secrets)
+    """
+    loaded = {}
+    for key_name in API_KEYS_TO_LOAD:
+        if os.environ.get(key_name):
+            # Already in environment
+            loaded[key_name] = False
+            continue
+
+        # Try to get from secrets (SOPS, GitHub repo, etc.)
+        value = get_secret(key_name)
+        if value:
+            os.environ[key_name] = value
+            loaded[key_name] = True
+            logger.debug(f"Loaded {key_name} from secrets")
+        else:
+            loaded[key_name] = False
+
+    return loaded
 
 
 class ReviewMethod(Enum):
@@ -59,9 +98,16 @@ class ReviewRouter:
         base_branch: str = "main"
     ):
         self.working_dir = Path(working_dir).resolve()
-        self.setup = check_review_setup(self.working_dir)
         self.context_limit = context_limit
         self.base_branch = base_branch
+
+        # Auto-load API keys from SOPS/secrets before checking setup
+        self._loaded_keys = ensure_api_keys_loaded()
+        if any(self._loaded_keys.values()):
+            loaded_names = [k for k, v in self._loaded_keys.items() if v]
+            logger.info(f"Loaded API keys from secrets: {', '.join(loaded_names)}")
+
+        self.setup = check_review_setup(self.working_dir)
 
         # Determine method
         if method and method != "auto":

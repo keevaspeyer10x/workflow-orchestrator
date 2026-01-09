@@ -1,3 +1,25 @@
+# Auto-Load API Keys Before REVIEW Phase
+
+## Problem
+API keys (OPENROUTER_API_KEY, GEMINI_API_KEY, etc.) were not automatically loaded from SOPS-encrypted secrets, requiring manual `eval $(sops -d ...)` commands.
+
+## Solution
+1. Add `ensure_api_keys_loaded()` function in `src/review/router.py`
+2. Auto-load keys from SecretsManager into environment in ReviewRouter.__init__
+3. Update APIExecutor to also try SecretsManager as fallback
+
+## Files Changed
+- `src/review/router.py` - Add ensure_api_keys_loaded(), call in __init__
+- `src/review/api_executor.py` - Use get_secret() as fallback
+
+## Implementation Complete
+- [x] Add ensure_api_keys_loaded() to router.py
+- [x] Call in ReviewRouter.__init__
+- [x] Update APIExecutor to use get_secret()
+- [x] Tests pass (58 tests)
+
+---
+
 # CORE-023-P3: Conflict Resolution Learning & Config
 
 ## Source of Truth

@@ -14,6 +14,7 @@ from typing import Optional
 from .context import ReviewContext, ReviewContextCollector
 from .prompts import get_prompt, get_tool
 from .result import ReviewResult, parse_review_output
+from ..secrets import get_secret
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +48,20 @@ class APIExecutor:
             context_limit=context_limit,
             base_branch=base_branch
         )
-        self.api_key = api_key or os.environ.get("OPENROUTER_API_KEY")
+        # Try to get API key from multiple sources:
+        # 1. Passed directly
+        # 2. Environment variable
+        # 3. SecretsManager (SOPS, GitHub repo, etc.)
+        self.api_key = api_key or os.environ.get("OPENROUTER_API_KEY") or get_secret("OPENROUTER_API_KEY")
 
         if not self.api_key:
-            raise ValueError("OPENROUTER_API_KEY environment variable not set")
+            raise ValueError(
+                "OPENROUTER_API_KEY not found. Checked:\n"
+                "  1. Environment variable\n"
+                "  2. SOPS-encrypted secrets (secrets.enc.yaml)\n"
+                "  3. GitHub private repo (if configured)\n"
+                "Run: eval \"$(sops -d secrets.enc.yaml | sed 's/: /=/' | sed 's/^/export /')\" to load keys"
+            )
 
     def execute(self, review_type: str, context_override: Optional[str] = None) -> ReviewResult:
         """
