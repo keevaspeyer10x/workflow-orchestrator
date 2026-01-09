@@ -156,6 +156,181 @@ Option D (simple subprocess) is even simpler for non-interactive batch execution
 
 ---
 
+#### CORE-025: Context Compaction Survival
+**Status:** Planned
+**Complexity:** High
+**Priority:** CRITICAL
+**Source:** User observation - Too much is forgotten after compaction, workflows derail
+
+**Description:** Context compaction (automatic summarization when context gets too long) causes catastrophic information loss. The agent forgets the active workflow, current phase, decisions made, and work in progress. Current mitigations (WF-012 state injection) are insufficient.
+
+**Problem Solved:**
+When compaction happens mid-workflow:
+- Agent forgets there's an active workflow
+- Loses track of current phase and completed items
+- Forgets architectural decisions made earlier in session
+- Forgets files it was working on and why
+- May restart work from scratch or abandon entirely
+
+This is the #1 cause of workflow abandonment in zero-human-review scenarios.
+
+**Current Mitigations (Insufficient):**
+- WF-012: Injects workflow state after compaction → Only shows phase/items, not context
+- WF-023: Detects abandonment → Reactive, not preventive
+- CONTEXT-001: North Star docs → Helps with vision, not session-specific state
+
+**Proposed Approaches:**
+
+**Option A: Aggressive Pre-Compaction Checkpoint**
+Detect when context is getting long, proactively checkpoint everything before compaction hits.
+
+```
+Context usage: 85% (approaching compaction threshold)
+─────────────────────────────────────────────────────
+⚠️  AUTO-CHECKPOINT: Saving session state...
+✓ Workflow state: EXECUTE phase, 3/5 items complete
+✓ Current task: Implementing retry logic in api/client.py
+✓ Key decisions: Using exponential backoff, max 3 retries
+✓ Files in progress: api/client.py (lines 45-120)
+✓ Pending questions: None
+✓ Checkpoint saved: cp_auto_2026-01-09_14-32
+─────────────────────────────────────────────────────
+```
+
+After compaction, inject the checkpoint summary.
+
+**Option B: Self-Managed Handover**
+When context is ~80% full, spawn a new agent session with explicit handover.
+
+```
+Context usage: 80%
+─────────────────────────────────────────────────────
+Initiating handover to fresh session...
+
+HANDOVER DOCUMENT:
+==================
+Task: Implement authentication middleware
+Workflow: wf_2026-01-09_auth (EXECUTE phase)
+Progress: 3/5 items complete
+
+Completed:
+- write_tests: 12 tests in tests/test_auth.py
+- implement_jwt_validation: src/middleware/jwt.py
+
+In Progress:
+- implement_session_handling: Started, 60% done
+- Working on: src/middleware/session.py lines 30-80
+- Approach: Using Redis for session storage (decided earlier)
+
+Pending:
+- integration_tests
+- update_docs
+
+Key Decisions Made:
+- JWT tokens expire after 1 hour (security review recommendation)
+- Using RS256 algorithm (discussed with user)
+- Session data stored in Redis, not cookies
+
+Files Modified This Session:
+- src/middleware/jwt.py (new, 145 lines)
+- src/middleware/session.py (in progress)
+- tests/test_auth.py (new, 89 lines)
+==================
+
+Spawning new session with handover context...
+```
+
+**Option C: Structured Memory System**
+Maintain an external "memory" file that survives compaction.
+
+```yaml
+# .workflow_memory.yaml (updated continuously)
+session_id: sess_2026-01-09_14-32
+workflow_id: wf_auth_middleware
+phase: EXECUTE
+
+current_task:
+  item: implement_session_handling
+  file: src/middleware/session.py
+  progress: "Implementing Redis session store, ~60% done"
+
+decisions:
+  - "JWT expiry: 1 hour (security review)"
+  - "Algorithm: RS256"
+  - "Session storage: Redis"
+
+blocked_on: null
+
+recent_actions:
+  - "Created jwt.py with validation logic"
+  - "Wrote 12 unit tests"
+  - "Started session.py implementation"
+```
+
+After compaction, agent reads this file to restore context.
+
+**Option D: Shorter Sessions with Explicit Handoff**
+Instead of fighting compaction, embrace it. Design workflows for shorter sessions with planned handoffs.
+
+- Each workflow phase = one session
+- Phase completion triggers handoff document generation
+- New session starts with handoff context
+- Never hit compaction because sessions are short
+
+**Recommendation:** Combination of A + C
+
+1. **Continuous memory file** (Option C) - Always-current state
+2. **Pre-compaction checkpoint** (Option A) - Catch what memory file misses
+3. **Post-compaction injection** - Load memory file + checkpoint into new context
+
+**Implementation:**
+
+```python
+# Hook that runs periodically or on tool calls
+def check_context_health():
+    usage = estimate_context_usage()
+
+    if usage > 0.85:
+        # Approaching danger zone
+        checkpoint = create_emergency_checkpoint()
+        update_memory_file(checkpoint)
+        warn_user("Context 85% full, checkpoint saved")
+
+    if usage > 0.95:
+        # Imminent compaction
+        trigger_handover()
+
+# After compaction detected (context suddenly small)
+def on_context_restore():
+    memory = load_memory_file()
+    checkpoint = load_latest_checkpoint()
+    inject_context(memory, checkpoint)
+    print("Session restored from checkpoint")
+```
+
+**Detection Challenge:**
+Claude Code doesn't expose context size or compaction events directly. Options:
+- Estimate from conversation length (token count heuristic)
+- Hook into Claude Code's summarization if API available
+- User-triggered checkpoint when they notice slowdown
+
+**Tasks:**
+- [ ] Design memory file schema (.workflow_memory.yaml)
+- [ ] Implement continuous memory file updates
+- [ ] Add context size estimation heuristic
+- [ ] Implement pre-compaction checkpoint trigger
+- [ ] Create handover document generator
+- [ ] Add post-compaction context injection
+- [ ] Test with artificially long sessions
+- [ ] Add `orchestrator checkpoint --emergency` for manual trigger
+- [ ] Integrate with SessionStart hook for auto-restore
+- [ ] Document compaction survival in CLAUDE.md
+
+**Why This Is Critical:**
+Without solving compaction, zero-human-review workflows will always fail on complex tasks. The agent simply cannot maintain coherence across long sessions. This is a fundamental blocker for autonomous AI coding.
+
+---
+
 #### CORE-024: Session Transcript Logging with Secret Scrubbing
 **Status:** Planned
 **Complexity:** Medium
