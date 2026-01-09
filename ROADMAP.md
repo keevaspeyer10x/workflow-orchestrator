@@ -157,6 +157,63 @@ Option D (simple subprocess) is even simpler for non-interactive batch execution
 
 ---
 
+#### CORE-026: Review Failure Resilience & API Key Recovery
+**Status:** Planned
+**Complexity:** Medium
+**Priority:** HIGH
+**Source:** CORE-023 implementation - Reviews silently failed after context compaction lost API keys
+
+**Problem:**
+During CORE-023-P1 implementation, context compaction occurred mid-session. This caused:
+1. API keys (GEMINI_API_KEY, OPENAI_API_KEY, XAI_API_KEY) to be lost from environment
+2. Reviews to fail with `ReviewRouter.execute_review() got an unexpected keyword argument 'context_override'`
+3. Agent proceeded without noticing reviews were broken
+4. Only 1 of 4 required external reviews actually ran
+5. Workflow completed with incomplete review coverage
+
+**Current Behavior (Broken):**
+- Review failures logged but not acted upon
+- No attempt to recover or reload keys
+- Agent doesn't detect that reviews are broken
+- `orchestrator finish` shows incomplete reviews but doesn't block
+
+**Desired Behavior:**
+1. **Detect API key loss:** After compaction, check if required keys are still available
+2. **Fail loudly:** If reviews fail, block workflow advancement with clear error
+3. **Prompt for recovery:** "API keys missing. Run: `eval \"$(sops -d secrets.enc.yaml ...)\"` then retry"
+4. **Retry mechanism:** After keys reloaded, retry failed reviews automatically
+5. **Block finish:** `orchestrator finish` should FAIL if required reviews didn't complete
+
+**Implementation:**
+```python
+# In cmd_complete for review items:
+def complete_review_item(item_id):
+    result = run_auto_review(review_type)
+    if not result.success:
+        if "API" in result.error or "key" in result.error.lower():
+            print("ERROR: API keys may be missing after context compaction")
+            print("Run: eval \"$(sops -d secrets.enc.yaml | sed 's/: /=/' | sed 's/^/export /')\"")
+            print("Then retry: orchestrator complete " + item_id)
+            sys.exit(1)
+        # Don't silently continue - block and require fix
+        print(f"ERROR: Review failed: {result.error}")
+        sys.exit(1)
+```
+
+**Files Affected:**
+- `src/cli.py` - Review item completion logic
+- `src/review/router.py` - Fix the `context_override` argument error
+- `src/engine.py` - Add review completion validation to finish
+
+**Success Criteria:**
+- [ ] Reviews that fail block workflow advancement
+- [ ] Clear error messages guide user to fix
+- [ ] After key reload, reviews can be retried
+- [ ] `orchestrator finish` verifies all required reviews passed
+- [ ] API key loss is detected and communicated
+
+---
+
 #### CORE-025: Context Compaction Survival
 **Status:** Planned
 **Complexity:** High
