@@ -1572,3 +1572,101 @@ The original vision of fully autonomous distributed agents with locking/claiming
 
 ### Low Priority
 
+#### CONTEXT-002: RAG/Retrieval for Knowledge Management
+**Status:** Exploration
+**Complexity:** High
+**Priority:** Low (exploratory)
+**Source:** User discussion - Managing complex processes beyond context window limits
+
+**Description:** Explore using RAG (Retrieval-Augmented Generation) to provide semantic search over learnings, PRDs, past decisions, and project knowledge. This could complement the handoff system (CORE-025) for longer-term knowledge management.
+
+**Problem Space:**
+Context windows have hard limits. Even with handoff/checkpoints, some information is lost or inaccessible:
+- "How did we solve this problem 3 months ago?"
+- "What were the tradeoffs we considered for X?"
+- "Which PRDs are relevant to this new feature?"
+- "What patterns have we learned across all projects?"
+
+**Potential Use Cases:**
+
+| Use Case | Description | Value |
+|----------|-------------|-------|
+| **Learning Retrieval** | Semantic search over LEARNINGS.md across sessions | Avoid repeating mistakes |
+| **PRD Context** | Auto-inject relevant PRD sections during PLAN | Better planning decisions |
+| **Decision History** | Surface past architectural decisions | Consistency |
+| **Cross-Project Knowledge** | Shared index across repos | Scale learnings |
+| **Review Context** | Provide reviewers with relevant past issues | Better reviews |
+
+**Comparison with Handoff (CORE-025):**
+
+| Aspect | Handoff | RAG |
+|--------|---------|-----|
+| Purpose | Survive context compaction | Query past knowledge |
+| Timing | Session boundaries | Any time |
+| Scope | Current task state | All historical knowledge |
+| Complexity | Low | High |
+| Infrastructure | Files only | Vector DB + embeddings |
+
+**Recommendation:** These are complementary. Handoff solves the immediate problem (context compaction kills workflows). RAG is a longer-term enhancement for knowledge management.
+
+**Open Questions:**
+- What embedding model? (OpenAI, local, etc.)
+- Vector DB? (Chroma, Pinecone, pgvector, local files?)
+- Index scope? (per-project, per-user, shared?)
+- How to handle updates? (re-index on commit?)
+- Cost vs benefit for small projects?
+- Privacy implications of indexing code/decisions?
+
+**Potential Architecture:**
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  LEARNINGS.md   │     │   PRDs/docs/    │     │  Session logs   │
+│  ROADMAP.md     │────▶│   CLAUDE.md     │────▶│  (scrubbed)     │
+│  Decisions      │     │   Architecture  │     │                 │
+└────────┬────────┘     └────────┬────────┘     └────────┬────────┘
+         │                       │                       │
+         └───────────────────────┼───────────────────────┘
+                                 ▼
+                    ┌─────────────────────┐
+                    │   Embedding Model   │
+                    │   (chunk + embed)   │
+                    └──────────┬──────────┘
+                               ▼
+                    ┌─────────────────────┐
+                    │    Vector Store     │
+                    │  (local or remote)  │
+                    └──────────┬──────────┘
+                               ▼
+                    ┌─────────────────────┐
+                    │   Query Interface   │
+                    │  orchestrator query │
+                    └─────────────────────┘
+```
+
+**CLI Concept:**
+```bash
+# Search learnings
+orchestrator query "authentication timeout issues"
+
+# Get context for planning
+orchestrator plan-context "add rate limiting"
+
+# Find relevant PRDs
+orchestrator prd search "user notifications"
+```
+
+**Tasks (if pursued):**
+- [ ] Research: Evaluate embedding models (cost, quality, local vs API)
+- [ ] Research: Evaluate vector stores (Chroma, pgvector, file-based)
+- [ ] Design: Define what gets indexed and when
+- [ ] Design: Define privacy/security boundaries
+- [ ] Prototype: Index LEARNINGS.md + query interface
+- [ ] Evaluate: Is the complexity worth it for typical use cases?
+
+**Decision Point:** This item is exploratory. Before implementing, need to validate that:
+1. The use cases are real (not hypothetical)
+2. Simpler solutions (grep, ctrl+f) aren't sufficient
+3. The infrastructure cost is justified
+
+---
+
