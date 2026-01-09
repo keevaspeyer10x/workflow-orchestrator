@@ -237,6 +237,9 @@ class EventType(str, Enum):
     REVIEW_STARTED = "review_started"
     REVIEW_COMPLETED = "review_completed"
     REVIEW_FAILED = "review_failed"
+    # Conflict resolution events (CORE-023-P3)
+    CONFLICT_RESOLVED = "conflict_resolved"
+    CONFLICT_ESCALATED = "conflict_escalated"
 
 
 class WorkflowEvent(BaseModel):

@@ -34,6 +34,8 @@ from typing import Optional, Literal
 # Import from existing infrastructure
 from .schema import ExtractedIntent, Constraint
 from .intent import IntentExtractor
+from .logger import log_resolution, log_escalation
+from ..user_config import UserConfig
 
 logger = logging.getLogger(__name__)
 
@@ -279,6 +281,7 @@ class LLMResolver:
         repo_path: Optional[Path] = None,
         client: Optional[LLMClient] = None,
         auto_apply_threshold: float = 0.8,
+        config: Optional[UserConfig] = None,
     ):
         """
         Initialize the LLM resolver.
@@ -287,8 +290,10 @@ class LLMResolver:
             repo_path: Path to git repository
             client: LLM client to use (auto-detected if not provided)
             auto_apply_threshold: Confidence threshold for auto-apply
+            config: User config (loaded from ~/.orchestrator/config.yaml if not provided)
         """
         self.repo_path = Path(repo_path) if repo_path else Path.cwd()
+        self.config = config or UserConfig.load()
         self.client = client or self._get_default_client()
         self.auto_apply_threshold = auto_apply_threshold
 
@@ -345,12 +350,36 @@ class LLMResolver:
         Returns:
             LLMResolutionResult with merged content or escalation info
         """
+        import time
+        start_time = time.time()
+
         logger.info(f"LLM resolving: {file_path}")
+
+        # CORE-023-P3: Check if LLM is disabled in config
+        if not self.config.llm_enabled:
+            logger.warning("LLM disabled in config, skipping")
+            result = LLMResolutionResult(
+                file_path=file_path,
+                needs_escalation=True,
+                escalation_reason="llm_disabled",
+                escalation_options=[
+                    "[A] Keep OURS - Your changes only",
+                    "[B] Keep THEIRS - Target branch changes only",
+                    "[C] Manual resolution required",
+                ],
+            )
+            log_escalation(
+                file_path=file_path,
+                reason="llm_disabled",
+                options=result.escalation_options,
+                working_dir=self.repo_path,
+            )
+            return result
 
         # Security check - skip sensitive files
         if self.is_sensitive_file(file_path):
             logger.warning(f"Sensitive file detected, skipping LLM: {file_path}")
-            return LLMResolutionResult(
+            result = LLMResolutionResult(
                 file_path=file_path,
                 needs_escalation=True,
                 escalation_reason="sensitive_file",
@@ -360,6 +389,13 @@ class LLMResolver:
                     "[C] Manual resolution required",
                 ],
             )
+            log_escalation(
+                file_path=file_path,
+                reason="sensitive_file",
+                options=result.escalation_options,
+                working_dir=self.repo_path,
+            )
+            return result
 
         # Stage 1: Extract intents
         logger.info("Stage 1: Extracting intents")
@@ -446,6 +482,25 @@ class LLMResolver:
                 "[C] Keep THEIRS",
                 "[D] Manual resolution",
             ]
+            # CORE-023-P3: Log escalation
+            log_escalation(
+                file_path=file_path,
+                reason="low_confidence",
+                options=result.escalation_options,
+                working_dir=self.repo_path,
+            )
+        else:
+            # CORE-023-P3: Log successful resolution
+            resolution_time_ms = int((time.time() - start_time) * 1000)
+            log_resolution(
+                file_path=file_path,
+                strategy=f"llm_{best_candidate.strategy}",
+                confidence=confidence,
+                resolution_time_ms=resolution_time_ms,
+                llm_used=True,
+                llm_model=self.client.model_name if self.client else None,
+                working_dir=self.repo_path,
+            )
 
         return result
 
@@ -458,9 +513,13 @@ class LLMResolver:
         Check if a file matches sensitive patterns.
 
         SECURITY: These files should NEVER be sent to external LLMs.
+
+        CORE-023-P3: Now also checks user config sensitive_globs from
+        ~/.orchestrator/config.yaml.
         """
         path_lower = path.lower()
 
+        # Check hardcoded patterns first (baseline security)
         for pattern in SENSITIVE_PATTERNS:
             # Handle glob patterns
             if fnmatch.fnmatch(path_lower, pattern.lower()):
@@ -470,6 +529,10 @@ class LLMResolver:
             if '*' not in pattern and '?' not in pattern:
                 if pattern.lower() in path_lower:
                     return True
+
+        # CORE-023-P3: Also check user config sensitive globs
+        if self.config.is_sensitive(path):
+            return True
 
         return False
 

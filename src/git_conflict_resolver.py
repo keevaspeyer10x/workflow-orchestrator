@@ -21,10 +21,13 @@ import logging
 import os
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Optional
+
+from .resolution.logger import log_resolution, log_escalation
 
 logger = logging.getLogger(__name__)
 
@@ -452,12 +455,15 @@ class GitConflictResolver:
             results=results,
         )
 
-    def apply_resolution(self, result: ResolutionResult) -> bool:
+    def apply_resolution(self, result: ResolutionResult, resolution_time_ms: int = 0) -> bool:
         """
         Apply a resolution to the working tree.
 
+        CORE-023-P3: Also logs the resolution to .workflow_log.jsonl.
+
         Args:
             result: Resolution result to apply
+            resolution_time_ms: Time taken to resolve (for logging)
 
         Returns:
             True if applied successfully
@@ -479,6 +485,15 @@ class GitConflictResolver:
             ["git", "add", result.file_path],
             cwd=self.repo_path,
             capture_output=True
+        )
+
+        # CORE-023-P3: Log the resolution
+        log_resolution(
+            file_path=result.file_path,
+            strategy=result.strategy,
+            confidence=result.confidence,
+            resolution_time_ms=resolution_time_ms,
+            working_dir=self.repo_path,
         )
 
         return True
