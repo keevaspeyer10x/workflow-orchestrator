@@ -12,7 +12,6 @@ All notable changes to the workflow-orchestrator.
   - Prevents roadmap bloat from low-value items without implementation evidence
   - Applied to both workflow.yaml and src/default_workflow.yaml
 - **WF-030: Session Isolation** - Documented multi-workflow limitation in roadmap (planned feature)
-- **WF-031: Version Check** - Documented auto-update mechanism in CLAUDE.md (deferred - auto-updates already work via session hook)
 
 ### Changed
 - **CLAUDE.md**: Added comprehensive "Automatic Updates" section explaining auto-update behavior
