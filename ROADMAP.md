@@ -1040,7 +1040,7 @@ In the REVIEW phase, before `commit_and_sync`:
 ---
 
 #### WF-027: Save Workflow Finish Summary to Archive
-**Status:** Planned
+**Status:** IMPLEMENTED (2026-01-10)
 **Complexity:** Low
 **Priority:** High - User can't see full summary
 **Source:** User request (2026-01-10) - Finish summaries truncated/hard to view in CLI
@@ -1056,10 +1056,11 @@ The `orchestrator finish` command outputs a comprehensive summary but:
 2. Include: phase summaries, skipped items, external reviews, learnings
 3. Fix LEARNINGS.md generation to ensure it's always updated
 
-**Implementation:**
-- Modify `cmd_finish` to write summary to archive file
-- Ensure LearningEngine updates LEARNINGS.md (fix bug)
-- Add archive file to final commit
+**Implementation:** ✅ DONE
+- Modified `cmd_finish` to capture output via StringIO buffer
+- Saves to `docs/archive/YYYY-MM-DD_<task-slug>_summary.md`
+- Displays file path at end: `📄 Full summary saved to: <path>`
+- LEARNINGS.md bug still needs investigation (separate issue)
 
 ---
 
