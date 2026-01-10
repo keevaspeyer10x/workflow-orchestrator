@@ -1014,6 +1014,86 @@ The existing `commit_and_sync` item could be enhanced to:
 
 ---
 
+#### WF-026: Save Review Output to Archive Before Commit
+**Status:** Planned
+**Complexity:** Low
+**Priority:** High - Preserves review evidence
+**Source:** User request (2026-01-10) - Review output truncated in CLI, lost after commit
+
+**Problem:**
+When running `minds review`, the full output is displayed in CLI but:
+1. Gets truncated for long reviews
+2. Is lost after committing (review only sees uncommitted changes)
+3. No permanent record of what issues were found/addressed
+
+**Proposed Solution:**
+In the REVIEW phase, before `commit_and_sync`:
+1. Run `minds review --timeout 90 > docs/archive/YYYY-MM-DD_<task-slug>_review.md`
+2. Add review output file to the commit
+3. Reference review file in workflow completion notes
+
+**Implementation:**
+- Add `save_review_output` step to REVIEW phase in workflow.yaml
+- Auto-generate filename from workflow task + date
+- Include in `commit_and_sync` staged files
+
+---
+
+#### WF-027: Save Workflow Finish Summary to Archive
+**Status:** Planned
+**Complexity:** Low
+**Priority:** High - User can't see full summary
+**Source:** User request (2026-01-10) - Finish summaries truncated/hard to view in CLI
+
+**Problem:**
+The `orchestrator finish` command outputs a comprehensive summary but:
+1. Output may be truncated in terminal
+2. Not saved to a file for later reference
+3. LEARNINGS.md sometimes not updated (bug observed)
+
+**Proposed Solution:**
+1. Save full finish summary to `docs/archive/YYYY-MM-DD_<task-slug>_summary.md`
+2. Include: phase summaries, skipped items, external reviews, learnings
+3. Fix LEARNINGS.md generation to ensure it's always updated
+
+**Implementation:**
+- Modify `cmd_finish` to write summary to archive file
+- Ensure LearningEngine updates LEARNINGS.md (fix bug)
+- Add archive file to final commit
+
+---
+
+#### CORE-027: Multi-Model API Reliability
+**Status:** Planned
+**Complexity:** Medium
+**Priority:** Medium
+**Source:** Approval system review (2026-01-10) - Models failing silently
+
+**Problem:**
+During multi-model reviews (`minds review`), models fail inconsistently:
+- Grok 4.1 failed after 62s (not timeout - API error?)
+- DeepSeek V3.2 failed after 63s
+- Gemini 3 Pro failed after 1s (likely rate limit)
+- No clear error messages or retry logic
+
+**Observed Failure Modes:**
+| Model | Failure Time | Likely Cause |
+|-------|--------------|--------------|
+| Grok 4.1 | 62s | Unknown API error |
+| DeepSeek V3.2 | 63s | Unknown API error |
+| Gemini 3 Pro | 1s | Rate limit or auth |
+
+**Proposed Improvements:**
+1. Better error reporting - show actual error, not just ✗
+2. Retry logic with exponential backoff for transient failures
+3. Fallback models when primary fails
+4. Health check before review (`minds status --check`)
+5. Save raw API responses for debugging
+
+**Note:** This may require changes to the `minds` CLI tool itself.
+
+---
+
 #### CONTEXT-001: Context Documents System (North Star, Architecture, UI Style Guide)
 **Status:** Planned
 **Complexity:** Medium
