@@ -20,6 +20,9 @@ All notable changes to the workflow-orchestrator.
   - `prd cleanup`: Cleans up all sessions
 - **ExecutionMode**: Added `SUBPROCESS` mode for non-tmux environments
 
+### Fixed
+- **Stale learnings in finish summary**: `orchestrator finish` now generates learning report BEFORE displaying summary, so current workflow learnings are shown instead of previous workflow's content
+
 ### Deprecated
 - `ClaudeSquadAdapter` and `squad_capabilities.py` - kept for reference but no longer used
 

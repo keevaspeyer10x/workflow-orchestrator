@@ -1375,7 +1375,19 @@ def cmd_finish(args):
             print("  Ensure API keys are loaded: eval $(sops -d secrets.enc.yaml)")
             print()
 
-        # LEARNINGS SUMMARY: Show actions vs roadmap items
+        # Generate learning report FIRST (before displaying summary)
+        # This ensures we show the CURRENT workflow's learnings, not stale ones
+        if not args.skip_learn:
+            print("Generating learning report...")
+            try:
+                learning = LearningEngine(args.dir or '.')
+                report = learning.generate_learning_report()
+                print(f"✓ Learning report saved to LEARNINGS.md")
+                print()
+            except Exception as e:
+                print(f"Warning: Could not generate learning report: {e}")
+
+        # LEARNINGS SUMMARY: Show actions vs roadmap items (now from freshly generated report)
         try:
             learnings_path = Path(args.dir or '.') / 'LEARNINGS.md'
             if learnings_path.exists():
@@ -1438,16 +1450,6 @@ def cmd_finish(args):
         print()
         print("Reply to confirm next steps or start a new workflow.")
         print("=" * 60)
-
-        # Trigger learning if available
-        if not args.skip_learn:
-            print("\nGenerating learning report...")
-            try:
-                learning = LearningEngine(args.dir or '.')
-                report = learning.generate_learning_report()
-                print(f"✓ Learning report saved to LEARNINGS.md")
-            except Exception as e:
-                print(f"Warning: Could not generate learning report: {e}")
 
 
 def cmd_analyze(args):
