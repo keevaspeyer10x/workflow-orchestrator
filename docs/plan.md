@@ -1,92 +1,79 @@
-# CORE-023-P3: Conflict Resolution - Learning & Config
+# Plan: Parallel Agent Approval System
 
 ## Overview
+Implement SQLite-backed approval queue for coordinating parallel AI agents that need human approval at workflow gates.
 
-Add learning from conflict patterns and configuration support to the conflict resolution system.
+## Architecture (from multi-model review consensus)
 
-## Deliverables
-
-### 1. Conflict Learning Module (`src/resolution/learning.py`)
-
-Create a module that:
-- Aggregates conflict resolution data from `.workflow_log.jsonl`
-- Identifies patterns (e.g., files with frequent conflicts)
-- Generates summaries for the LEARN phase
-- Suggests roadmap additions when patterns detected
-
-**Key Functions:**
-- `get_conflict_summary(working_dir)` - Returns conflict stats for LEARN phase
-- `get_conflict_patterns(working_dir, session_window)` - Identifies repeat offenders
-- `suggest_roadmap_additions(patterns)` - Generates ROADMAP suggestions
-
-### 2. LEARN Phase Integration
-
-Modify the LEARN phase to surface conflict data:
-- Add conflict summary output during `document_learnings` item
-- Show: most conflicted files, strategies used, resolution success rate
-- Display suggestions based on patterns (e.g., "src/cli.py had conflicts 5 times")
-
-### 3. Auto-add Roadmap Suggestions
-
-When conflict patterns are detected:
-- Format suggestion as markdown (consistent with existing ROADMAP.md format)
-- Append to ROADMAP.md under "## Conflict-Related Suggestions"
-- Log the action with a message like "Added suggestion to ROADMAP.md: ..."
-- Inform user (don't ask) - this is an automatic learning action
-
-### 4. Extended Config File Support (`src/user_config.py`)
-
-Extend UserConfig to support:
-- Per-file resolution policies (e.g., "package-lock.json" -> "regenerate")
-- Additional sensitive file globs (override defaults)
-- LLM enable/disable flag (already exists, verify)
-
-**Config schema addition:**
-```yaml
-resolution:
-  file_policies:
-    "package-lock.json": "regenerate"
-    "*.lock": "theirs"
-    ".env*": "ours"
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    ORCHESTRATOR CONTROL PLANE                   │
+├─────────────────────────────────────────────────────────────────┤
+│  ┌─────────┐    ┌─────────┐    ┌─────────┐                     │
+│  │ Agent 1 │    │ Agent 2 │    │ Agent N │                     │
+│  │ (tmux)  │    │ (tmux)  │    │ (tmux)  │                     │
+│  └────┬────┘    └────┬────┘    └────┬────┘                     │
+│       │              │              │                           │
+│       └──────────────┴──────────────┘                           │
+│                      │                                          │
+│                      ▼                                          │
+│          ┌───────────────────────┐                             │
+│          │   SQLite Queue        │                             │
+│          │   (WAL mode)          │                             │
+│          └───────────┬───────────┘                             │
+│                      │                                          │
+│                      ▼                                          │
+│          ┌───────────────────────┐                             │
+│          │  orchestrator pending │  ◄── User checks this       │
+│          │  orchestrator review  │  ◄── User approves here     │
+│          └───────────────────────┘                             │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-### 5. Tests (`tests/test_conflict_learning.py`)
+## Implementation Steps
 
-Test coverage for:
-- `get_conflict_summary()` - returns correct stats from log
-- `get_conflict_patterns()` - identifies repeat conflict files
-- `suggest_roadmap_additions()` - generates correct markdown
-- `UserConfig.get_file_policy()` - returns correct policy for path
-- Integration with LEARN phase
+### 1. ApprovalQueue (src/approval_queue.py) ✅ DONE
+- SQLite with WAL mode for concurrent access
+- State machine: PENDING → APPROVED|REJECTED → CONSUMED
+- Heartbeat tracking for stuck agents
+- Methods: submit(), check(), consume(), decide(), pending()
 
-### 6. Documentation Update (CLAUDE.md)
+### 2. ApprovalGate (src/approval_gate.py)
+- Agent-side interface for requesting approval
+- Polling with exponential backoff (2s → 10s → 30s)
+- Auto-approval rules by risk level
+- Timeout handling (default 30 min)
+- tmux notification on gate hit
 
-Add section on:
-- Configuration options for conflict resolution
-- How conflict learning works
-- Per-file resolution policies
+### 3. CLI Commands (src/cli.py)
+- `orchestrator pending` - List all waiting agents
+- `orchestrator review` - Batch approval interface
+- `orchestrator approve <id>` - Approve single request
+- `orchestrator reject <id>` - Reject single request
 
-## Implementation Order
+### 4. Auto-Approval Rules
+| Risk Level | Auto-Approve | Examples |
+|------------|--------------|----------|
+| LOW | ✅ Always | Read files, run tests, lint, PLAN phase |
+| MEDIUM | ⚠️ With logging | Create files, small edits (<100 lines) |
+| HIGH | ❌ Human review | >100 lines, configs, deps |
+| CRITICAL | 🚫 Never | rm -rf, force push, prod deploy |
 
-1. Extend `UserConfig` with per-file policies
-2. Create `src/resolution/learning.py`
-3. Add roadmap suggestion logic
-4. Integrate with LEARN phase (CLI output)
-5. Write tests
-6. Update CLAUDE.md
+### 5. Integration with TmuxAdapter
+- Agents use ApprovalGate when hitting workflow gates
+- Pending command shows tmux session info
+- Review command can attach to agent session
 
-## Files to Modify/Create
+## Files to Create/Modify
+- `src/approval_queue.py` ✅ DONE
+- `src/approval_gate.py` (new)
+- `src/cli.py` (add pending, review commands)
+- `tests/test_approval_queue.py` (new)
+- `tests/test_approval_gate.py` (new)
 
-| File | Action |
-|------|--------|
-| `src/user_config.py` | Extend with file_policies |
-| `src/resolution/learning.py` | Create new module |
-| `src/resolution/__init__.py` | Export new functions |
-| `tests/test_conflict_learning.py` | Create new test file |
-| `CLAUDE.md` | Add configuration docs |
-
-## Dependencies
-
-- Existing `src/resolution/logger.py` (log format)
-- Existing `src/user_config.py` (config patterns)
-- Existing `src/schema.py` (EventType.CONFLICT_RESOLVED)
+## Success Criteria
+1. Agents can submit approval requests and poll for decisions
+2. User can see all pending approvals with `orchestrator pending`
+3. User can batch approve/reject with `orchestrator review`
+4. Stale agents are detected and expired after timeout
+5. All tests pass

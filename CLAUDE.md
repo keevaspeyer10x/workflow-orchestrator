@@ -228,6 +228,11 @@ orchestrator finish
 | `orchestrator prd attach <task>` | Attach to agent's tmux window |
 | `orchestrator prd done <task>` | Mark task complete, terminate session |
 | `orchestrator prd cleanup` | Clean up all agent sessions |
+| `orchestrator approval pending` | List pending approval requests from parallel agents |
+| `orchestrator approval approve <id>` | Approve an agent's request |
+| `orchestrator approval reject <id>` | Reject an agent's request |
+| `orchestrator approval approve-all` | Approve all pending requests |
+| `orchestrator approval stats` | Show approval queue statistics |
 
 ## Workflow Rules
 

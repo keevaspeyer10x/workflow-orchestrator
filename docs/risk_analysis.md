@@ -1,33 +1,53 @@
-# Risk Analysis: CORE-023-P3
+# Risk Analysis: Parallel Agent Approval System
 
-## Risk Assessment
+## Risk Summary
+**Overall Risk: LOW** - Additive feature with well-understood failure modes
 
-### Low Risk
+## Identified Risks (from multi-model review)
 
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| Log file format changes | May break existing log readers | Use existing event types, extend details field |
-| Config file migration | Old configs may not have new fields | Use defaults for missing fields |
-| Roadmap format mismatch | Auto-added suggestions may look different | Follow exact existing ROADMAP.md format |
+### 1. Queue Corruption
+- **Risk**: Concurrent writes corrupt approval state
+- **Likelihood**: Medium (without mitigation)
+- **Impact**: High - agents get stuck or miss approvals
+- **Mitigation**: SQLite with WAL mode handles concurrent access natively
+- **Residual Risk**: Low
 
-### Medium Risk
+### 2. Orphaned/Stuck Agents
+- **Risk**: Agent crashes or disconnects, leaving pending requests
+- **Likelihood**: Medium
+- **Impact**: Medium - queue fills with stale requests
+- **Mitigation**: Heartbeat tracking + TTL expiration (default 60 min)
+- **Residual Risk**: Low
 
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| Performance with large log files | Slow pattern analysis | Limit session window (default: 10 sessions) |
-| Race conditions in log/roadmap writes | Corrupted files | Use file locking (already in engine.py) |
+### 3. Duplicate Approvals
+- **Risk**: Same request approved twice, causing duplicate actions
+- **Likelihood**: Low
+- **Impact**: Medium - duplicate work or conflicts
+- **Mitigation**: State machine with "consume exactly once" semantics
+- **Residual Risk**: Very Low
 
-### No Significant Risks
+### 4. Missing Context in Review
+- **Risk**: User approves without understanding what they're approving
+- **Likelihood**: Medium
+- **Impact**: High - bad code gets approved
+- **Mitigation**: Structured payloads with operation, files, diff summary
+- **Residual Risk**: Low
 
-This is a low-risk addition:
-- Extends existing functionality (logging, config)
-- No changes to core resolution logic
-- No external API calls added
-- Backwards compatible (new config fields are optional)
+### 5. Auto-Approval Bypasses Safety
+- **Risk**: Risky operations auto-approved incorrectly
+- **Likelihood**: Low
+- **Impact**: High - dangerous commands executed
+- **Mitigation**: Conservative risk classification, CRITICAL never auto-approves
+- **Residual Risk**: Low
 
-## Testing Strategy
+## Impact Assessment
+- **Files Changed**: 3 new files, 1 modified (cli.py)
+- **Breaking Changes**: None - additive feature
+- **Dependencies**: None new (uses stdlib sqlite3)
+- **Backward Compatibility**: Full - existing workflows unaffected
 
-1. Unit tests for learning module
-2. Integration tests with mock log files
-3. Config validation tests
-4. Manual verification of ROADMAP format
+## Rollback Plan
+1. Remove CLI commands from cli.py
+2. Delete approval_queue.py and approval_gate.py
+3. Delete .workflow_approvals.db
+4. No data migration needed

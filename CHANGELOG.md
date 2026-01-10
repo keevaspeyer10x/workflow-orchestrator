@@ -2,6 +2,21 @@
 
 All notable changes to the workflow-orchestrator.
 
+## [2.4.0] - 2026-01-10
+
+### Added
+- **Parallel Agent Approval System**: Coordinate multiple Claude Code agents with approval gates
+  - `ApprovalQueue`: SQLite-backed queue with WAL mode for concurrent agent access
+  - `ApprovalGate`: Agent-side interface with exponential backoff polling (2s → 10s → 30s)
+  - State machine: PENDING → APPROVED/REJECTED → CONSUMED (consume-once semantics)
+  - Risk-based auto-approval: LOW auto-approves, CRITICAL always requires human
+  - Heartbeat tracking + TTL expiration for stuck agent detection
+  - CLI commands: `approval pending`, `approve`, `reject`, `approve-all`, `stats`, `cleanup`
+  - 29 new tests covering queue operations, concurrency, and maintenance
+
+### Changed
+- **CLAUDE.md**: Added documentation for approval commands in Key Commands table
+
 ## [2.3.0] - 2026-01-10
 
 ### Added

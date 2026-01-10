@@ -2680,6 +2680,144 @@ def cmd_sessions(args):
         sys.exit(1)
 
 
+def _find_approval_request(queue, request_id: str):
+    """Find an approval request by full ID or prefix match."""
+    # Try exact match first
+    if queue.get(request_id):
+        return request_id
+    # Try prefix match in pending requests
+    for req in queue.pending():
+        if req.id.startswith(request_id):
+            return req.id
+    return None
+
+
+def cmd_approval(args):
+    """Manage parallel agent approval requests."""
+    from src.approval_queue import ApprovalQueue
+    from datetime import datetime, timezone
+
+    working_dir = Path(args.dir or '.')
+    action = args.approval_action
+
+    queue = ApprovalQueue(working_dir / '.workflow_approvals.db')
+
+    if action == "pending":
+        # List pending approval requests
+        pending = queue.pending()
+
+        if not pending:
+            print("No pending approval requests.")
+            return
+
+        print(f"\n{'='*60}")
+        print(f" PENDING APPROVAL REQUESTS ({len(pending)})")
+        print(f"{'='*60}\n")
+
+        for req in pending:
+            # Calculate wait time
+            try:
+                created = datetime.fromisoformat(req.created_at)
+                # Normalize timezone: if naive, assume UTC
+                if created.tzinfo is None:
+                    created = created.replace(tzinfo=timezone.utc)
+                now = datetime.now(timezone.utc)
+                wait_secs = (now - created).total_seconds()
+                if wait_secs < 60:
+                    wait_str = f"{int(wait_secs)}s"
+                elif wait_secs < 3600:
+                    wait_str = f"{int(wait_secs // 60)}m"
+                else:
+                    wait_str = f"{int(wait_secs // 3600)}h {int((wait_secs % 3600) // 60)}m"
+            except (ValueError, TypeError):
+                wait_str = "?"
+
+            risk_emoji = {"low": "🟢", "medium": "🟡", "high": "🟠", "critical": "🔴"}.get(req.risk_level, "⚪")
+            print(f"  [{req.id[:8]}] {risk_emoji} {req.risk_level.upper()}")
+            print(f"    Agent: {req.agent_id}")
+            print(f"    Phase: {req.phase}")
+            print(f"    Operation: {req.operation}")
+            print(f"    Waiting: {wait_str}")
+            if req.context:
+                files = req.context.get('files', [])
+                if files:
+                    print(f"    Files: {', '.join(files[:3])}{'...' if len(files) > 3 else ''}")
+            print("")
+
+        print(f"{'='*60}")
+        print("Commands:")
+        print(f"  orchestrator approval approve <id>  - Approve request")
+        print(f"  orchestrator approval reject <id>   - Reject request")
+        print(f"  orchestrator approval approve-all   - Approve all pending")
+        print(f"{'='*60}\n")
+
+    elif action == "approve":
+        request_id = args.request_id
+        if not request_id:
+            print("Error: 'approval approve' requires REQUEST_ID")
+            sys.exit(1)
+
+        found = _find_approval_request(queue, request_id)
+        if not found:
+            print(f"Request not found: {request_id}")
+            sys.exit(1)
+
+        reason = getattr(args, 'reason', None) or "Approved via CLI"
+        if queue.approve(found, reason):
+            print(f"✅ Approved: {found[:8]}...")
+        else:
+            print(f"Failed to approve: {found}")
+            sys.exit(1)
+
+    elif action == "reject":
+        request_id = args.request_id
+        if not request_id:
+            print("Error: 'approval reject' requires REQUEST_ID")
+            sys.exit(1)
+
+        found = _find_approval_request(queue, request_id)
+        if not found:
+            print(f"Request not found: {request_id}")
+            sys.exit(1)
+
+        reason = getattr(args, 'reason', None) or "Rejected via CLI"
+        if queue.reject(found, reason):
+            print(f"❌ Rejected: {found[:8]}...")
+        else:
+            print(f"Failed to reject: {found}")
+            sys.exit(1)
+
+    elif action == "approve-all":
+        reason = getattr(args, 'reason', None) or "Batch approved via CLI"
+        count = queue.approve_all(reason)
+        if count > 0:
+            print(f"✅ Approved {count} request(s)")
+        else:
+            print("No pending requests to approve.")
+
+    elif action == "stats":
+        stats = queue.stats()
+        print("\nApproval Queue Statistics:")
+        print(f"  Pending:  {stats.get('pending', 0)}")
+        print(f"  Approved: {stats.get('approved', 0)}")
+        print(f"  Rejected: {stats.get('rejected', 0)}")
+        print(f"  Consumed: {stats.get('consumed', 0)}")
+        print(f"  Expired:  {stats.get('expired', 0)}")
+        print("")
+
+    elif action == "cleanup":
+        days = getattr(args, 'days', None) or 7
+        expired = queue.expire_stale(timeout_minutes=60)
+        cleaned = queue.cleanup(days=days)
+        print(f"Expired {expired} stale request(s)")
+        print(f"Cleaned {cleaned} old record(s) (older than {days} days)")
+
+    else:
+        print(f"Unknown action: {action}")
+        print("Available actions: pending, approve, reject, approve-all, stats, cleanup")
+        sys.exit(1)
+
+
 def cmd_update_models(args):
     """Update the model registry from OpenRouter API (CORE-017)."""
     from src.model_registry import get_model_registry
@@ -3791,6 +3929,17 @@ Examples:
     sessions_parser.add_argument('--older', type=int, default=30, help='Remove sessions older than N days (default: 30)')
     sessions_parser.add_argument('-d', '--dir', help='Working directory')
     sessions_parser.set_defaults(func=cmd_sessions)
+
+    # Approval command (Parallel Agent Coordination)
+    approval_parser = subparsers.add_parser('approval', help='Manage parallel agent approval requests')
+    approval_parser.add_argument('approval_action',
+                                 choices=['pending', 'approve', 'reject', 'approve-all', 'stats', 'cleanup'],
+                                 help='Approval action')
+    approval_parser.add_argument('request_id', nargs='?', help='Request ID (for approve/reject)')
+    approval_parser.add_argument('--reason', help='Reason for approval/rejection')
+    approval_parser.add_argument('--days', type=int, default=7, help='Cleanup records older than N days (default: 7)')
+    approval_parser.add_argument('-d', '--dir', help='Working directory')
+    approval_parser.set_defaults(func=cmd_approval)
 
     # PRD command (Phase 6)
     prd_parser = subparsers.add_parser('prd', help='Execute PRD mode with multiple concurrent agents')

@@ -107,3 +107,78 @@
 | Multiple spawn same task | Idempotent - returns existing |
 | Kill non-existent task | No error, logs warning |
 | Attach to completed task | Error with helpful message |
+
+---
+
+# Parallel Agent Approval System Test Cases
+
+## ApprovalQueue Tests (test_approval_queue.py)
+
+### Basic Operations
+| Test | Description |
+|------|-------------|
+| `test_submit_creates_pending_request` | Submit creates request with PENDING status |
+| `test_check_returns_status` | Check returns correct status for request |
+| `test_check_returns_none_for_unknown` | Check returns None for unknown ID |
+| `test_decide_approves_request` | Decide changes status to APPROVED |
+| `test_decide_rejects_request` | Decide changes status to REJECTED |
+| `test_consume_marks_consumed` | Consume marks approved request as CONSUMED |
+| `test_consume_fails_for_pending` | Cannot consume pending request |
+| `test_consume_once_semantics` | Cannot consume same request twice |
+
+### Concurrent Access
+| Test | Description |
+|------|-------------|
+| `test_concurrent_submits` | Multiple agents can submit simultaneously |
+| `test_concurrent_reads` | Multiple agents can check status simultaneously |
+| `test_wal_mode_enabled` | WAL journal mode is active |
+
+### Maintenance
+| Test | Description |
+|------|-------------|
+| `test_heartbeat_updates_timestamp` | Heartbeat updates last_heartbeat |
+| `test_expire_stale_marks_expired` | Stale requests get expired |
+| `test_cleanup_removes_old_consumed` | Old consumed requests deleted |
+| `test_stats_returns_counts` | Stats returns correct counts by status |
+
+## ApprovalGate Tests (test_approval_gate.py)
+
+### Polling
+| Test | Description |
+|------|-------------|
+| `test_request_approval_submits` | request_approval submits to queue |
+| `test_polling_returns_on_approval` | Polling exits when approved |
+| `test_polling_returns_on_rejection` | Polling exits when rejected |
+| `test_timeout_returns_timeout` | Returns TIMEOUT after timeout period |
+| `test_exponential_backoff` | Polling interval increases over time |
+
+### Auto-Approval
+| Test | Description |
+|------|-------------|
+| `test_low_risk_auto_approves` | LOW risk operations auto-approve |
+| `test_critical_never_auto_approves` | CRITICAL always requires human |
+| `test_phase_affects_risk` | PLAN phase more permissive than EXECUTE |
+
+## CLI Tests
+
+### orchestrator pending
+| Test | Description |
+|------|-------------|
+| `test_pending_shows_waiting_agents` | Shows all pending requests |
+| `test_pending_empty_message` | Shows message when no pending |
+| `test_pending_shows_wait_time` | Shows how long each has been waiting |
+
+### orchestrator review
+| Test | Description |
+|------|-------------|
+| `test_review_lists_pending` | Shows pending requests for review |
+| `test_review_approve_single` | Can approve single request |
+| `test_review_reject_single` | Can reject single request |
+| `test_review_approve_all` | Can approve all pending |
+
+## Integration Tests
+| Test | Description |
+|------|-------------|
+| `test_full_flow_single_agent` | Agent submits, user approves, agent continues |
+| `test_full_flow_parallel_agents` | Multiple agents coordinate correctly |
+| `test_tmux_session_integration` | Works with TmuxAdapter sessions |
