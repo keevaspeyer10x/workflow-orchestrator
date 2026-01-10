@@ -1739,8 +1739,147 @@ orchestrator prd cleanup        # Clean orphaned sessions
 
 ---
 
+#### PRD-008: Zero-Config Workflow Enforcement for Agents
+**Status:** ✅ **CRITICAL** - Enables actual dogfooding
+**Complexity:** MEDIUM (auto-setup + context injection)
+**Priority:** HIGH - Required for PRD-007 to be usable
+**Source:** User feedback (2026-01-11) - "Simple prompt shouldn't require 125 pages of docs"
+
+**Problem Statement:**
+PRD-007 built a complete Agent Workflow Enforcement System, but using it requires:
+1. Manually starting orchestrator server (`python -m src.orchestrator.api`)
+2. Manually creating `agent_workflow.yaml` in target repo
+3. Manually importing and using Agent SDK
+4. Reading 125 pages of documentation to understand how
+
+**This defeats the purpose.** Agents should just say:
+```
+I want to implement user authentication using workflow enforcement.
+```
+
+**Current UX (TOO COMPLEX):**
+```
+1. Start server: cd workflow-orchestrator && python -m src.orchestrator.api
+2. Create agent_workflow.yaml with phases/gates/tools
+3. Import AgentClient and write boilerplate
+4. Claim task, track progress, submit artifacts
+5. Read AGENT_SDK_GUIDE.md, WORKFLOW_SPEC.md, DEPLOYMENT_GUIDE.md
+```
+
+**Desired UX (SIMPLE):**
+```
+User: "I want to implement user auth using workflow enforcement."
+Agent: [Auto-detects orchestrator, auto-generates workflow.yaml, auto-uses SDK]
+```
+
+**Required Auto-Setup Components:**
+
+| Component | Current | Needed |
+|-----------|---------|--------|
+| **Server Discovery** | Manual start | Auto-detect running server OR auto-start in background |
+| **Workflow YAML** | Manual creation | Auto-generate from task description + repo conventions |
+| **Agent SDK Usage** | Manual import/setup | Auto-inject SDK as context for AI agents |
+| **Prompt Context** | User must explain | Claude Code reads AGENT_SDK_GUIDE.md automatically |
+
+**Proposed Solution:**
+
+**1. Auto-Detection / Auto-Start**
+```python
+# In agent context initialization
+def ensure_orchestrator_running():
+    # Check if server running on localhost:8000
+    if not orchestrator_reachable():
+        # Start in background: orchestrator serve --daemon
+        start_orchestrator_daemon()
+    return orchestrator_url
+```
+
+**2. Auto-Generate Workflow YAML**
+```python
+def generate_workflow_yaml(task_description: str, repo_analysis: dict):
+    # Analyze repo: tests/, src/, language, conventions
+    # Generate appropriate workflow.yaml with:
+    # - Phases based on project type
+    # - Tools based on repo languages
+    # - Gates based on test framework detected
+    return workflow_yaml
+```
+
+**3. Auto-Inject SDK Context for Claude Code**
+
+Add to Claude Code's session initialization:
+```python
+# When orchestrator detected in repo or ~/workflow-orchestrator exists:
+if orchestrator_available():
+    inject_context([
+        "docs/AGENT_SDK_GUIDE.md",  # How to use SDK
+        "src/agent_sdk/client.py",   # SDK code for reference
+    ])
+```
+
+**4. Simple Command Pattern**
+```bash
+# In any repo
+orchestrator enforce "Implement user authentication"
+
+# Auto-generates:
+# 1. agent_workflow.yaml (if not exists)
+# 2. Starts server (if not running)
+# 3. Injects SDK context for agent
+# 4. Provides simple prompt to agent
+```
+
+**Simple Prompt for Agents:**
+```
+Task: Implement user authentication
+
+The workflow orchestrator is running and agent_workflow.yaml has been created.
+Use the Agent SDK (src.agent_sdk.client.AgentClient) to:
+1. Claim this task
+2. Follow the enforced workflow phases
+3. Submit artifacts at gates
+4. Track progress through completion
+
+The SDK is already imported and ready to use.
+```
+
+**Integration with PRD-007:**
+This makes PRD-007 actually usable. Without this, PRD-007 is "technically complete" but requires too much manual setup for anyone to actually use it.
+
+**Files to Create:**
+- `src/orchestrator/auto_setup.py` - Auto-detection, auto-start, auto-generation
+- `src/orchestrator/workflow_generator.py` - Generate workflow.yaml from task + repo
+- `src/cli.py` - Add `orchestrator enforce <task>` command
+- `.claude/agent_sdk_context.md` - Auto-injected context for Claude Code sessions
+
+**Files to Modify:**
+- Claude Code session initialization (if we control it)
+- OR: Add to CLAUDE.md with instructions for agent to read SDK guide
+
+**Success Criteria:**
+- Agent can use workflow enforcement with single simple prompt
+- No manual server startup required
+- No manual YAML creation required
+- No manual SDK setup required
+- Works in any repo with one command: `orchestrator enforce "task"`
+
+**Dogfooding Test:**
+```
+# In a different repo
+$ orchestrator enforce "Add rate limiting to API"
+
+✓ Orchestrator running on localhost:8000
+✓ Generated agent_workflow.yaml (5 phases, 3 gates)
+✓ Agent SDK context injected
+✓ Task ready - tell your agent: "Start the rate limiting task"
+```
+
+**Recommendation:** ✅ **IMPLEMENT IMMEDIATELY** - PRD-007 is not truly "complete" without this UX layer.
+
+---
+
 #### PRD-007: Agent Workflow Enforcement System
-**Status:** ✅ COMPLETED - Days 14-20 (2026-01-11)
+**Status:** ✅ COMPLETED - Days 14-20 (2026-01-11) | ⚠️ **Requires PRD-008 for usability**
 **Complexity:** High
 **Priority:** CRITICAL - Blocks reliable parallel execution
 **Source:** Multi-agent orchestration session feedback (2026-01-10)
