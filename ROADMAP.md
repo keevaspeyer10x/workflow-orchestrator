@@ -793,9 +793,9 @@ Medium effort, high impact on workflow completion rates. Session hooks and state
 ---
 
 #### WF-024: Risk-Based Multi-AI Phase Reviews
-**Status:** ⚠️ **DEFER** - Implement basic phase reviews first, then optimize
-**Complexity:** HIGH (full risk-based routing system)
-**Priority:** Medium (nice-to-have optimization)
+**Status:** ✅ **IMPLEMENT Phase 1** - Plan review for complex projects, defer full system
+**Complexity:** MEDIUM (Phase 1: PLAN review) / HIGH (Full system)
+**Priority:** HIGH (Phase 1: PLAN review) / Medium (Full risk-based system)
 **Source:** User discussion - Robust zero-human-review workflows need AI oversight at each phase
 
 **Description:** Extend multi-model AI review beyond just the REVIEW phase. Add AI review gates at PLAN approval and after high-risk EXECUTE steps, with model selection based on task risk level and cost efficiency.
@@ -961,45 +961,65 @@ orchestrator complete write_tests --risk high  # Force higher review
 | Catch Rate | Good (late) | Better (earlier) | Best (optimized) |
 
 **Current Evidence:**
-- ❌ No data on how often bad plans slip through
-- ❌ No data on test design issues
+- ✅ User feedback: Plan review valuable for complex projects
+- ✅ Conceptually sound (catch issues early, prevent wasted implementation)
+- ❌ No data on how often bad plans slip through (but logical risk)
+- ❌ No data on test design issues yet
 - ❌ No evidence that full risk system is needed vs simple "always review PLAN"
-- ✅ Conceptually sound (catch issues early)
 
 **YAGNI Check:**
-- Solving a **hypothetical** problem (bad plans, bad tests)
-- Would be **completely fine** without this for 12+ months
-- Current solution **works** (REVIEW phase catches issues, just later)
-- **Simpler solution exists:** Just add PLAN review for everyone, skip complexity
+- **Phase 1 (PLAN review):** Solving a **likely** problem (bad plans → wasted work)
+  - Would be **better** with this for complex projects
+  - Current solution **works** but wastes time on bad approaches
+- **Full risk system:** Solving **hypothetical** optimization problem
+  - Would be **completely fine** without tiers/risk routing for 12+ months
+  - Premature optimization
 
-**Recommendation:** ⚠️ **DEFER full system** - Consider simpler "PLAN + REVIEW" first
+**Recommendation:** ✅ **IMPLEMENT Phase 1 (PLAN review)**, ⚠️ **DEFER Phase 2-3** (risk-based system)
 
 **Reasoning:**
-This is over-engineered for current needs. The valuable insight is "review earlier (PLAN phase)", not "complex risk-based routing system". Simpler approach:
+User is right - plan reviews for complex projects can prevent hours of wasted implementation on flawed approaches. However, the full risk-based routing system is over-engineered. **Phased approach:**
 
-1. **Phase 1 (Now):** Add simple PLAN review (all workflows get it)
-2. **Validate:** Does PLAN review catch real issues?
-3. **Phase 2 (If needed):** Add risk-based optimization based on data
+**Phase 1 (IMPLEMENT NOW):** Simple PLAN review
+- Add `orchestrator review-plan` command
+- Integrate with `advance` from PLAN phase (optional or configurable)
+- 2 external models review plan before human approval
+- Simple pass/fail with feedback
+- **Especially valuable for complex projects**
+- Medium complexity, high value for catching bad approaches early
 
-Full risk-based system is premature without evidence it's needed. Start simple, evolve based on learnings.
+**Phase 2 (VALIDATE):** Collect data
+- Does PLAN review catch real issues in practice?
+- What % of plans need revision after review?
+- Is there correlation with project complexity?
 
-**Simpler Alternative:**
-Just add mandatory PLAN review (2 models) before human approval. Skip all the risk levels, tier selection, and per-item configuration. If that works well, then consider optimizing.
+**Phase 3 (IF NEEDED):** Risk-based optimization
+- Only add risk tiers, test review, execute review if data shows need
+- May never be needed if simple PLAN review is sufficient
 
-**Tasks (if pursuing full system):**
+**Implementation Priority:**
+Start with Phase 1 - simple, valuable, addresses user's concern about complex projects without over-engineering.
+
+**Tasks for Phase 1 (PLAN review):**
+- [ ] Implement `orchestrator review-plan` command
+- [ ] Add plan review integration to `advance` from PLAN phase
+- [ ] Make plan review optional/configurable (some workflows may not need it)
+- [ ] Display AI feedback before human approval gate
+- [ ] Support 2-model review (e.g., Gemini + GPT)
+- [ ] Track plan review results in workflow log
+- [ ] Document in CLAUDE.md with guidance on when to use
+- [ ] Test with complex vs simple projects
+
+**Tasks for Phase 2-3 (if data justifies):**
 - [ ] Add `risk` field to ChecklistItemDef schema
 - [ ] Create ModelTier enum (economy, standard, premium)
 - [ ] Add tier-based model selection to ReviewRouter
-- [ ] Implement `review-plan` command
-- [ ] Add plan review gate to `advance` from PLAN phase
 - [ ] Add test review hook after `write_tests` completion
 - [ ] Add risk-based review trigger in `complete` command
 - [ ] Add `phase_reviews` configuration section
 - [ ] Create economy-tier review prompts (concise, focused)
 - [ ] Add `--show-risk` flag to status command
-- [ ] Add `--risk` override to complete command
 - [ ] Track per-phase review costs
-- [ ] Document risk levels and review flow in CLAUDE.md
 
 **Cost Consideration:**
 
