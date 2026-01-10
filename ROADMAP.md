@@ -1301,6 +1301,33 @@ orchestrator prd cleanup        # Clean orphaned sessions
 
 ---
 
+#### PRD-005: Integrate ApprovalGate with TmuxAdapter
+**Status:** Planned
+**Complexity:** Medium
+**Priority:** High - Enables human-in-the-loop for parallel agents
+**Source:** Approval system implementation (2026-01-10)
+**Depends On:** ApprovalQueue (v2.4.0), TmuxAdapter (v2.3.0)
+
+**Description:** Integrate the new ApprovalGate with TmuxAdapter so spawned parallel agents automatically pause at workflow gates and wait for human approval.
+
+**Current State:**
+- `ApprovalQueue` and `ApprovalGate` exist but are standalone
+- `TmuxAdapter` spawns agents but doesn't coordinate approval
+- Agents would need to call `gate.request_approval()` at gates
+
+**Implementation:**
+1. Inject ApprovalGate into agent prompts when spawning via TmuxAdapter
+2. Modify agent workflow to call gate.request_approval() at PLAN approval, EXECUTE approval, etc.
+3. Add `orchestrator approval watch` command to auto-approve/notify on new requests
+4. Consider integration with Happy app for mobile approval notifications
+
+**Files to Modify:**
+- `src/prd/tmux_adapter.py` - Inject gate initialization
+- `src/approval_gate.py` - Add integration hooks
+- `src/cli.py` - Add `approval watch` command
+
+---
+
 ### Short-term (Low Effort)
 
 #### CORE-009: Constraints File Flag
