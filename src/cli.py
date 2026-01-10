@@ -1290,22 +1290,31 @@ def cmd_finish(args):
         engine.complete_workflow(notes=notes)
         completed_at = engine.state.completed_at
 
+        # WF-027: Capture summary to buffer for saving to file
+        from io import StringIO
+        summary_buffer = StringIO()
+
+        def output(line=""):
+            """Print to stdout and capture to buffer."""
+            print(line)
+            summary_buffer.write(line + "\n")
+
         # CORE-011: Print comprehensive completion summary
-        print("=" * 60)
-        print("✓ WORKFLOW COMPLETED")
-        print("=" * 60)
-        print(f"Task: {task_description}")
+        output("=" * 60)
+        output("✓ WORKFLOW COMPLETED")
+        output("=" * 60)
+        output(f"Task: {task_description}")
 
         # Show duration if times are available
         if started_at and completed_at:
             duration = completed_at - started_at
-            print(f"Duration: {format_duration(duration)}")
-        print()
+            output(f"Duration: {format_duration(duration)}")
+        output()
 
         # Phase summary table
         if summary:
-            print("PHASE SUMMARY")
-            print("-" * 60)
+            output("PHASE SUMMARY")
+            output("-" * 60)
             total_completed = 0
             total_skipped = 0
             total_items = 0
@@ -1316,18 +1325,18 @@ def cmd_finish(args):
                 total_completed += completed
                 total_skipped += skipped
                 total_items += total
-                print(f"  {phase_id:12} {total} items ({completed} completed, {skipped} skipped)")
-            print("-" * 60)
-            print(f"  {'Total':12} {total_items} items ({total_completed} completed, {total_skipped} skipped)")
-            print()
+                output(f"  {phase_id:12} {total} items ({completed} completed, {skipped} skipped)")
+            output("-" * 60)
+            output(f"  {'Total':12} {total_items} items ({total_completed} completed, {total_skipped} skipped)")
+            output()
 
         # Skipped items summary (enhanced with full reasons, item_id, and gate highlighting)
         if all_skipped:
             total_skipped_count = sum(len(items) for items in all_skipped.values())
-            print(f"SKIPPED ITEMS ({total_skipped_count} total - review for justification)")
-            print("-" * 60)
+            output(f"SKIPPED ITEMS ({total_skipped_count} total - review for justification)")
+            output("-" * 60)
             for phase_id, items in all_skipped.items():
-                print(f"  [{phase_id}]")
+                output(f"  [{phase_id}]")
                 for item_id, reason in items:
                     # Look up item definition for description and step type
                     item_def = engine.get_item_definition(item_id)
@@ -1342,57 +1351,57 @@ def cmd_finish(args):
 
                     # Highlight gate bypasses prominently
                     if is_gate:
-                        print(f"    ⚠️  GATE BYPASSED: {item_id}: {description}")
+                        output(f"    ⚠️  GATE BYPASSED: {item_id}: {description}")
                     else:
-                        print(f"    • {item_id}: {description}")
+                        output(f"    • {item_id}: {description}")
 
                     # Show full reason, indented for readability
                     for line in reason.split('\n'):
-                        print(f"      → {line}")
-                print()
+                        output(f"      → {line}")
+                output()
         else:
-            print("SKIPPED ITEMS: None (all items completed)")
-            print()
+            output("SKIPPED ITEMS: None (all items completed)")
+            output()
 
         # REVIEW MODEL VISIBILITY: Show which models reviewed each phase
         review_info = engine.state.metadata.get("review_models", {})
         if review_info:
-            print("EXTERNAL REVIEWS PERFORMED")
-            print("-" * 60)
+            output("EXTERNAL REVIEWS PERFORMED")
+            output("-" * 60)
             for phase_id, models in review_info.items():
                 if models:
-                    print(f"  {phase_id}:")
+                    output(f"  {phase_id}:")
                     for model_name, status in models.items():
                         status_icon = "✓" if status.get("success") else "✗"
                         issues = status.get("issues", 0)
-                        print(f"    {status_icon} {model_name}: {issues} issues found")
-            print()
+                        output(f"    {status_icon} {model_name}: {issues} issues found")
+            output()
         else:
-            print("EXTERNAL REVIEWS")
-            print("-" * 60)
-            print("  ⚠️  No external model reviews recorded!")
-            print("  External reviews are REQUIRED for code changes.")
-            print("  Ensure API keys are loaded: eval $(sops -d secrets.enc.yaml)")
-            print()
+            output("EXTERNAL REVIEWS")
+            output("-" * 60)
+            output("  ⚠️  No external model reviews recorded!")
+            output("  External reviews are REQUIRED for code changes.")
+            output("  Ensure API keys are loaded: eval $(sops -d secrets.enc.yaml)")
+            output()
 
         # Generate learning report FIRST (before displaying summary)
         # This ensures we show the CURRENT workflow's learnings, not stale ones
         if not args.skip_learn:
-            print("Generating learning report...")
+            output("Generating learning report...")
             try:
                 learning = LearningEngine(args.dir or '.')
                 report = learning.generate_learning_report()
-                print(f"✓ Learning report saved to LEARNINGS.md")
-                print()
+                output(f"✓ Learning report saved to LEARNINGS.md")
+                output()
             except Exception as e:
-                print(f"Warning: Could not generate learning report: {e}")
+                output(f"Warning: Could not generate learning report: {e}")
 
         # LEARNINGS SUMMARY: Show actions vs roadmap items (now from freshly generated report)
         try:
             learnings_path = Path(args.dir or '.') / 'LEARNINGS.md'
             if learnings_path.exists():
-                print("LEARNINGS SUMMARY")
-                print("-" * 60)
+                output("LEARNINGS SUMMARY")
+                output("-" * 60)
                 content = learnings_path.read_text()
 
                 # Parse actions from learnings
@@ -1414,20 +1423,38 @@ def cmd_finish(args):
                             roadmap_items.append(item[:60])
 
                 if immediate_actions:
-                    print("  IMMEDIATE ACTIONS:")
+                    output("  IMMEDIATE ACTIONS:")
                     for action in immediate_actions[:5]:
-                        print(f"    → {action}")
+                        output(f"    → {action}")
 
                 if roadmap_items:
-                    print("  ROADMAP ITEMS:")
+                    output("  ROADMAP ITEMS:")
                     for item in roadmap_items[:5]:
-                        print(f"    ○ {item}")
+                        output(f"    ○ {item}")
 
                 if not immediate_actions and not roadmap_items:
-                    print("  No specific actions identified. Review LEARNINGS.md manually.")
-                print()
+                    output("  No specific actions identified. Review LEARNINGS.md manually.")
+                output()
         except Exception as e:
             print(f"Warning: Could not parse LEARNINGS.md: {e}", file=sys.stderr)
+
+        # WF-027: Save summary to archive file
+        working_dir = Path(args.dir or '.')
+        archive_dir = working_dir / 'docs' / 'archive'
+        archive_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate filename from date and task slug
+        from datetime import datetime
+        import re
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        task_slug = re.sub(r'[^a-z0-9]+', '-', task_description.lower())[:40].strip('-')
+        summary_filename = f"{date_str}_{task_slug}_summary.md"
+        summary_path = archive_dir / summary_filename
+
+        try:
+            summary_path.write_text(summary_buffer.getvalue())
+        except Exception as e:
+            print(f"Warning: Could not save summary to {summary_path}: {e}", file=sys.stderr)
 
         # Next steps prompt
         print("=" * 60)
@@ -1447,6 +1474,8 @@ def cmd_finish(args):
         print("    • Any follow-up tasks?")
         print("    • Questions about the implementation?")
         print("    • Ready to close this session?")
+        print()
+        print(f"  📄 Full summary saved to: {summary_path}")
         print()
         print("Reply to confirm next steps or start a new workflow.")
         print("=" * 60)
