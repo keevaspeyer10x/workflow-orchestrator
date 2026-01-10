@@ -1817,16 +1817,67 @@ if orchestrator_available():
     ])
 ```
 
-**4. Simple Command Pattern**
+**4. Simple Command Pattern with Execution Mode**
 ```bash
-# In any repo
+# In any repo - DEFAULT: Sequential (single agent, proven robust)
 orchestrator enforce "Implement user authentication"
+
+# OR: Parallel execution with sub-agents (when ready for multi-agent)
+orchestrator enforce "Implement user authentication" --parallel
+
+# OR: Explicit sequential (same as default)
+orchestrator enforce "Implement user authentication" --sequential
 
 # Auto-generates:
 # 1. agent_workflow.yaml (if not exists)
 # 2. Starts server (if not running)
 # 3. Injects SDK context for agent
 # 4. Provides simple prompt to agent
+# 5. Configures execution mode (sequential by default)
+```
+
+**Execution Modes:**
+
+| Mode | Flag | Description | When to Use |
+|------|------|-------------|-------------|
+| **Sequential** | (default) or `--sequential` | Single agent works through phases linearly | Default until multi-agent proven robust |
+| **Parallel** | `--parallel` | Spawns sub-agents for parallelizable work | After PRD-004, PRD-007, PRD-014 validated |
+
+**Sequential Mode (Default):**
+- Single Claude Code agent
+- Works through PLAN → TDD → IMPL → REVIEW → VERIFY sequentially
+- Proven workflow (current orchestrator behavior)
+- Lower complexity, easier debugging
+- **Recommended until parallel agent coordination is battle-tested**
+
+**Parallel Mode (Opt-in):**
+- Spawns multiple agents via `orchestrator prd spawn`
+- Agents coordinate through orchestrator server
+- State management prevents conflicts
+- Approval gates for coordination decisions
+- **Only use after dogfooding validates robustness**
+
+**Default Rationale:**
+Sequential mode is default because:
+- Multi-agent coordination is new (PRD-007 just completed)
+- File conflicts not yet solved (PRD-014 exploratory)
+- Spawning stability needs validation (PRD-004 recently fixed)
+- Single-agent workflow is proven and reliable
+
+**When to Switch Default:**
+After dogfooding shows:
+- ✅ Multi-agent spawning stable (no crashes, cleanup works)
+- ✅ State coordination prevents race conditions
+- ✅ File conflicts resolved or rare
+- ✅ Approval gates handle coordination well
+- ✅ Performance benefit clear (>30% faster)
+
+**Configuration:**
+```yaml
+# orchestrator.yaml
+execution:
+  default_mode: "sequential"  # or "parallel" when proven
+  allow_parallel: true         # Can users opt-in to --parallel?
 ```
 
 **Simple Prompt for Agents:**
