@@ -107,19 +107,57 @@ This installs the orchestrator AND enables automatic updates for future sessions
 
 **Note:** Auto-updates only update the orchestrator code. Your repo-specific files (`workflow.yaml`, workflow state, logs) are never modified.
 
-## Happy Integration (Optional)
+## Parallel Agent Spawning (PRD Execution)
 
-If the user uses [Happy](https://happy.engineering/) to access Claude Code from mobile, configure the orchestrator to spawn sessions using Happy:
+Spawn multiple Claude Code agents to work on tasks in parallel using tmux sessions.
+
+### Quick Start
+
+```bash
+# Spawn 3 parallel agents
+orchestrator prd spawn --count 3
+
+# List active agents
+orchestrator prd sessions
+
+# Watch an agent work (attaches to tmux)
+orchestrator prd attach task-1
+
+# Mark task complete (terminates session)
+orchestrator prd done task-1
+
+# Clean up all sessions
+orchestrator prd cleanup
+```
+
+### How It Works
+
+1. **TmuxAdapter** (default): Spawns agents in tmux windows
+   - Sessions persist if orchestrator crashes
+   - You can attach to watch/interact with agents
+   - Requires tmux installed
+
+2. **SubprocessAdapter** (fallback): Fire-and-forget subprocess spawning
+   - Used when tmux not available (CI, containers)
+   - Logs captured to `.wfo_logs/`
+   - No attach capability
+
+### Happy Integration (Mobile Access)
+
+If you use [Happy](https://happy.engineering/) to access Claude Code from mobile, spawned agents will appear in your Happy app:
 
 ```bash
 # One-time global setup (persists across all repos)
 orchestrator config set claude_binary happy
 
-# Or per-session override
-CLAUDE_BINARY=happy orchestrator prd spawn --count 3
+# Now all spawned agents appear in Happy!
+orchestrator prd spawn --count 3
 ```
 
-This allows Claude Squad sessions to appear in the Happy mobile app.
+With Happy configured:
+- Start parallel agents from your phone
+- Monitor agent progress in the Happy app
+- Seamless handoff between mobile and desktop
 
 ## Using the Orchestrator
 
@@ -185,6 +223,11 @@ orchestrator finish
 | `orchestrator config get KEY` | Get configuration value |
 | `orchestrator secrets sources` | Show available secret sources |
 | `orchestrator secrets test NAME` | Test if a secret is accessible |
+| `orchestrator prd spawn --count N` | Spawn N parallel agents |
+| `orchestrator prd sessions` | List active agent sessions |
+| `orchestrator prd attach <task>` | Attach to agent's tmux window |
+| `orchestrator prd done <task>` | Mark task complete, terminate session |
+| `orchestrator prd cleanup` | Clean up all agent sessions |
 
 ## Workflow Rules
 
