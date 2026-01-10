@@ -156,6 +156,14 @@ You are the final check - the skeptical senior engineer this code hasn't had.
 - **What did the AI likely miss?** Think about the blind spots of coding agents
 - **Is this the right solution?** Or is it solving the wrong problem?
 
+## Architectural Principles
+
+Check if the code adheres to these non-negotiable principles:
+
+- **Stand-alone, agent-agnostic design**: The orchestrator must work independently of Claude Code. Does this code introduce tight coupling to any specific AI coding assistant (Claude Code, Cursor, Windsurf, Codex)? Does it assume CLAUDE.md exists? Does it require specific environment features?
+- **CLI-first, local-first**: Should work in vanilla terminal without any AI agent. Does this code require a specific IDE or agent to function?
+- **Environment independence**: Must work in CI/CD pipelines, Docker containers, and bare-metal servers without special dependencies on AI coding environments.
+
 ## Changed Files
 {changed_files}
 
