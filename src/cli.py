@@ -2841,9 +2841,119 @@ def cmd_approval(args):
         print(f"Expired {expired} stale request(s)")
         print(f"Cleaned {cleaned} old record(s) (older than {days} days)")
 
+    elif action == "watch":
+        import subprocess
+        import shutil
+
+        once = getattr(args, 'once', False)
+        interval = getattr(args, 'interval', 5)
+        seen_ids = set()
+
+        print("👀 Watching for approval requests...")
+        print("   Press Ctrl+C to stop\n")
+
+        def notify_tmux_bell():
+            """Trigger tmux bell for Happy app notifications."""
+            if shutil.which("tmux"):
+                try:
+                    subprocess.run(
+                        ["tmux", "send-keys", "-t", ":", ""],
+                        capture_output=True,
+                        timeout=2
+                    )
+                    # Send bell character
+                    subprocess.run(
+                        ["tmux", "run-shell", "echo -e '\\a'"],
+                        capture_output=True,
+                        timeout=2
+                    )
+                except (subprocess.SubprocessError, FileNotFoundError):
+                    pass
+
+        try:
+            while True:
+                pending = queue.pending()
+                new_requests = [r for r in pending if r.id not in seen_ids]
+
+                if new_requests:
+                    notify_tmux_bell()
+                    print(f"\n{'='*50}")
+                    print(f"⏳ NEW APPROVAL REQUEST(S): {len(new_requests)}")
+                    print(f"{'='*50}")
+
+                    for req in new_requests:
+                        risk_emoji = {"low": "🟢", "medium": "🟡", "high": "🟠", "critical": "🔴"}.get(req.risk_level, "⚪")
+                        print(f"\n  {risk_emoji} [{req.id[:8]}] {req.risk_level.upper()}")
+                        print(f"    Agent: {req.agent_id}")
+                        print(f"    Phase: {req.phase}")
+                        print(f"    Operation: {req.operation}")
+                        if req.context:
+                            files = req.context.get('files', [])
+                            if files:
+                                print(f"    Files: {', '.join(files[:3])}")
+                        seen_ids.add(req.id)
+
+                    print(f"\n  Run: orchestrator approval approve <id>")
+                    print(f"  Or:  orchestrator approval approve-all")
+                    print(f"{'='*50}\n")
+
+                if once:
+                    if not pending:
+                        print("No pending requests.")
+                    break
+
+                import time
+                time.sleep(interval)
+
+        except KeyboardInterrupt:
+            print("\n\n👋 Watch stopped.")
+
+    elif action == "summary":
+        summary = queue.decision_summary()
+
+        print(f"\n{'='*60}")
+        print(f" DECISION SUMMARY")
+        print(f"{'='*60}\n")
+
+        auto = summary.get("auto_approved", [])
+        human = summary.get("human_approved", [])
+        rejected = summary.get("rejected", [])
+
+        if auto:
+            print(f"  🤖 AUTO-APPROVED ({len(auto)}):")
+            for item in auto[:10]:  # Limit display
+                print(f"    • {item['operation']}")
+                print(f"      Rationale: {item.get('rationale', item.get('reason', 'N/A'))}")
+            if len(auto) > 10:
+                print(f"    ... and {len(auto) - 10} more")
+            print("")
+
+        if human:
+            print(f"  ✅ HUMAN APPROVED ({len(human)}):")
+            for item in human[:10]:
+                print(f"    • {item['operation']}")
+                if item.get('reason'):
+                    print(f"      Reason: {item['reason']}")
+            if len(human) > 10:
+                print(f"    ... and {len(human) - 10} more")
+            print("")
+
+        if rejected:
+            print(f"  ❌ REJECTED ({len(rejected)}):")
+            for item in rejected[:10]:
+                print(f"    • {item['operation']}")
+                if item.get('reason'):
+                    print(f"      Reason: {item['reason']}")
+            print("")
+
+        if not (auto or human or rejected):
+            print("  No decisions recorded yet.")
+
+        print(f"{'='*60}\n")
+
     else:
         print(f"Unknown action: {action}")
-        print("Available actions: pending, approve, reject, approve-all, stats, cleanup")
+        print("Available actions: pending, approve, reject, approve-all, stats, cleanup, watch, summary")
         sys.exit(1)
 
 
@@ -3962,11 +4072,13 @@ Examples:
     # Approval command (Parallel Agent Coordination)
     approval_parser = subparsers.add_parser('approval', help='Manage parallel agent approval requests')
     approval_parser.add_argument('approval_action',
-                                 choices=['pending', 'approve', 'reject', 'approve-all', 'stats', 'cleanup'],
+                                 choices=['pending', 'approve', 'reject', 'approve-all', 'stats', 'cleanup', 'watch', 'summary'],
                                  help='Approval action')
     approval_parser.add_argument('request_id', nargs='?', help='Request ID (for approve/reject)')
     approval_parser.add_argument('--reason', help='Reason for approval/rejection')
     approval_parser.add_argument('--days', type=int, default=7, help='Cleanup records older than N days (default: 7)')
+    approval_parser.add_argument('--once', action='store_true', help='Check once and exit (for watch)')
+    approval_parser.add_argument('--interval', type=int, default=5, help='Poll interval in seconds (for watch)')
     approval_parser.add_argument('-d', '--dir', help='Working directory')
     approval_parser.set_defaults(func=cmd_approval)
 

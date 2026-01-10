@@ -165,7 +165,7 @@ class ApprovalQueue:
                     last_heartbeat TEXT,
 
                     -- Indexes for common queries
-                    CHECK (status IN ('pending', 'approved', 'rejected', 'consumed', 'expired'))
+                    CHECK (status IN ('pending', 'approved', 'rejected', 'consumed', 'expired', 'auto_approved'))
                 )
             """)
 
@@ -494,3 +494,70 @@ class ApprovalQueue:
                 result[req.agent_id] = []
             result[req.agent_id].append(req)
         return result
+
+    def mark_auto_approved(self, request_id: str, reason: str = "") -> bool:
+        """
+        Mark a request as auto-approved (for transparency logging).
+
+        Args:
+            request_id: The request ID
+            reason: Reason/rationale for auto-approval
+
+        Returns:
+            True if marked, False if not found
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connection() as conn:
+            cursor = conn.execute("""
+                UPDATE approvals
+                SET status = 'auto_approved', decided_at = ?, decision_reason = ?
+                WHERE id = ? AND status = 'pending'
+            """, (now, reason, request_id))
+            conn.commit()
+
+            success = cursor.rowcount > 0
+            if success:
+                logger.info(f"Auto-approved {request_id}: {reason}")
+            return success
+
+    def decision_summary(self) -> dict:
+        """
+        Get a summary of all decisions grouped by type.
+
+        Returns:
+            Dict with 'auto_approved', 'human_approved', 'rejected' lists
+        """
+        with self._connection() as conn:
+            rows = conn.execute("""
+                SELECT * FROM approvals
+                WHERE status IN ('auto_approved', 'approved', 'rejected', 'consumed')
+                ORDER BY decided_at DESC
+            """).fetchall()
+
+            summary = {
+                "auto_approved": [],
+                "human_approved": [],
+                "rejected": [],
+            }
+
+            for row in rows:
+                req = ApprovalRequest.from_row(row)
+                entry = {
+                    "id": req.id,
+                    "agent_id": req.agent_id,
+                    "operation": req.operation,
+                    "phase": req.phase,
+                    "risk_level": req.risk_level,
+                    "reason": req.decision_reason or "",
+                    "rationale": req.decision_reason or "",
+                    "decided_at": req.decided_at,
+                }
+
+                if row["status"] == "auto_approved":
+                    summary["auto_approved"].append(entry)
+                elif row["status"] in ("approved", "consumed"):
+                    summary["human_approved"].append(entry)
+                elif row["status"] == "rejected":
+                    summary["rejected"].append(entry)
+
+            return summary

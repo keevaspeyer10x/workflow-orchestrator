@@ -233,6 +233,8 @@ orchestrator finish
 | `orchestrator approval reject <id>` | Reject an agent's request |
 | `orchestrator approval approve-all` | Approve all pending requests |
 | `orchestrator approval stats` | Show approval queue statistics |
+| `orchestrator approval watch` | Watch for new approval requests (with tmux bell notification) |
+| `orchestrator approval summary` | Show decision summary (auto-approved vs human-approved) |
 
 ## Workflow Rules
 

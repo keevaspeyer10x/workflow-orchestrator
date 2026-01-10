@@ -1383,7 +1383,7 @@ orchestrator prd cleanup        # Clean orphaned sessions
 ---
 
 #### PRD-005: Integrate ApprovalGate with TmuxAdapter
-**Status:** Planned
+**Status:** Implemented (2026-01-10)
 **Complexity:** Medium
 **Priority:** High - Enables human-in-the-loop for parallel agents
 **Source:** Approval system implementation (2026-01-10)
@@ -1391,21 +1391,43 @@ orchestrator prd cleanup        # Clean orphaned sessions
 
 **Description:** Integrate the new ApprovalGate with TmuxAdapter so spawned parallel agents automatically pause at workflow gates and wait for human approval.
 
-**Current State:**
-- `ApprovalQueue` and `ApprovalGate` exist but are standalone
-- `TmuxAdapter` spawns agents but doesn't coordinate approval
-- Agents would need to call `gate.request_approval()` at gates
+**Delivered:**
+- `ApprovalGate.get_decision_log()` - Tracks all decisions with rationale
+- `ApprovalGate._generate_rationale()` - Risk-level explanations for transparency
+- `ApprovalQueue.decision_summary()` - Groups decisions by type (auto/human)
+- `ApprovalQueue.mark_auto_approved()` - Status for auto-approved requests
+- `generate_approval_gate_instructions()` - Prompt injection for agents
+- `orchestrator approval watch` - CLI command with tmux bell notifications
+- `orchestrator approval summary` - Decision summary display
+- 50 new tests for PRD-005 functionality
+
+**Files Modified:**
+- `src/approval_gate.py` - Decision logging, rationale generation
+- `src/approval_queue.py` - Decision summary, auto-approved status
+- `src/prd/tmux_adapter.py` - Prompt injection function
+- `src/cli.py` - Watch and summary commands
+- `tests/test_approval_gate.py` - New test file (21 tests)
+
+**Future Work:** PRD-006 below
+
+---
+
+#### PRD-006: Auto-Inject ApprovalGate in TmuxAdapter.spawn_agent()
+**Status:** Planned
+**Complexity:** Low
+**Priority:** Medium - Improves developer experience
+**Source:** PRD-005 implementation learnings (2026-01-10)
+**Depends On:** PRD-005 (Implemented)
+
+**Description:** Automatically inject ApprovalGate instructions into agent prompts when spawning via TmuxAdapter, eliminating the need for manual prompt modification.
 
 **Implementation:**
-1. Inject ApprovalGate into agent prompts when spawning via TmuxAdapter
-2. Modify agent workflow to call gate.request_approval() at PLAN approval, EXECUTE approval, etc.
-3. Add `orchestrator approval watch` command to auto-approve/notify on new requests
-4. Consider integration with Happy app for mobile approval notifications
+1. Modify `TmuxAdapter.spawn_agent()` to call `generate_approval_gate_instructions()`
+2. Append gate instructions to agent prompt files automatically
+3. Add flag `--no-approval-gate` to opt-out if needed
 
 **Files to Modify:**
-- `src/prd/tmux_adapter.py` - Inject gate initialization
-- `src/approval_gate.py` - Add integration hooks
-- `src/cli.py` - Add `approval watch` command
+- `src/prd/tmux_adapter.py` - Modify spawn_agent() to inject instructions
 
 ---
 

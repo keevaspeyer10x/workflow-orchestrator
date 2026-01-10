@@ -31,8 +31,9 @@ import time
 import subprocess
 import logging
 from enum import Enum
-from typing import Optional
+from typing import Optional, List
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from .approval_queue import ApprovalQueue, ApprovalRequest, RiskLevel
 
@@ -109,6 +110,7 @@ class ApprovalGate:
         self.agent_id = agent_id
         self.auto_approval_rules = auto_approval_rules or DEFAULT_AUTO_APPROVAL_RULES
         self.enable_notifications = enable_notifications
+        self._decision_log: List[dict] = []
 
     def request_approval(
         self,
@@ -140,6 +142,15 @@ class ApprovalGate:
         """
         # Check auto-approval
         if self._should_auto_approve(risk_level, phase):
+            rationale = self._generate_rationale(risk_level, phase, operation)
+            self._log_decision(
+                operation=operation,
+                risk_level=risk_level,
+                phase=phase,
+                status="auto_approved",
+                rationale=rationale,
+                context=context,
+            )
             logger.info(f"Auto-approved: {operation} (risk={risk_level}, phase={phase})")
             return WaitResult.AUTO_APPROVED
 
@@ -154,6 +165,17 @@ class ApprovalGate:
 
         request_id = self.queue.submit(request)
         self._notify_user(request)
+
+        # Log that we're awaiting decision
+        self._log_decision(
+            operation=operation,
+            risk_level=risk_level,
+            phase=phase,
+            status="awaiting_decision",
+            rationale=f"Requires human approval: {risk_level} risk in {phase} phase",
+            context=context,
+            request_id=request_id,
+        )
 
         # Poll for decision
         return self._poll_for_decision(request_id, timeout_minutes)
@@ -266,6 +288,95 @@ class ApprovalGate:
         secs = int(elapsed % 60)
         print(f"\r⏳ Waiting for approval... {mins}m {secs}s (next check in {next_check}s)   ",
               end="", flush=True)
+
+    def _log_decision(
+        self,
+        operation: str,
+        risk_level: str,
+        phase: str,
+        status: str,
+        rationale: str,
+        context: Optional[dict] = None,
+        request_id: Optional[str] = None,
+    ) -> None:
+        """
+        Log a decision for transparency.
+
+        Args:
+            operation: Description of the operation
+            risk_level: Risk level (low, medium, high, critical)
+            phase: Workflow phase
+            status: Decision status (auto_approved, awaiting_decision, approved, rejected)
+            rationale: Human-readable explanation of why this decision was made
+            context: Additional context
+            request_id: Queue request ID if submitted
+        """
+        self._decision_log.append({
+            "operation": operation,
+            "risk_level": risk_level,
+            "phase": phase,
+            "status": status,
+            "rationale": rationale,
+            "context": context or {},
+            "request_id": request_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+
+    def _generate_rationale(self, risk_level: str, phase: str, operation: str) -> str:
+        """
+        Generate a human-readable rationale for auto-approval.
+
+        Args:
+            risk_level: The risk level
+            phase: The workflow phase
+            operation: The operation description
+
+        Returns:
+            Explanation of why this was auto-approved
+        """
+        if risk_level == "low":
+            return (
+                f"Auto-approved: Low risk operation in {phase} phase. "
+                "Low risk operations (read files, run tests, lint) are safe to proceed automatically."
+            )
+        elif risk_level == "medium":
+            return (
+                f"Auto-approved: Medium risk in {phase} phase. "
+                f"Medium risk operations are auto-approved in PLAN/VERIFY/LEARN phases "
+                "as they don't make persistent changes. Logged for transparency."
+            )
+        else:
+            # Should not reach here for auto-approve, but handle gracefully
+            return f"Auto-approved: {risk_level} risk in {phase} phase."
+
+    def get_decision_log(self) -> List[dict]:
+        """
+        Get the decision log for this session.
+
+        Returns:
+            List of decision entries with operation, risk, phase, rationale, timestamp
+        """
+        return self._decision_log.copy()
+
+    def get_decision_summary(self) -> dict:
+        """
+        Get a summary of decisions grouped by type.
+
+        Returns:
+            Dict with 'auto_approved', 'human_required', 'approved', 'rejected' lists
+        """
+        summary = {
+            "auto_approved": [],
+            "human_required": [],
+        }
+
+        for entry in self._decision_log:
+            if entry["status"] == "auto_approved":
+                summary["auto_approved"].append(entry)
+            else:
+                summary["human_required"].append(entry)
+
+        return summary
 
 
 def create_gate(

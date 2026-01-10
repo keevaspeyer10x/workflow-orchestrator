@@ -48,6 +48,84 @@ def get_claude_binary() -> str:
     return "claude"
 
 
+def generate_approval_gate_instructions(agent_id: str, db_path: str) -> str:
+    """
+    Generate instructions for an agent to use the ApprovalGate.
+
+    These instructions are injected into the agent's prompt so it knows
+    to pause at workflow gates and request human approval.
+
+    Args:
+        agent_id: Identifier for this agent
+        db_path: Path to the approval database
+
+    Returns:
+        Markdown-formatted instructions for the agent
+    """
+    return f"""
+## Approval Gate Integration (PRD-005)
+
+You are running as part of a parallel agent system. You MUST request human approval
+at certain workflow gates before proceeding with risky operations.
+
+### Risk Classification Guide
+
+Classify each operation by risk level:
+
+| Risk Level | Examples | Approval |
+|------------|----------|----------|
+| **low** | Read files, run tests, lint, format | Auto-approved |
+| **medium** | Create files, small edits (<50 lines), install deps | Auto in PLAN/VERIFY, human in EXECUTE |
+| **high** | Major refactoring (>100 lines), config changes, deps | Always requires human |
+| **critical** | Force push, delete branches, prod deploy, rm -rf | Always requires human |
+
+### How to Request Approval
+
+Before risky operations in EXECUTE phase, request approval:
+
+```python
+from src.approval_gate import create_gate
+
+# Initialize gate (once at start)
+gate = create_gate(agent_id="{agent_id}", db_path="{db_path}")
+
+# Before risky operations
+result = gate.request_approval(
+    phase="EXECUTE",
+    operation="Modify database schema",  # Human-readable description
+    risk_level="high",  # low, medium, high, critical
+    context={{"files": ["schema.py"], "lines_changed": 150}}
+)
+
+if result == WaitResult.REJECTED:
+    print("Operation rejected by human")
+    # Handle rejection gracefully
+```
+
+### When to Request Approval
+
+1. **EXECUTE phase** - Before making changes to files, configs, or dependencies
+2. **High/Critical risk** - Always request, regardless of phase
+3. **Irreversible operations** - Always request (force push, deletions)
+
+### Auto-Approval (Transparency)
+
+Low-risk and some medium-risk operations are auto-approved for efficiency.
+All decisions (auto and human) are logged for transparency.
+At the end of your session, report what was auto-approved so the human knows.
+
+### Waiting for Approval
+
+When you submit a high-risk request:
+1. The request appears in `orchestrator approval pending`
+2. Wait for human to run `orchestrator approval approve <id>`
+3. Your gate.request_approval() call will return when decided
+
+Agent ID: {agent_id}
+Approval DB: {db_path}
+"""
+
+
 @dataclass
 class TmuxConfig:
     """Configuration for tmux-based agent management."""
