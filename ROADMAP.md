@@ -1546,6 +1546,159 @@ orchestrator detect-completions --dry-run
 
 ---
 
+#### WF-034: Post-Workflow Self-Assessment & Adherence Validation
+**Status:** ✅ **RECOMMENDED** - Critical for dogfooding and continuous improvement
+**Complexity:** LOW (checklist) to MEDIUM (automated validation)
+**Priority:** HIGH - Ensures workflows are actually followed
+**Source:** User feedback (2026-01-11) - Agent completed PRD but didn't use parallel agents or run third-party reviews
+
+**Problem Statement:**
+AI agents complete tasks but fail to follow the orchestrator's workflow recommendations:
+1. **Parallel agents not used** - PRD says "tasks can be done in parallel" but agent works sequentially
+2. **Reviews skipped** - Agent doesn't run third-party model reviews
+3. **No systematic feedback capture** - Insights about what went well/poorly are lost
+4. **Workflow adherence unmeasured** - No way to validate the orchestrator itself was followed
+
+**Real-World Example:**
+User feedback from a PRD implementation:
+```
+Should Have Used Parallel Agents
+The PRD explicitly stated: "Each task can be done in parallel by separate agents"
+I should have launched 4 agents in parallel. This would have been faster and
+followed the orchestrator workflow properly.
+
+No Third-Party Model Reviews
+I did not perform multi-model code reviews. For reliability improvements
+specifically, it would have been valuable to have other models review the changes.
+```
+
+**Root Cause:**
+- No post-workflow validation that recommendations were followed
+- No structured way to capture feedback about workflow effectiveness
+- Orchestrator doesn't enforce its own workflow (meta-problem)
+
+**Proposed Solutions:**
+
+**Phase 1: Self-Assessment Checklist (LOW complexity, immediate value)**
+
+Add to LEARN phase in workflow.yaml:
+```yaml
+- id: "workflow_adherence_check"
+  name: "Workflow Adherence Self-Assessment"
+  description: "Validate that orchestrator workflow was followed correctly"
+  required: true
+  notes:
+    - "[check] Did you use parallel agents when PRD/plan recommended it?"
+    - "[check] Did you run all 5 third-party model reviews (security, quality, consistency, holistic, vibe-coding)?"
+    - "[check] Did you use 'orchestrator status' before each action?"
+    - "[check] Did you complete all required items (no skips without justification)?"
+    - "[check] Did you document learnings and propose roadmap items?"
+    - "[feedback] Capture structured feedback: What went well? What challenges? What could improve?"
+```
+
+**Phase 2: Automated Validation (MEDIUM complexity)**
+
+Add `orchestrator validate-adherence` command that checks:
+```bash
+# Analyze workflow log for adherence
+orchestrator validate-adherence
+
+OUTPUT:
+✓ Parallel agents: Used (4 agents spawned for PRD tasks)
+✗ Third-party reviews: MISSING - No external model reviews detected
+✓ Status checks: Frequent (23 status checks during workflow)
+✓ Required items: All completed (0 unjustified skips)
+⚠ Learnings: Brief (3 learnings documented, consider more detail)
+
+ADHERENCE SCORE: 80% (4/5 criteria met)
+```
+
+Detection methods:
+- **Parallel agents**: Check `.workflow_log.jsonl` for `prd spawn` commands
+- **Reviews**: Check for `review_completed` events with external models (not DEFERRED)
+- **Status checks**: Count `orchestrator status` calls in session transcript
+- **Required items**: Validate no required items skipped without reason
+- **Learnings**: Check length/detail of `document_learnings` notes
+
+**Phase 3: Feedback Capture Template**
+
+Create `orchestrator feedback` command:
+```bash
+orchestrator feedback --workflow wf_95ec1970
+
+PROMPT:
+1. Did you use multi-agents? (yes/no/not-recommended)
+2. What went well? (1-2 sentences)
+3. What challenges did you encounter? (1-2 sentences)
+4. What could be improved? (1-2 sentences)
+5. Did you run third-party model reviews? (yes/no/deferred)
+6. Additional notes:
+
+OUTPUT → .workflow_feedback.jsonl (structured for analysis)
+```
+
+**Phase 4: Workflow Enforcement for Orchestrator Itself (MEDIUM complexity)**
+
+Create `orchestrator-meta.yaml` - a workflow for using the orchestrator:
+- Dogfooding: Orchestrator enforces its own usage
+- PLAN phase: Check if parallel agents should be used
+- REVIEW phase: Enforce third-party model reviews
+- VERIFY phase: Validate adherence checklist completed
+
+**Success Criteria:**
+- [ ] Adherence checklist added to default workflow LEARN phase
+- [ ] `orchestrator validate-adherence` command implemented
+- [ ] Adherence score shows % of workflow recommendations followed
+- [ ] `orchestrator feedback` command captures structured feedback
+- [ ] Feedback stored in `.workflow_feedback.jsonl` for analysis
+- [ ] At least 3 dogfooding sessions validate the system works
+
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (No Validation) | With Adherence Validation |
+|--------|------------------------|--------------------------|
+| Complexity | None | LOW-MEDIUM (checklist → automation) |
+| Workflow Quality | Unknown (no measurement) | Measured and improvable |
+| Dogfooding | Not validated | Systematically validated |
+| Feedback Loop | Ad-hoc (lost insights) | Structured (actionable) |
+| Meta-Problem | Orchestrator doesn't follow itself | Self-enforcing |
+
+**Current Evidence:**
+- ✅ User explicitly reported not following workflow recommendations
+- ✅ Agent recognized they SHOULD have used parallel agents but didn't
+- ✅ No third-party reviews performed when they should have been
+- ✅ Feedback was captured manually - needs systematic approach
+
+**YAGNI Check:**
+- This is **NOT speculative** - we have concrete evidence of the problem
+- Validates that the orchestrator itself is being used correctly (dogfooding validation)
+- Prevents wasted effort (wrong approach) and missed quality checks (skipped reviews)
+- Creates feedback loop for continuous workflow improvement
+
+**Recommendation:** ✅ **RECOMMEND** - High priority, phased approach
+
+**Reasoning:**
+The orchestrator is designed to enforce workflows, but doesn't enforce its own recommendations. This is a meta-problem: "workflow orchestrator not being orchestrated by workflow". Phase 1 (checklist) is very low effort (~30 min) and provides immediate value. Phase 2-4 can be implemented incrementally as dogfooding validates the approach.
+
+**Implementation Priority:**
+1. **Phase 1** (Immediate) - Add adherence checklist to workflow.yaml
+2. **Phase 3** (Quick win) - Add `orchestrator feedback` command for structured capture
+3. **Phase 2** (Medium-term) - Build automated validation from logs
+4. **Phase 4** (Long-term) - Meta-workflow for dogfooding
+
+**Tasks:**
+- [ ] Add `workflow_adherence_check` item to LEARN phase in workflow.yaml and src/default_workflow.yaml
+- [ ] Create `orchestrator feedback` command with structured prompts
+- [ ] Store feedback in `.workflow_feedback.jsonl`
+- [ ] Implement `orchestrator validate-adherence` command
+- [ ] Add adherence detection logic (parallel agents, reviews, status checks)
+- [ ] Calculate adherence score
+- [ ] Add documentation to CLAUDE.md
+- [ ] Dogfood on 3+ real workflows to validate approach
+- [ ] (Future) Create orchestrator-meta.yaml for self-enforcement
+
+---
+
 #### CORE-027: Multi-Model API Reliability
 **Status:** Planned
 **Complexity:** Medium
