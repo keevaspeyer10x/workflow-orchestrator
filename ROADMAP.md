@@ -1064,6 +1064,101 @@ The `orchestrator finish` command outputs a comprehensive summary but:
 
 ---
 
+#### WF-028: Enforce Orchestrator Status Check at Session Start
+**Status:** ✅ **RECOMMENDED** - Critical learning from PRD-007
+**Complexity:** LOW (multiple implementation options)
+**Priority:** HIGH - Prevents workflow abandonment
+**Source:** PRD-007 learnings (2026-01-11) - Workflow state out of sync after context compaction
+
+**Problem Statement:**
+AI agents (especially after context compaction or session resumption) frequently forget to check `orchestrator status` before starting new work, leading to:
+1. Abandoned workflows mid-execution
+2. Missing quality gates (reviews, testing, verification)
+3. Lost learnings (LEARN phase never completed)
+4. Work done outside workflow tracking
+
+**Root Cause:**
+No enforcement mechanism ensures agents check workflow state before starting work.
+
+**Proposed Solutions** (Pick one or combine):
+
+**Option A: Workflow Phase (HIGHEST IMPACT)**
+Add mandatory first phase to ALL workflows:
+```yaml
+phases:
+  - id: "SESSION_SETUP"
+    name: "Session Initialization"
+    items:
+      - id: "check_workflow_status"
+        name: "Check Active Workflow State"
+        required: true
+        notes:
+          - "[critical] ALWAYS run 'orchestrator status' as first action"
+          - "[critical] If active workflow exists, continue it before new work"
+          - "[info] This prevents abandoning workflows mid-execution"
+        verification:
+          type: "manual_gate"
+          description: "Agent must acknowledge current workflow state"
+```
+
+**Benefits:**
+- Forces conscious decision about existing workflows
+- Works across all workflow types
+- Visible in `orchestrator status` output
+
+**Option B: Session Start Hook (IMMEDIATE REMINDER)**
+Modify `.claude/SessionStart` hook (auto-run on session start):
+```bash
+#!/bin/bash
+# Check for active workflow
+if [ -f .workflow_state.json ]; then
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "⚠️  ACTIVE WORKFLOW DETECTED"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  orchestrator status
+  echo ""
+  echo "Run 'orchestrator status' for details."
+  echo "Continue the workflow before starting new work."
+fi
+```
+
+**Benefits:**
+- Immediate visibility on session start
+- Works even if agent ignores workflows
+- No changes to workflow YAML needed
+
+**Option C: CLAUDE.md Prominent Warning (DOCUMENTATION)**
+Add to **top of CLAUDE.md** (highly visible):
+```markdown
+# ⚠️ CRITICAL: Check Orchestrator Status First
+
+**ALWAYS run this as your FIRST action in ANY session:**
+\```bash
+orchestrator status
+\```
+
+If a workflow is active, **continue it**. Do NOT start new work.
+
+This prevents abandoning quality gates (reviews, tests, learnings).
+```
+
+**Benefits:**
+- Low implementation cost
+- Relies on agent following instructions
+- Easy to update
+
+**Recommendation:** ✅ **IMPLEMENT ALL THREE**
+- Option A: Long-term solution (workflow enforcement)
+- Option B: Immediate guard rail (session hook)
+- Option C: Clear documentation (agent awareness)
+
+**Implementation Priority:**
+1. Option B (quick win, immediate value)
+2. Option C (documentation update)
+3. Option A (requires workflow YAML updates, broader impact)
+
+---
+
 #### CORE-027: Multi-Model API Reliability
 **Status:** Planned
 **Complexity:** Medium
@@ -1582,100 +1677,114 @@ orchestrator prd cleanup        # Clean orphaned sessions
 
 ---
 
-#### PRD-007-E1: Redis-Backed State Management
-**Status:** Planned
-**Complexity:** Medium
-**Priority:** Low (only needed for >1000 concurrent tasks)
-**Source:** PRD-007 learnings (2026-01-11)
+#### PRD-007-E1: Multi-Instance Architecture Package (Redis + Distributed Locks + Circuit Breaker Coordination)
+**Status:** 🔍 **EXPLORATORY** - Requires complexity/benefit analysis before implementation
+**Complexity:** VERY HIGH (complete architectural redesign)
+**Priority:** Low (no evidence of need)
+**Source:** PRD-007 learnings + tradeoff analysis (2026-01-11)
 **Depends On:** PRD-007 (Completed)
+**Includes:** Former E1 (Redis state), E4 (distributed locks), E5 (circuit breaker coordination)
 
-**Problem:** Current JSON-based state persistence adequate for <1000 concurrent tasks, but won't scale to massive parallel agent deployments.
+⚠️ **CRITICAL:** These three items form an "all or nothing" package. Implementing E1 alone without E4/E5 creates data corruption risk in multi-instance scenarios.
 
-**Solution:** Add Redis backend for StateManager with:
-- Redis sorted sets for task queues
-- Redis hashes for task metadata
-- Redis pub/sub for cross-instance event coordination
-- Fallback to JSON for single-instance deployments
+**Complexity vs Benefit Tradeoff:**
 
-**Triggers:** Implement when deployment scales beyond 1000 concurrent agent tasks.
+| Factor | Current (Single-Instance) | This PRD (Multi-Instance) |
+|--------|--------------------------|---------------------------|
+| **Complexity** | LOW - JSON file, thread locks | VERY HIGH - Redis cluster, distributed protocols |
+| **Operational Overhead** | Minimal - no dependencies | High - Redis ops, backups, monitoring, troubleshooting |
+| **Scale Limit** | ~1000 concurrent tasks | Unlimited (horizontal scaling) |
+| **Failure Modes** | Simple - file corruption, deadlock | Complex - split brain, network partitions, Redis down |
+| **Testing** | Easy - single process | Hard - distributed system race conditions |
+| **Cost** | $0/month extra | Redis hosting + operational time |
+
+**Current Evidence for Need:**
+- ❌ No production deployment exists yet
+- ❌ No data on actual concurrent task volume
+- ❌ No observed bottleneck at single-instance scale
+- ❌ No user requests for multi-instance or HA
+
+**What Changes Required:**
+1. Replace JSON state with Redis (sorted sets, hashes, pub/sub)
+2. Replace `threading.Lock` with Redis distributed locks (redlock algorithm)
+3. Share circuit breaker state across instances
+4. Add Redis cluster deployment (3+ nodes for HA)
+5. Implement connection pooling, failover, retry logic
+6. Add distributed system tests (network partitions, race conditions)
+
+**Recommendation:** ⚠️ **DEFER - Apply YAGNI Principle**
+- Current architecture is production-ready for foreseeable scale
+- No evidence shows need for >100 concurrent tasks, let alone >1000
+- Premature optimization adds significant operational burden
+- **Revisit only when:** Production shows sustained >500 concurrent tasks OR user explicitly requires multi-instance HA
 
 ---
 
 #### PRD-007-E2: Persistent Event Store
-**Status:** Planned
+**Status:** 🔍 **DEFER** - Wait for user need
 **Complexity:** Medium
-**Priority:** Low (current in-memory store works for single-instance)
-**Source:** PRD-007 learnings (2026-01-11)
+**Priority:** Low (no current use case)
+**Source:** PRD-007 learnings + tradeoff analysis (2026-01-11)
 **Depends On:** PRD-007 (Completed)
 
-**Problem:** Current in-memory event store is lost on restart, limiting audit trail and debugging capabilities for long-running deployments.
+**Complexity vs Benefit Tradeoff:**
 
-**Solution:** Add persistent event store with:
-- Append-only event log (SQLite or PostgreSQL)
-- Event replay capability for debugging
-- Retention policies (auto-purge old events)
-- Query API for event analysis
+| Factor | Current (In-Memory) | This PRD (Persistent) |
+|--------|---------------------|----------------------|
+| **Complexity** | LOW - Python list | MEDIUM - SQLite schema, migrations, queries |
+| **Storage** | Minimal (cleared on restart) | Growing disk usage (needs retention policy) |
+| **Query Speed** | Instant (in-memory) | Slower (disk I/O) |
+| **Debugging Value** | Good (active session) | Better (cross-restart forensics) |
 
-**Triggers:** Implement when debugging requires event history across restarts.
+**Current Evidence for Need:**
+- ❌ No user reports needing event history after restart
+- ❌ In-memory events sufficient for debugging active issues
+- ❌ No compliance requirement for event retention
+
+**Recommendation:** ⚠️ **DEFER** - Wait for actual user request. Current in-memory store works for all known use cases.
+
+**Reconsider when:** User explicitly requests cross-restart event analysis OR compliance requires event audit trail.
 
 ---
 
 #### PRD-007-E3: Prometheus Metrics Endpoint
-**Status:** Planned
-**Complexity:** Low
-**Priority:** Medium (useful for production monitoring)
-**Source:** PRD-007 learnings (2026-01-11)
+**Status:** ✅ **RECOMMENDED** - Low effort, high value for production
+**Complexity:** LOW (well-established pattern)
+**Priority:** Medium-High (standard practice for production services)
+**Source:** PRD-007 learnings + tradeoff analysis (2026-01-11)
 **Depends On:** PRD-007 (Completed)
 
-**Problem:** No built-in metrics for monitoring orchestrator health and performance.
+**Complexity vs Benefit Tradeoff:**
 
-**Solution:** Add `/metrics` endpoint with Prometheus format:
-- Task completion rates
-- Phase transition latencies
-- Circuit breaker state
-- Retry counts
-- Event bus throughput
-- API latency percentiles
+| Factor | Cost | Benefit |
+|--------|------|---------|
+| **Implementation** | 2-3 hours (prometheus_client library + decorators) | Standard monitoring practice |
+| **Operational** | Prometheus server (can use existing) | Alerting on circuit breakers, latency spikes |
+| **Maintenance** | LOW - stable library | Performance regression detection |
 
-**Integration:** Grafana dashboards for visualization.
+**Current Evidence for Need:**
+- ✅ Production services should have metrics
+- ✅ Circuit breaker state visibility essential
+- ✅ Low implementation cost
+- ✅ Enables proactive issue detection
 
----
+**Metrics to Expose:**
+- Task completion rate (gauge)
+- Phase transition latency (histogram)
+- Circuit breaker state (gauge: 0=CLOSED, 1=OPEN, 2=HALF_OPEN)
+- Retry counts by operation (counter)
+- Event bus throughput (counter)
+- API request latency percentiles (histogram)
 
-#### PRD-007-E4: Distributed Locking Support
-**Status:** Planned
-**Complexity:** High
-**Priority:** Low (only needed for multi-instance deployments)
-**Source:** PRD-007 learnings (2026-01-11)
-**Depends On:** PRD-007-E1 (Redis backend)
-
-**Problem:** Current lock-based concurrency only works within single instance. Multi-instance deployments need distributed locking.
-
-**Solution:** Add distributed locking via Redis:
-- Replace threading.Lock with redis-py lock
-- Configurable lock timeouts
-- Automatic lock release on failure
-- Deadlock detection
-
-**Triggers:** Implement when horizontal scaling requires multiple orchestrator instances.
+**Recommendation:** ✅ **IMPLEMENT** - This is a best practice with high ROI. Should be added before first production deployment.
 
 ---
 
-#### PRD-007-E5: Circuit Breaker State Sharing
-**Status:** Planned
-**Complexity:** Medium
-**Priority:** Low (only needed for multi-instance deployments)
-**Source:** PRD-007 learnings (2026-01-11)
-**Depends On:** PRD-007-E1 (Redis backend)
+#### ~~PRD-007-E4: Distributed Locking Support~~
+#### ~~PRD-007-E5: Circuit Breaker State Sharing~~
 
-**Problem:** Circuit breaker state is per-instance. One instance's circuit breaker open doesn't affect other instances, leading to redundant failures.
-
-**Solution:** Share circuit breaker state across instances:
-- Redis-backed circuit breaker state
-- Coordinated state transitions (CLOSED→OPEN→HALF_OPEN)
-- Per-instance failure counting with global threshold
-- Backoff coordination to prevent thundering herd
-
-**Triggers:** Implement when multi-instance deployment sees duplicate failures from same external service.
+**Status:** ❌ **MERGED INTO PRD-007-E1** (see above)
+**Reason:** These cannot be implemented independently. They are part of the multi-instance architecture package and have no value without it.
 
 ---
 
