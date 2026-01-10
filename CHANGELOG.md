@@ -2,6 +2,23 @@
 
 All notable changes to the workflow-orchestrator.
 
+## [2.2.2] - 2026-01-10
+
+### Fixed
+- **Smarter API Key Check**: Now warns only when NO review API keys are set (was warning if ANY key missing)
+  - At least one key (GEMINI, OPENAI, OPENROUTER, or XAI) enables reviews
+  - Empty strings treated as missing
+  - Less noisy UX for vibe coders
+- **default_test Bug**: Fixed `check_project_mismatch` using wrong default (`npm run build` → `npm test`)
+- **sops Command Syntax**: Fixed invalid bash syntax in API key loading instructions (now uses `yq`)
+
+### Changed
+- **Skip Summary Enhancement**: Now shows `item_id: description` format for better traceability
+- **Gate Bypass Highlighting**: Force-skipped gate items now show `⚠️ GATE BYPASSED:` prefix in finish summary
+
+### Added
+- 4 new tests for API key check behavior (`TestAPIKeyCheck` class)
+
 ## [2.2.1] - 2026-01-08
 
 ### Added

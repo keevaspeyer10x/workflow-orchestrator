@@ -236,8 +236,7 @@ phases:
       - id: "security_review"
         name: "Security Review [Codex]"
         description: "MANDATORY. Uses Codex/GPT-5.1 to check for OWASP Top 10, injection attacks, auth issues, SSRF, hardcoded secrets. Run in BACKGROUND."
-        required: true
-        skippable: false
+        step_type: "gate"
         skip_conditions: ["documentation_only"]
         notes:
           - "[model] Codex (gpt-5.1-codex-max) - code-specialized security analysis"
@@ -246,8 +245,7 @@ phases:
       - id: "quality_review"
         name: "Code Quality Review [Codex]"
         description: "MANDATORY. Uses Codex/GPT-5.1 to check for code smells, edge cases, error handling, test coverage gaps. Run in BACKGROUND."
-        required: true
-        skippable: false
+        step_type: "gate"
         skip_conditions: ["documentation_only"]
         notes:
           - "[model] Codex (gpt-5.1-codex-max) - code-specialized quality analysis"
@@ -256,8 +254,7 @@ phases:
       - id: "consistency_review"
         name: "Codebase Consistency Review [Gemini]"
         description: "MANDATORY. Uses Gemini 3 Pro (1M context) to check if new code fits existing patterns, uses existing utilities, follows conventions. Run in BACKGROUND."
-        required: true
-        skippable: false
+        step_type: "gate"
         skip_conditions: ["documentation_only"]
         notes:
           - "[model] Gemini 3 Pro (gemini-3-pro-preview) - 1M context for full codebase"
@@ -267,8 +264,7 @@ phases:
       - id: "holistic_review"
         name: "Holistic Senior Engineer Review [Gemini]"
         description: "MANDATORY. Uses Gemini 3 Pro as a 'skeptical senior engineer' - would you approve this PR? What concerns you? What questions would you ask? Run in BACKGROUND."
-        required: true
-        skippable: false
+        step_type: "gate"
         skip_conditions: ["documentation_only"]
         notes:
           - "[model] Gemini 3 Pro (gemini-3-pro-preview) - fresh eyes review"
@@ -278,8 +274,7 @@ phases:
       - id: "vibe_coding_review"
         name: "Vibe-Coding Issues Review [Grok]"
         description: "MANDATORY. Uses Grok 3 to catch AI-specific issues: hallucinated APIs, plausible-but-wrong logic, tests that don't test, cargo cult code. Third model perspective. Run in BACKGROUND."
-        required: true
-        skippable: false
+        step_type: "gate"
         skip_conditions: ["documentation_only"]
         notes:
           - "[model] Grok 3 - catches AI-generation blindspots"
@@ -290,8 +285,7 @@ phases:
       - id: "collect_review_results"
         name: "Collect All Review Results"
         description: "Wait for all 5 background reviews to complete. Aggregate findings. Report which models were used and any issues found. Block if any CRITICAL issues."
-        required: true
-        skippable: false
+        step_type: "gate"
         notes:
           - "[gate] Do not proceed until ALL 5 reviews have completed"
           - "[report] List each review with: model used, duration, issues found"

@@ -292,7 +292,7 @@ class WorkflowEngine:
 
         return archived
 
-    def start_workflow(self, yaml_path: str, task_description: str, project: Optional[str] = None, constraints: Optional[list[str]] = None, no_archive: bool = False) -> WorkflowState:
+    def start_workflow(self, yaml_path: str, task_description: str, project: Optional[str] = None, constraints: Optional[list[str]] = None, no_archive: bool = False, settings_overrides: Optional[dict] = None) -> WorkflowState:
         """Start a new workflow instance.
 
         Args:
@@ -301,10 +301,17 @@ class WorkflowEngine:
             project: Optional project name
             constraints: Optional list of task-specific constraints (Feature 4)
             no_archive: If True, skip archiving existing workflow documents (WF-004)
+            settings_overrides: Optional dict of settings to override (e.g., test_command)
         """
         # Load the workflow definition
         yaml_path_resolved = Path(yaml_path).resolve()
         self.load_workflow_def(str(yaml_path_resolved))
+
+        # Apply settings overrides (e.g., from CLI flags, .orchestrator.yaml, or auto-detection)
+        if settings_overrides:
+            for key, value in settings_overrides.items():
+                self.workflow_def.settings[key] = value
+            logger.debug(f"Applied settings overrides: {list(settings_overrides.keys())}")
 
         # Validate workflow has at least one phase
         if not self.workflow_def.phases:
@@ -695,18 +702,20 @@ class WorkflowEngine:
         self,
         item_id: str,
         reason: str,
-        context_considered: Optional[list[str]] = None
+        context_considered: Optional[list[str]] = None,
+        force: bool = False
     ) -> Tuple[bool, str]:
         """
         Skip an item with a documented reason.
 
-        For gate and required steps: Cannot be skipped.
+        For gate and required steps: Cannot be skipped (unless force=True).
         For documented and flexible steps: Validates skip reasoning.
 
         Args:
             item_id: The item to skip
             reason: Substantive reason for skipping
             context_considered: Optional list of factors considered before skipping
+            force: If True, allow skipping gate steps (requires detailed reason)
 
         Returns (success, message).
         """
@@ -717,16 +726,21 @@ class WorkflowEngine:
         # Check step type enforcement
         step_type = item_def.step_type
 
-        # Gate steps cannot be skipped
+        # Gate steps cannot be skipped (unless force=True)
         if step_type == StepType.GATE:
-            return False, f"Item {item_id} is a gate step and cannot be skipped"
+            if not force:
+                return False, f"Item {item_id} is a gate step and cannot be skipped. Use --force to override."
+            # Force skip requires detailed reason (at least 50 chars)
+            if len(reason.strip()) < 50:
+                return False, f"Force-skipping a gate requires a detailed reason (at least 50 characters). Got {len(reason.strip())}."
 
         # Required steps cannot be skipped
         if step_type == StepType.REQUIRED:
             return False, f"Item {item_id} is a required step and cannot be skipped"
 
         # Check skippable flag (for backwards compatibility and manual gates)
-        if not item_def.skippable:
+        # Note: force=True can override this for gates
+        if not item_def.skippable and not (force and step_type == StepType.GATE):
             return False, f"Item {item_id} is not skippable"
 
         if item_state.status in [ItemStatus.COMPLETED, ItemStatus.SKIPPED]:
@@ -769,20 +783,26 @@ class WorkflowEngine:
         if context_considered:
             item_state.skip_context_considered = context_considered
 
+        # Track force-skipped gates
+        is_force_skipped = force and step_type == StepType.GATE
+
         self.save_state()
         self.log_event(WorkflowEvent(
             event_type=EventType.ITEM_SKIPPED,
             workflow_id=self.state.workflow_id,
             phase_id=self.state.current_phase_id,
             item_id=item_id,
-            message=f"Skipped item: {item_id}",
+            message=f"{'Force-skipped' if is_force_skipped else 'Skipped'} item: {item_id}",
             details={
                 "reason": reason,
                 "step_type": step_type.value,
-                "context_considered": context_considered
+                "context_considered": context_considered,
+                "force_skipped": is_force_skipped
             }
         ))
 
+        if is_force_skipped:
+            return True, f"Item {item_id} force-skipped (gate verification bypassed)"
         return True, f"Item {item_id} skipped"
 
     # ========================================================================

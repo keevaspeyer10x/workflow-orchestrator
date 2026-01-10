@@ -11,6 +11,7 @@ import sys
 import json
 from pathlib import Path
 from datetime import datetime, timedelta
+from typing import Optional
 
 from src.engine import WorkflowEngine
 from src.analytics import WorkflowAnalytics
@@ -41,7 +42,14 @@ from src.review import (
     setup_reviews,
 )
 from src.review.registry import get_review_item_mapping
-from src.config import find_workflow_path, get_default_workflow_content, is_using_bundled_workflow
+from src.config import (
+    find_workflow_path,
+    get_default_workflow_content,
+    is_using_bundled_workflow,
+    detect_project_type,
+    get_project_commands,
+    load_settings_overrides,
+)
 from src.validation import validate_constraints, validate_note
 from src.secrets import (
     SecretsManager,
@@ -173,6 +181,93 @@ def format_duration(delta: timedelta) -> str:
     return " ".join(parts) if parts else "< 1m"
 
 
+def check_project_mismatch(working_dir: Path, current_test_command: str) -> Optional[str]:
+    """
+    Check if detected project type doesn't match the test command.
+
+    Args:
+        working_dir: Project directory to check
+        current_test_command: The test command that would be used
+
+    Returns:
+        Warning message if mismatch detected, None otherwise.
+    """
+    project_type = detect_project_type(working_dir)
+    if not project_type:
+        return None  # Can't detect, no warning
+
+    commands = get_project_commands(working_dir)
+    recommended_test = commands.get("test_command")
+
+    if not recommended_test:
+        return None
+
+    # Check if current command matches recommended
+    # Simple heuristic: check if the key tool matches
+    current_lower = current_test_command.lower()
+    recommended_lower = recommended_test.lower()
+
+    # Extract the main command (first word)
+    current_tool = current_lower.split()[0] if current_lower else ""
+    recommended_tool = recommended_lower.split()[0] if recommended_lower else ""
+
+    # Check for mismatch
+    if current_tool != recommended_tool:
+        return (
+            f"Project type mismatch detected!\n"
+            f"    Detected: {project_type} project\n"
+            f"    Default test command: {current_test_command}\n"
+            f"    Recommended: {recommended_test}\n"
+            f"\n"
+            f"    Auto-correcting test_command to '{recommended_test}'\n"
+            f"    (Use --test-command to override, or create .orchestrator.yaml)"
+        )
+
+    return None
+
+
+def check_review_api_keys() -> Optional[str]:
+    """
+    Check if API keys required for external model reviews are set.
+
+    Only warns if NO keys are available (at least one key = reviews can work).
+    Treats empty strings as missing.
+
+    Returns:
+        Warning message if NO keys are set, None if at least one key present.
+    """
+    review_keys = {
+        "GEMINI_API_KEY": "Google Gemini",
+        "OPENAI_API_KEY": "OpenAI GPT-5.2 / Codex",
+        "OPENROUTER_API_KEY": "OpenRouter (fallback)",
+        "XAI_API_KEY": "xAI Grok 4.1",
+    }
+
+    # Check which keys are available (non-empty)
+    available = []
+    missing = []
+    for key, provider in review_keys.items():
+        value = os.environ.get(key, "").strip()
+        if value:
+            available.append(provider)
+        else:
+            missing.append(f"  - {key}: {provider}")
+
+    # If at least one key is available, reviews can work
+    if available:
+        return None
+
+    # No keys available - warn user
+    return (
+        "⚠️  No external review API keys found!\n"
+        "Reviews require at least one of these:\n"
+        + "\n".join(missing) + "\n\n"
+        "Load them with:\n"
+        "  eval \"$(sops -d secrets.enc.yaml | yq -r 'to_entries | .[] | \"export \" + .key + \"=\" + .value')\"\n"
+        "Or use direnv: direnv allow"
+    )
+
+
 def get_engine(args) -> WorkflowEngine:
     """Create an engine instance with the working directory."""
     working_dir = getattr(args, 'dir', '.') or '.'
@@ -210,6 +305,51 @@ def cmd_start(args):
         if is_using_bundled_workflow(working_dir):
             print("Using bundled default workflow (no local workflow.yaml found)")
 
+    # Build settings overrides from multiple sources (priority order):
+    # 1. CLI flags (highest priority)
+    # 2. .orchestrator.yaml file
+    # 3. Auto-detected project type
+    # 4. Bundled defaults (lowest priority)
+    settings_overrides = {}
+
+    # Load .orchestrator.yaml overrides
+    file_overrides = load_settings_overrides(working_dir)
+    if file_overrides:
+        settings_overrides.update(file_overrides)
+        print(f"Loaded settings from .orchestrator.yaml")
+
+    # Auto-detect project type (only when using bundled workflow)
+    using_bundled = is_using_bundled_workflow(working_dir)
+    if using_bundled:
+        detected_commands = get_project_commands(working_dir)
+        project_type = detect_project_type(working_dir)
+
+        # Check for mismatch between default (npm) and detected project
+        if project_type and project_type != "node":
+            # Show warning about auto-correction
+            default_test = "npm test"  # The bundled default test command
+            if detected_commands.get("test_command"):
+                warning = check_project_mismatch(working_dir, default_test)
+                if warning:
+                    print(f"\n⚠️  {warning}\n")
+
+        # Apply detected commands (if not already overridden by .orchestrator.yaml)
+        if detected_commands.get("test_command") and "test_command" not in settings_overrides:
+            settings_overrides["test_command"] = detected_commands["test_command"]
+        if detected_commands.get("build_command") and "build_command" not in settings_overrides:
+            settings_overrides["build_command"] = detected_commands["build_command"]
+
+    # Apply CLI flags (highest priority - overrides everything)
+    test_command = getattr(args, 'test_command', None)
+    build_command = getattr(args, 'build_command', None)
+
+    if test_command:
+        settings_overrides["test_command"] = test_command
+        print(f"Using test command from --test-command: {test_command}")
+    if build_command:
+        settings_overrides["build_command"] = build_command
+        print(f"Using build command from --build-command: {build_command}")
+
     # Parse constraints (Feature 4) - can be specified multiple times
     constraints = getattr(args, 'constraints', None) or []
 
@@ -220,6 +360,11 @@ def cmd_start(args):
         print(f"Error: {e}")
         sys.exit(1)
 
+    # Check for API keys required for external model reviews
+    api_key_warning = check_review_api_keys()
+    if api_key_warning:
+        print(f"\n{api_key_warning}\n")
+
     # Get no_archive flag (WF-004)
     no_archive = getattr(args, 'no_archive', False)
 
@@ -229,13 +374,16 @@ def cmd_start(args):
             args.task,
             project=args.project,
             constraints=constraints,
-            no_archive=no_archive
+            no_archive=no_archive,
+            settings_overrides=settings_overrides
         )
         print(f"\n✓ Workflow started: {state.workflow_id}")
         print(f"  Task: {args.task}")
         print(f"  Phase: {state.current_phase_id}")
         if constraints:
             print(f"  Constraints: {len(constraints)} specified")
+        if settings_overrides.get("test_command"):
+            print(f"  Test command: {settings_overrides['test_command']}")
         print("\nRun 'orchestrator status' to see the checklist.")
     except ValueError as e:
         print(f"Error: {e}")
@@ -796,11 +944,24 @@ def cmd_skip(args):
         print("Error: No active workflow")
         sys.exit(1)
 
+    # Get force flag
+    force = getattr(args, 'force', False)
+
     try:
         # Get item definition for context before skipping
         item_def = engine.get_item_definition(args.item)
 
-        success, message = engine.skip_item(args.item, args.reason)
+        # Check if this is a gate item and warn if using --force
+        if force and item_def:
+            print("=" * 60)
+            print("⚠️  WARNING: Force-skipping a gate bypasses verification!")
+            print("=" * 60)
+            print("This should only be used when:")
+            print("  • The verification command is incorrect for your project type")
+            print("  • You have manually verified the gate's intent")
+            print()
+
+        success, message = engine.skip_item(args.item, args.reason, force=force)
 
         if success:
             # CORE-010: Enhanced skip output
@@ -1160,15 +1321,37 @@ def cmd_finish(args):
             print(f"  {'Total':12} {total_items} items ({total_completed} completed, {total_skipped} skipped)")
             print()
 
-        # Skipped items summary
+        # Skipped items summary (enhanced with full reasons, item_id, and gate highlighting)
         if all_skipped:
-            print("SKIPPED ITEMS (review for justification)")
+            total_skipped_count = sum(len(items) for items in all_skipped.values())
+            print(f"SKIPPED ITEMS ({total_skipped_count} total - review for justification)")
             print("-" * 60)
             for phase_id, items in all_skipped.items():
+                print(f"  [{phase_id}]")
                 for item_id, reason in items:
-                    # Truncate long reasons
-                    short_reason = reason[:50] + "..." if len(reason) > 50 else reason
-                    print(f"  • {item_id}: \"{short_reason}\"")
+                    # Look up item definition for description and step type
+                    item_def = engine.get_item_definition(item_id)
+                    if item_def:
+                        description = item_def.description or item_id
+                        step_type = getattr(item_def, 'step_type', None)
+                        is_gate = step_type and 'gate' in str(step_type.value).lower()
+                    else:
+                        description = item_id
+                        step_type = None
+                        is_gate = False
+
+                    # Highlight gate bypasses prominently
+                    if is_gate:
+                        print(f"    ⚠️  GATE BYPASSED: {item_id}: {description}")
+                    else:
+                        print(f"    • {item_id}: {description}")
+
+                    # Show full reason, indented for readability
+                    for line in reason.split('\n'):
+                        print(f"      → {line}")
+                print()
+        else:
+            print("SKIPPED ITEMS: None (all items completed)")
             print()
 
         # REVIEW MODEL VISIBILITY: Show which models reviewed each phase
@@ -3263,6 +3446,10 @@ Examples:
                               help='Task constraint (can be specified multiple times)')
     start_parser.add_argument('--no-archive', action='store_true',
                               help='Skip archiving existing workflow documents')
+    start_parser.add_argument('--test-command', dest='test_command',
+                              help='Override test command (e.g., "pytest -v")')
+    start_parser.add_argument('--build-command', dest='build_command',
+                              help='Override build command (e.g., "pip install -e .")')
     start_parser.set_defaults(func=cmd_start)
 
     # Init command
@@ -3321,6 +3508,8 @@ Examples:
     skip_parser.add_argument('item', help='Item ID to skip')
     skip_parser.add_argument('--reason', '-r', required=True, help='Reason for skipping (min 10 chars)')
     skip_parser.add_argument('--quiet', '-q', action='store_true', help='Minimal output')
+    skip_parser.add_argument('--force', '-f', action='store_true',
+                             help='Force skip gate items (requires detailed reason)')
     skip_parser.set_defaults(func=cmd_skip)
     
     # Approve-item command (NEW)

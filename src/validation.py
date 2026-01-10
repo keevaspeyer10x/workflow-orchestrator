@@ -9,7 +9,7 @@ from typing import Optional
 
 # Maximum length constants
 MAX_CONSTRAINT_LENGTH = 1000
-MAX_NOTE_LENGTH = 500
+MAX_NOTE_LENGTH = 2000  # Increased from 500 to allow detailed clarifying questions
 
 
 def validate_constraint(constraint: str) -> str:

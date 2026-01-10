@@ -105,6 +105,6 @@ class TestConstants:
         """MAX_CONSTRAINT_LENGTH is 1000 as specified in roadmap."""
         assert MAX_CONSTRAINT_LENGTH == 1000
 
-    def test_note_length_is_500(self):
-        """MAX_NOTE_LENGTH is 500 as specified in roadmap."""
-        assert MAX_NOTE_LENGTH == 500
+    def test_note_length_is_2000(self):
+        """MAX_NOTE_LENGTH is 2000 (increased from 500 for clarifying questions)."""
+        assert MAX_NOTE_LENGTH == 2000
