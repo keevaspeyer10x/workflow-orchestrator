@@ -621,4 +621,9 @@ def start_server(host: str = "localhost", port: int = 8000):
 
 
 if __name__ == "__main__":
-    start_server()
+    import argparse
+    parser = argparse.ArgumentParser(description="Orchestrator API Server")
+    parser.add_argument("--port", type=int, default=8000, help="Port to run server on")
+    parser.add_argument("--host", default="localhost", help="Host to bind to")
+    args = parser.parse_args()
+    start_server(host=args.host, port=args.port)

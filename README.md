@@ -66,9 +66,23 @@ pip install -e .
 
 ## Quick Start
 
+### Zero-Config Workflow Enforcement (New!)
+
+For AI agents, the fastest way to get started:
+
+```bash
+orchestrator enforce "Add user authentication"
+```
+
+This single command:
+- Auto-detects or starts the orchestrator server
+- Generates `agent_workflow.yaml` based on your repo (Python/JS/Go/Rust)
+- Outputs agent-ready instructions with SDK examples
+- Supports `--parallel` for multi-agent execution
+
 **For vibe coders:** Just say to Claude:
 - "Install orchestrator" (first time only)
-- "Use orchestrator to build a user settings page"
+- "Use orchestrator enforce to build a user settings page"
 - "Use orchestrator to fix the login bug"
 
 **What happens:** The orchestrator guides you through 5 phases:
@@ -84,6 +98,7 @@ pip install -e .
 
 | Command | Purpose |
 |---------|---------|
+| `enforce "task"` | Zero-config setup: auto-start server, generate workflow, get agent instructions |
 | `init` | Initialize workflow.yaml in current directory |
 | `start "task"` | Begin a new workflow |
 | `status` | Check current state (AI should do this constantly) |

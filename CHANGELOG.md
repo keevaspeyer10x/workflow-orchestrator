@@ -2,6 +2,26 @@
 
 All notable changes to the workflow-orchestrator.
 
+## [2.6.0] - 2026-01-11
+
+### Added
+- **PRD-008: Zero-Config Workflow Enforcement**: Single command workflow setup for AI agents
+  - **`orchestrator enforce` command**: Auto-detects server, generates workflow, and provides agent instructions
+  - **Server Auto-Discovery** (`src/orchestrator/auto_setup.py`): Checks ports 8000-8002 for running servers
+  - **Server Auto-Start**: Spawns daemon process if no server found, with health check verification
+  - **Repository Analysis** (`src/orchestrator/workflow_generator.py`): Detects language and test framework
+    - Python (pytest), JavaScript (jest/mocha), Go (go test), Rust (cargo test)
+    - Auto-detects project structure (src/, tests/, etc.)
+  - **Workflow YAML Generation**: Creates `.orchestrator/agent_workflow.yaml` from template
+    - 5-phase workflow (PLAN → TDD → IMPL → REVIEW → VERIFY)
+    - Language-specific test commands and tool restrictions
+  - **Agent Context Formatting** (`src/orchestrator/agent_context.py`): Generates SDK usage instructions
+    - Markdown format with code examples
+    - Sequential vs parallel execution mode support
+    - Outputs to stdout for AI consumption + backup file
+  - **Cross-Platform Support**: Windows and Unix daemon process management
+  - **81 comprehensive unit tests** with 100% pass rate
+
 ## [2.5.0] - 2026-01-11
 
 ### Added
@@ -78,6 +98,48 @@ All notable changes to the workflow-orchestrator.
 ## [2.4.0] - 2026-01-10
 
 ### Added
+- **CORE-023-P1: Conflict Resolution - Core**: Fast conflict detection and resolution without LLM
+  - `orchestrator resolve` command with preview and `--apply` modes
+  - Conflict detection for merge and rebase operations
+  - 3-way merge via `git merge-file`
+  - Git `rerere` integration for resolution caching
+  - Interactive escalation with ours/theirs/both/editor options
+  - Status integration with conflict warnings
+  - Files: `src/git_conflict_resolver.py`, CLI in `src/cli.py`
+
+- **CORE-023-P2: Conflict Resolution - LLM Integration**: Intelligent resolution for complex conflicts
+  - `--use-llm` flag for `orchestrator resolve` command
+  - Intent extraction with structured JSON output
+  - Multi-provider support: OpenAI, Gemini, OpenRouter
+  - Confidence-based escalation (HIGH=auto, MEDIUM=ask, LOW=escalate)
+  - Tiered validation: conflict markers, syntax, JSON, YAML
+  - Sensitive file protection (skips .env, secrets, keys)
+  - Context-aware with CLAUDE.md conventions and token budgets
+  - 36 unit tests covering all functionality
+  - Files: `src/resolution/llm_resolver.py`
+
+- **WF-027: Workflow Finish Summary Archival**: Automatic persistence of completion summaries
+  - Saves full `orchestrator finish` output to `docs/archive/YYYY-MM-DD_<task-slug>_summary.md`
+  - Includes phase summaries, skipped items, external reviews, learnings
+  - Solves terminal truncation and enables later reference
+  - Displays save location confirmation
+
+- **PRD-005: ApprovalGate + TmuxAdapter Integration**: Human-in-the-loop for parallel agents
+  - Automatic pause at workflow gates for human approval
+  - `ApprovalGate.get_decision_log()` tracks decisions with rationale
+  - `ApprovalQueue.decision_summary()` groups by auto/human decisions
+  - `orchestrator approval watch` with tmux bell notifications
+  - `orchestrator approval summary` for decision analysis
+  - 50 new tests; 21 in `tests/test_approval_gate.py`
+  - Files: `src/approval_gate.py`, `src/approval_queue.py`, `src/prd/tmux_adapter.py`
+
+- **PRD-006: Auto-Inject ApprovalGate in spawn_agent()**: Zero-config approval system
+  - Automatic injection of approval gate instructions during agent spawning
+  - Added `inject_approval_gate: bool = True` to TmuxConfig/SubprocessConfig
+  - `--no-approval-gate` CLI flag for opt-out
+  - 13 new tests (8 TmuxAdapter, 5 SubprocessAdapter)
+  - Maintains backward compatibility
+
 - **Parallel Agent Approval System**: Coordinate multiple Claude Code agents with approval gates
   - `ApprovalQueue`: SQLite-backed queue with WAL mode for concurrent agent access
   - `ApprovalGate`: Agent-side interface with exponential backoff polling (2s → 10s → 30s)
@@ -93,6 +155,15 @@ All notable changes to the workflow-orchestrator.
 ## [2.3.0] - 2026-01-10
 
 ### Added
+- **PRD-001: Claude Squad Integration Phase 1**: Architecture simplification for agent spawning
+  - Replaced complex multi-backend spawning with Claude Squad integration
+  - New files: `src/prd/squad_adapter.py`, `src/prd/squad_capabilities.py`, `src/prd/session_registry.py`
+  - CLI commands: `prd check-squad`, `prd spawn`, `prd sessions`, `prd attach`, `prd done`
+  - Persistent session state registry
+  - Capability-aware agent selection
+  - Removed: Modal/Render/local subprocess backends (`worker_pool.py`, `backends/local.py`, `backends/modal_worker.py`, `backends/render.py`)
+  - Retained: GitHub Actions batch execution, branch management, conflict resolution
+
 - **PRD-004: Direct tmux Agent Management**: Replaced broken Claude Squad integration with direct tmux session management
   - `TmuxAdapter`: Spawns Claude Code agents in tmux windows for interactive sessions
   - `SubprocessAdapter`: Fire-and-forget fallback when tmux unavailable

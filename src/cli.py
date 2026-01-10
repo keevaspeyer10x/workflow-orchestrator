@@ -2488,6 +2488,93 @@ def cmd_setup(args):
     print("To disable: orchestrator setup --remove")
 
 
+def cmd_enforce(args):
+    """
+    Zero-config workflow enforcement for agents.
+
+    Auto-detects or starts orchestrator server, generates agent_workflow.yaml,
+    and provides agent-ready instructions.
+    """
+    from src.orchestrator.auto_setup import ensure_orchestrator_running, ServerError
+    from src.orchestrator.workflow_generator import analyze_repo, generate_workflow_yaml, save_workflow_yaml
+    from src.orchestrator.agent_context import generate_agent_instructions, save_agent_instructions, format_agent_prompt
+
+    working_dir = Path(args.dir or '.')
+
+    try:
+        # Step 1: Ensure server is running
+        if not args.json:
+            print("Checking for running orchestrator server...")
+
+        port = args.port if hasattr(args, 'port') else 8000
+        server_url = ensure_orchestrator_running(port=port)
+
+        if not args.json:
+            print(f"✓ Server running at {server_url}")
+
+        # Step 2: Check for existing workflow.yaml, or generate new one
+        workflow_path = working_dir / ".orchestrator" / "agent_workflow.yaml"
+        if not workflow_path.exists():
+            if not args.json:
+                print("Analyzing repository...")
+
+            analysis = analyze_repo(working_dir)
+
+            if not args.json:
+                print(f"✓ Detected: {analysis.language} project with {analysis.test_framework}")
+
+            workflow_content = generate_workflow_yaml(args.task, analysis)
+            workflow_path = save_workflow_yaml(workflow_content, working_dir)
+
+            if not args.json:
+                print(f"✓ Generated workflow: {workflow_path}")
+        else:
+            if not args.json:
+                print(f"✓ Using existing workflow: {workflow_path}")
+
+        # Step 3: Generate agent instructions
+        mode = "parallel" if args.parallel else "sequential"
+        instructions = generate_agent_instructions(
+            task=args.task,
+            server_url=server_url,
+            workflow_path=workflow_path,
+            mode=mode
+        )
+
+        # Step 4: Save instructions
+        instructions_path = save_agent_instructions(instructions, working_dir)
+
+        if not args.json:
+            print(f"✓ Instructions saved: {instructions_path}")
+
+        # Step 5: Output prompt
+        if args.json:
+            # Machine-readable JSON output
+            import json
+            print(json.dumps({
+                "server_url": server_url,
+                "workflow_path": str(workflow_path),
+                "instructions_path": str(instructions_path),
+                "mode": mode,
+                "task": args.task
+            }, indent=2))
+        else:
+            # Human/AI-readable formatted prompt
+            prompt = format_agent_prompt(instructions, server_url, mode)
+            print(prompt)
+
+    except ServerError as e:
+        print(f"✗ Server error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"✗ Error: {e}", file=sys.stderr)
+        if not args.json:
+            print("\nFor troubleshooting, see:", file=sys.stderr)
+            print("  .orchestrator/enforce.log", file=sys.stderr)
+            print("  .orchestrator/server.log", file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_setup_reviews(args):
     """Set up review infrastructure in a repository."""
     working_dir = Path(args.dir or '.')
@@ -4039,6 +4126,21 @@ Examples:
     setup_parser.add_argument('--remove', action='store_true', help='Remove auto-updates from this repo')
     setup_parser.add_argument('--copy-secrets', action='store_true', help='Copy encrypted secrets from orchestrator repo')
     setup_parser.set_defaults(func=cmd_setup)
+
+    # Enforce command (PRD-008: Zero-Config Workflow Enforcement)
+    enforce_parser = subparsers.add_parser('enforce',
+        help='Zero-config workflow enforcement (auto-start server, generate workflow.yaml)')
+    enforce_parser.add_argument('task', help='Task description')
+    enforce_parser.add_argument('--parallel', action='store_true',
+        help='Use parallel execution mode (spawn multiple agents)')
+    enforce_parser.add_argument('--sequential', action='store_true',
+        help='Use sequential mode (single agent, default)')
+    enforce_parser.add_argument('--port', type=int, default=8000,
+        help='Orchestrator server port (default: 8000)')
+    enforce_parser.add_argument('--json', action='store_true',
+        help='Output JSON for programmatic parsing')
+    enforce_parser.add_argument('--dir', '-d', help='Working directory (default: current)')
+    enforce_parser.set_defaults(func=cmd_enforce)
 
     # Config command
     config_parser = subparsers.add_parser('config', help='Manage orchestrator configuration')

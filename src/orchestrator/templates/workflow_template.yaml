@@ -1,0 +1,229 @@
+name: "Auto-Generated Agent Workflow"
+version: "1.0"
+description: "Workflow contract for agent. Enforced by orchestrator."
+
+# Task and project metadata
+task: "{task_description}"
+language: "{language}"
+test_framework: "{test_framework}"
+test_command: "{test_command}"
+
+# ============================================================================
+# CRITICAL: This workflow is ENFORCED, not advisory
+# - Agents receive read-only snapshots of this file
+# - Orchestrator validates all transitions against this contract
+# - Phase tokens cryptographically prove gate passage
+# - No direct state mutation allowed
+# ============================================================================
+
+phases:
+  - id: "PLAN"
+    name: "Planning & Approval"
+    description: "Agent must propose plan and get approval before proceeding"
+
+    required_artifacts:
+      - type: "plan_document"
+        description: "Technical plan with acceptance criteria"
+        validation:
+          - rule: "has_acceptance_criteria"
+            message: "Plan must include measurable acceptance criteria"
+          - rule: "has_implementation_steps"
+            message: "Plan must outline implementation steps"
+
+      - type: "scope_definition"
+        description: "What's in scope, what's out of scope"
+        validation:
+          - rule: "has_in_scope"
+            message: "Must define what IS in scope"
+          - rule: "has_out_of_scope"
+            message: "Must define what is NOT in scope (prevents scope creep)"
+
+    gates:
+      - id: "plan_approval"
+        type: "approval"  # Requires human/orchestrator approval
+        blockers:
+          - check: "plan_has_acceptance_criteria"
+            severity: "blocking"
+            message: "Plan must include measurable acceptance criteria"
+
+          - check: "scope_is_bounded"
+            severity: "blocking"
+            message: "Scope must be clearly bounded with constraints"
+
+        timeout_seconds: 3600
+        approvers: ["human", "orchestrator"]
+
+    allowed_tools:
+      - "read_files"
+      - "search_codebase"
+      - "grep"
+      - "glob"
+      - "ask_user_question"
+      - "web_fetch"
+
+    forbidden_tools:
+      - "write_files"
+      - "edit_files"
+      - "git_commit"
+      - "run_tests"
+      - "bash"
+
+  - id: "TDD"
+    name: "Write Tests (RED phase)"
+    description: "Write failing tests BEFORE implementation"
+
+    required_artifacts:
+      - type: "test_files"
+        description: "Test files that cover acceptance criteria"
+        validation:
+          - rule: "tests_exist"
+            message: "Test files must be created"
+          - rule: "tests_cover_acceptance_criteria"
+            message: "Each acceptance criterion must have test coverage"
+
+      - type: "test_run_result"
+        description: "Proof that tests were run and FAILED (RED phase)"
+        validation:
+          - rule: "tests_were_run"
+            message: "Must provide evidence of test execution"
+          - rule: "tests_failed"
+            message: "TDD requires tests to FAIL initially (RED phase)"
+
+    gates:
+      - id: "tests_written"
+        type: "validation"
+        blockers:
+          - check: "tests_exist_for_acceptance_criteria"
+            severity: "blocking"
+            message: "Each acceptance criterion must have test coverage"
+
+          - check: "tests_initially_fail"
+            severity: "blocking"
+            message: "Tests must FAIL before implementation (RED phase)"
+
+    allowed_tools:
+      - "read_files"
+      - "write_files"
+      - "edit_files"
+      - "bash"  # For running tests: {test_command}
+      - "search_codebase"
+
+    forbidden_tools:
+      - "git_commit"  # No commits until implementation complete
+
+  - id: "IMPL"
+    name: "Implementation (GREEN phase)"
+    description: "Implement code to make tests pass"
+
+    required_artifacts:
+      - type: "implementation"
+        description: "Code that makes tests pass"
+        validation:
+          - rule: "code_exists"
+            message: "Implementation files must be created"
+
+      - type: "test_run_result"
+        description: "Proof that tests now PASS (GREEN phase)"
+        validation:
+          - rule: "tests_were_run"
+            message: "Must run tests after implementation"
+          - rule: "tests_passed"
+            message: "All tests must PASS after implementation (GREEN phase)"
+
+    gates:
+      - id: "tests_pass"
+        type: "validation"
+        blockers:
+          - check: "all_tests_pass"
+            severity: "blocking"
+            message: "All tests must pass before proceeding"
+
+          - check: "no_skipped_tests"
+            severity: "warning"
+            message: "Consider fixing skipped tests"
+
+    allowed_tools:
+      - "read_files"
+      - "write_files"
+      - "edit_files"
+      - "bash"
+      - "search_codebase"
+      - "grep"
+      - "glob"
+
+    forbidden_tools:
+      - "git_commit"  # Wait for review
+
+  - id: "REVIEW"
+    name: "Code Review & Quality Checks"
+    description: "Automated and manual code review"
+
+    required_artifacts:
+      - type: "review_report"
+        description: "Results of automated code reviews"
+        validation:
+          - rule: "security_review_passed"
+            message: "Security review must pass"
+          - rule: "quality_review_passed"
+            message: "Quality review must pass"
+
+    gates:
+      - id: "quality_gates"
+        type: "validation"
+        blockers:
+          - check: "no_critical_issues"
+            severity: "blocking"
+            message: "Critical issues must be fixed"
+
+          - check: "no_security_vulnerabilities"
+            severity: "blocking"
+            message: "Security vulnerabilities must be fixed"
+
+    allowed_tools:
+      - "read_files"
+      - "write_files"
+      - "edit_files"
+      - "bash"
+      - "search_codebase"
+
+    forbidden_tools: []
+
+  - id: "VERIFY"
+    name: "Final Verification"
+    description: "Final checks before completion"
+
+    required_artifacts:
+      - type: "verification_report"
+        description: "Proof that all acceptance criteria met"
+        validation:
+          - rule: "all_acceptance_criteria_met"
+            message: "All acceptance criteria must be verified"
+
+      - type: "final_test_run"
+        description: "Final test run results"
+        validation:
+          - rule: "all_tests_pass"
+            message: "All tests must pass in final verification"
+
+    gates:
+      - id: "ready_to_complete"
+        type: "approval"
+        blockers:
+          - check: "acceptance_criteria_verified"
+            severity: "blocking"
+            message: "All acceptance criteria must be verified"
+
+          - check: "no_known_issues"
+            severity: "blocking"
+            message: "All known issues must be resolved"
+
+        timeout_seconds: 1800
+        approvers: ["human"]
+
+    allowed_tools:
+      - "read_files"
+      - "bash"
+      - "search_codebase"
+      - "git_commit"  # Can commit after verification
+
+    forbidden_tools: []

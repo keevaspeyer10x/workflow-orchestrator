@@ -201,6 +201,90 @@ With Happy configured:
 - Monitor agent progress in the Happy app
 - Seamless handoff between mobile and desktop
 
+## Zero-Config Workflow Enforcement (PRD-008)
+
+The `orchestrator enforce` command provides zero-setup workflow enforcement for AI agents.
+
+### Quick Start
+
+```bash
+# Start a workflow with zero configuration
+orchestrator enforce "Add user authentication"
+
+# Parallel execution mode (spawn multiple agents)
+orchestrator enforce "Refactor API layer" --parallel
+
+# JSON output for programmatic use
+orchestrator enforce "Fix login bug" --json
+```
+
+### What It Does
+
+Single command setup that:
+1. **Auto-detects or starts orchestrator server** (checks ports 8000-8002)
+2. **Analyzes your repository** (detects Python/JavaScript/Go/Rust)
+3. **Generates agent_workflow.yaml** (5-phase TDD workflow with language-specific commands)
+4. **Outputs agent-ready instructions** (SDK usage examples, task context, execution mode)
+
+### Supported Languages
+
+- **Python**: Auto-detects pytest, generates `pytest` test command
+- **JavaScript**: Auto-detects jest/mocha, generates `npm test` command
+- **Go**: Auto-detects go.mod, generates `go test ./...` command
+- **Rust**: Auto-detects Cargo.toml, generates `cargo test` command
+
+### Generated Files
+
+- `.orchestrator/agent_workflow.yaml` - 5-phase workflow (PLAN → TDD → IMPL → REVIEW → VERIFY)
+- `.orchestrator/agent_instructions.md` - Agent SDK usage guide (backup reference)
+- `.orchestrator/server.log` - Server logs (if auto-started)
+- `.orchestrator/server.pid` - Server process ID (for cleanup)
+
+### Agent SDK Integration
+
+The command outputs instructions for using the Agent SDK:
+
+```python
+from src.agent_sdk.client import AgentClient
+
+# Connect to orchestrator
+client = AgentClient(
+    agent_id="agent-001",
+    orchestrator_url="http://localhost:8000"
+)
+
+# Claim a task
+task = client.claim_task(capabilities=["read_files", "write_files"])
+
+# Work through phases
+current_phase = client.get_current_phase()
+client.advance_phase()
+```
+
+### Execution Modes
+
+**Sequential (default)**: Single agent works through phases linearly
+```bash
+orchestrator enforce "Task"
+```
+
+**Parallel**: Multiple agents work on different phases/tasks
+```bash
+orchestrator enforce "Task" --parallel
+```
+
+### For AI Agents
+
+When an AI agent runs `orchestrator enforce`, it receives:
+- Complete task context
+- Server URL for Agent SDK
+- Workflow file location
+- Phase-by-phase guidance
+- Tool restrictions per phase
+- Example code snippets
+
+**All output goes to stdout** for immediate AI consumption. Backup files are saved to `.orchestrator/` for reference.
+
 ## Using the Orchestrator
 
 After installation, the user can say things naturally:
