@@ -101,6 +101,46 @@ pip install -e .
 | `finish --abandon` | Abandon current workflow |
 | `setup` | Enable automatic updates for this repo |
 | `setup --remove` | Disable automatic updates |
+| `prd spawn --count N` | Spawn N parallel Claude agents |
+| `prd sessions` | List active agent sessions |
+| `prd attach <task>` | Attach to agent's tmux window |
+| `prd done <task>` | Mark task complete, terminate session |
+| `prd cleanup` | Clean up all agent sessions |
+
+## Parallel Agent Spawning
+
+Spawn multiple Claude Code agents to work on tasks simultaneously using tmux sessions.
+
+### Quick Start
+
+```bash
+# Spawn 3 parallel agents
+orchestrator prd spawn --count 3
+
+# List active agents
+orchestrator prd sessions
+
+# Watch an agent work (attaches to tmux)
+orchestrator prd attach task-1
+
+# Mark task complete (terminates session)
+orchestrator prd done task-1
+
+# Clean up all sessions
+orchestrator prd cleanup
+```
+
+### How It Works
+
+1. **TmuxAdapter** (default): Spawns agents in tmux windows
+   - Sessions persist if orchestrator crashes
+   - You can attach to watch/interact with agents
+   - Requires tmux installed (`brew install tmux` or `apt install tmux`)
+
+2. **SubprocessAdapter** (fallback): Fire-and-forget subprocess spawning
+   - Used automatically when tmux not available (CI, containers, Windows)
+   - Logs captured to `.wfo_logs/`
+   - No attach capability
 
 ## Workflow YAML Format
 
