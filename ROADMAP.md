@@ -952,6 +952,101 @@ Error analysis runs on already-scrubbed transcripts (CORE-024), so no secrets ar
 
 ---
 
+#### WF-029: Tradeoff Analysis in Learnings-to-Roadmap Pipeline
+**Status:** ✅ **RECOMMENDED** - Critical learning from PRD-007
+**Complexity:** MEDIUM (requires AI judgment + user approval)
+**Priority:** HIGH - Prevents roadmap bloat with unnecessary items
+**Source:** User feedback (2026-01-11) - "Don't want unnecessary or unhelpful functionality"
+
+**Problem Statement:**
+The current `propose_actions` step in LEARN phase automatically suggests adding items to ROADMAP without evaluating complexity vs benefit tradeoff. This leads to:
+1. **Roadmap bloat** - Items added that will never be implemented
+2. **No prioritization** - Everything marked "Planned" regardless of actual value
+3. **Premature optimization** - YAGNI violations (E1/E4/E5 in PRD-007)
+4. **Analysis paralysis** - Users must evaluate dozens of low-value items
+
+**Evidence from PRD-007:**
+- Proposed 5 enhancement items without tradeoff analysis
+- 4 out of 5 had no evidence of need
+- Only 1 out of 5 (Prometheus) worth implementing
+- User had to request tradeoff analysis after the fact
+
+**Proposed Solution:**
+
+Add **mandatory tradeoff analysis** to `propose_actions` step:
+
+```yaml
+- id: "propose_actions"
+  name: "Propose Recommended Actions"
+  notes:
+    - "[critical] For each ROADMAP item, include complexity vs benefit analysis"
+    - "[critical] Categorize as: ✅ RECOMMEND / ⚠️ DEFER / 🔍 EXPLORATORY"
+    - "[template] Use standard tradeoff template (see below)"
+```
+
+**Standard Tradeoff Template:**
+
+For each proposed roadmap item, AI must evaluate:
+
+```markdown
+**Complexity vs Benefit Tradeoff:**
+| Factor | Current State | With This Change |
+|--------|---------------|------------------|
+| Complexity | [LOW/MEDIUM/HIGH/VERY HIGH] | Impact description |
+| Operational Overhead | Current cost | New cost/burden |
+| [Other relevant factors] | ... | ... |
+
+**Current Evidence:**
+- ✅/❌ Production data showing need?
+- ✅/❌ User requests for this?
+- ✅/❌ Observed bottleneck/pain point?
+- ✅/❌ Compliance/security requirement?
+
+**YAGNI Check:**
+- Is this solving a problem we actually have? (Not hypothetical future)
+- Would we be okay WITHOUT this for next 6-12 months?
+- Does current solution fail in practice?
+
+**Recommendation:** ✅ IMPLEMENT / ⚠️ DEFER / 🔍 EXPLORATORY
+**Reasoning:** [Clear explanation with specific triggers for reconsideration]
+```
+
+**AI Evaluation Criteria:**
+
+| Recommendation | Criteria |
+|----------------|----------|
+| ✅ **IMPLEMENT** | Low effort + High value, OR addresses active pain point with evidence |
+| ⚠️ **DEFER** | No current evidence of need, wait for user request or production data |
+| 🔍 **EXPLORATORY** | High complexity requiring separate analysis, unclear if needed |
+
+**Examples from PRD-007:**
+
+| Item | Old | New (with analysis) | Why |
+|------|-----|---------------------|-----|
+| E3: Prometheus | "Add to roadmap" | ✅ IMPLEMENT | Low effort (2-3h), standard practice, high ops value |
+| E2: Event Store | "Add to roadmap" | ⚠️ DEFER | No user need, in-memory works, wait for request |
+| E1: Redis State | "Add to roadmap" | 🔍 EXPLORATORY - DEFER | Very high complexity, no evidence of >1000 tasks, YAGNI |
+
+**Integration with Workflow:**
+
+1. **During `propose_actions`**: AI must provide tradeoff analysis for each item
+2. **Before `approve_actions`**: User reviews analysis (not just item list)
+3. **In `apply_approved_actions`**: Only approved items with recommendation preserved
+4. **ROADMAP.md entry**: Includes full tradeoff analysis, not just description
+
+**User Benefits:**
+- Roadmap stays lean (only valuable items)
+- Clear decision criteria (not gut feel)
+- Easy to say "no" to low-value items
+- Revisit triggers clearly defined
+
+**Success Metrics:**
+- Roadmap items added drop by >50% (quality over quantity)
+- >80% of "IMPLEMENT" items actually get implemented
+- <20% of items marked "DEFER" ever reconsidered
+
+---
+
 #### WF-025: Documentation Update Step in LEARN Phase
 **Status:** Planned
 **Complexity:** Low
