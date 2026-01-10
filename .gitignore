@@ -5,9 +5,9 @@
 
 # Plaintext secrets (encrypted versions are safe to commit)
 .secrets.yaml
-.manus/secrets.yaml
 .secrets.reference
-.manus/keys/age.key
+.workflow-orchestrator/keys/age.key
+.secrets.enc
 
 # Python
 __pycache__/

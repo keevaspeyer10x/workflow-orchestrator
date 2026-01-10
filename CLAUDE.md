@@ -2,24 +2,82 @@
 
 ## CRITICAL: API Keys for External Reviews
 
-**External AI model reviews are REQUIRED for code changes.** Before starting any workflow:
-
-```bash
-# Load API keys from SOPS-encrypted secrets
-eval "$(sops -d secrets.enc.yaml | sed 's/: /=/' | sed 's/^/export /')"
-
-# Or use direnv (if .envrc exists)
-direnv allow
-
-# Verify keys are loaded
-env | grep -i api_key
-```
+**External AI model reviews are REQUIRED for code changes.** You need YOUR OWN API keys (not someone else's!):
 
 **Required keys:**
 - `GEMINI_API_KEY` - For Gemini 3 Pro reviews
 - `OPENAI_API_KEY` - For GPT-5.2 Max / Codex reviews
 - `OPENROUTER_API_KEY` - For API fallback
 - `XAI_API_KEY` - For Grok 4.1 reviews
+
+### Setup: Password-Protected Secrets (Recommended)
+
+**One-time setup:**
+
+1. **Install SOPS** (if not already installed):
+   ```bash
+   # macOS
+   brew install sops age
+
+   # Linux
+   wget https://github.com/getsops/sops/releases/latest/download/sops-latest.linux.amd64
+   sudo mv sops-latest.linux.amd64 /usr/local/bin/sops && chmod +x /usr/local/bin/sops
+   ```
+
+2. **Generate your AGE key**:
+   ```bash
+   mkdir -p ~/.config/sops/age
+   age-keygen -o ~/.config/sops/age/keys.txt
+   ```
+
+3. **Create your secrets file**:
+   ```bash
+   # Get your public key
+   grep "public key:" ~/.config/sops/age/keys.txt
+
+   # Create .sops.yaml with your public key
+   cat > .sops.yaml << EOF
+   creation_rules:
+     - age: age1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  # Your public key
+   EOF
+
+   # Create and encrypt your secrets
+   sops secrets.enc.yaml
+   # Add your API keys in YAML format:
+   # gemini_api_key: your-key-here
+   # openai_api_key: your-key-here
+   # openrouter_api_key: your-key-here
+   # grok_api_key: your-key-here
+   ```
+
+4. **Encrypt your AGE key with a password**:
+   ```bash
+   mkdir -p .workflow-orchestrator/keys
+   openssl enc -aes-256-cbc -pbkdf2 \
+     -in ~/.config/sops/age/keys.txt \
+     -out .workflow-orchestrator/keys/age.key.enc
+   # Choose a memorable password when prompted
+   ```
+
+5. **Set your password as an environment variable**:
+   ```bash
+   # For Happy: Add to settings
+   SOPS_KEY_PASSWORD=your-memorable-password
+
+   # For desktop: Add to shell profile (~/.bashrc, ~/.zshrc, etc.)
+   echo 'export SOPS_KEY_PASSWORD="your-memorable-password"' >> ~/.zshrc
+   ```
+
+**How it works:**
+- Session hook auto-decrypts your AGE key using `SOPS_KEY_PASSWORD`
+- AGE key decrypts `secrets.enc.yaml`
+- API keys are loaded automatically
+- No manual steps needed each session!
+
+**Verify it's working:**
+```bash
+env | grep -i api_key
+```
 
 **If keys are not loaded:**
 - Reviews will FAIL during the REVIEW phase

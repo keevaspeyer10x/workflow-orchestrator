@@ -65,18 +65,18 @@ else
     echo "      Run 'orchestrator secrets init' to set up secrets"
 fi
 
-# 4. Legacy: Load SOPS AGE key if available (for backwards compatibility)
-KEY_FILE=".manus/keys/age.key.enc"
+# 4. Load password-encrypted SOPS AGE key
+KEY_FILE=".workflow-orchestrator/keys/age.key.enc"
 if [ -f "$KEY_FILE" ] && [ -n "$SOPS_KEY_PASSWORD" ] && [ -z "$SOPS_AGE_KEY" ]; then
     AGE_KEY=$(echo "$SOPS_KEY_PASSWORD" | openssl enc -aes-256-cbc -pbkdf2 -d -in "$KEY_FILE" -pass stdin 2>/dev/null) || true
     if [ -n "$AGE_KEY" ] && [ -n "$CLAUDE_ENV_FILE" ]; then
         echo "export SOPS_AGE_KEY='$AGE_KEY'" >> "$CLAUDE_ENV_FILE"
-        echo "SOPS AGE key loaded (legacy)"
+        echo "SOPS AGE key loaded from password"
     fi
 fi
 
 # 5. Check for local unencrypted key (for desktop use)
-LOCAL_KEY=".manus/keys/age.key"
+LOCAL_KEY=".workflow-orchestrator/keys/age.key"
 if [ -f "$LOCAL_KEY" ] && [ -z "$SOPS_AGE_KEY" ]; then
     if [ -n "$CLAUDE_ENV_FILE" ]; then
         echo "export SOPS_AGE_KEY='$(cat "$LOCAL_KEY")'" >> "$CLAUDE_ENV_FILE"
