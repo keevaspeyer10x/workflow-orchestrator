@@ -1,0 +1,90 @@
+id: prd-parallel-core-work
+title: "Parallel Core Work: CORE-024 + CORE-023-P3"
+description: |
+  Dogfood test: Implement two independent features in parallel using the orchestrator's
+  PRD spawning capability.
+
+tasks:
+  - id: core-024-session-logging
+    description: |
+      CORE-024: Session Transcript Logging with Secret Scrubbing
+
+      Implement session transcript logging that automatically scrubs secrets.
+
+      **Deliverables:**
+      1. Create `src/transcript_logger.py` with:
+         - TranscriptLogger class
+         - Known-secret replacement (from SecretsManager)
+         - Pattern-based scrubbing (API key formats: sk-*, ghp_*, xai-*, Bearer tokens)
+         - Configurable custom patterns
+
+      2. Create `.workflow_sessions/` directory management:
+         - Auto-create on first log
+         - Add to .gitignore template
+
+      3. Add `sessions` CLI command group:
+         - `orchestrator sessions list` - List recent sessions
+         - `orchestrator sessions show <id>` - View specific session
+         - `orchestrator sessions clean --older <days>` - Clean old sessions
+
+      4. Add retention/rotation policy (configurable, default 30 days)
+
+      5. Add tests in `tests/test_transcript_logger.py`
+
+      6. Update CLAUDE.md with documentation
+
+      **Reference:** See ROADMAP.md section "CORE-024: Session Transcript Logging"
+    dependencies: []
+    metadata:
+      priority: high
+      complexity: medium
+      estimated_files:
+        - src/transcript_logger.py (new)
+        - src/cli.py (add sessions commands)
+        - tests/test_transcript_logger.py (new)
+        - CLAUDE.md (docs)
+
+  - id: core-023-p3-conflict-learning
+    description: |
+      CORE-023-P3: Conflict Resolution - Learning & Config
+
+      Add learning from conflict patterns and configuration support.
+
+      **Deliverables:**
+      1. Log conflict resolutions to `.workflow_log.jsonl`:
+         - Record: file, conflict type, resolution strategy, success/failure
+         - Include context: branch names, commit hashes
+
+      2. LEARN phase surfaces conflict patterns:
+         - Add conflict summary to learn phase output
+         - Show: most conflicted files, common resolution strategies
+
+      3. Auto-add suggestions to ROADMAP.md:
+         - When patterns detected (e.g., "src/cli.py conflicts 5 times")
+         - Inform user, don't ask (append to roadmap)
+
+      4. Create config file support (`~/.orchestrator/config.yaml`):
+         - Sensitive file globs (override defaults)
+         - Per-file resolution policies (e.g., "always ours" for lockfiles)
+         - LLM enable/disable flag
+
+      5. Add tests in `tests/test_conflict_learning.py`
+
+      6. Update CLAUDE.md with configuration documentation
+
+      **Reference:** See ROADMAP.md section "CORE-023-P3: Conflict Resolution - Learning & Config"
+      **Depends on:** CORE-023-P2 (already completed)
+    dependencies: []
+    metadata:
+      priority: medium
+      complexity: medium
+      estimated_files:
+        - src/resolution/conflict_learning.py (new)
+        - src/resolution/config.py (new)
+        - src/cli.py (integrate with learn phase)
+        - tests/test_conflict_learning.py (new)
+        - CLAUDE.md (docs)
+
+settings:
+  integration_branch: main
+  require_reviews: true
