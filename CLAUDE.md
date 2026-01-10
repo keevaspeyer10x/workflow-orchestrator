@@ -50,28 +50,34 @@
    # grok_api_key: your-key-here
    ```
 
-4. **Encrypt your AGE key with a password**:
+4. **Encrypt your AGE key with a password** (global setup - works across all repos):
    ```bash
-   mkdir -p .workflow-orchestrator/keys
+   # Create global config directory
+   mkdir -p ~/.config/workflow-orchestrator/keys
+
+   # Encrypt your AGE key with a password
    openssl enc -aes-256-cbc -pbkdf2 \
      -in ~/.config/sops/age/keys.txt \
-     -out .workflow-orchestrator/keys/age.key.enc
+     -out ~/.config/workflow-orchestrator/keys/age.key.enc
    # Choose a memorable password when prompted
    ```
 
-5. **Set your password as an environment variable**:
+5. **Set your password as an environment variable** (one-time setup):
    ```bash
-   # For Happy: Add to settings
+   # For Happy: Add to Happy settings
    SOPS_KEY_PASSWORD=your-memorable-password
 
    # For desktop: Add to shell profile (~/.bashrc, ~/.zshrc, etc.)
    echo 'export SOPS_KEY_PASSWORD="your-memorable-password"' >> ~/.zshrc
+   source ~/.zshrc
    ```
 
 **How it works:**
-- Session hook auto-decrypts your AGE key using `SOPS_KEY_PASSWORD`
-- AGE key decrypts `secrets.enc.yaml`
+- Your encrypted AGE key is stored globally in `~/.config/workflow-orchestrator/keys/age.key.enc`
+- Session hook auto-decrypts your AGE key using `SOPS_KEY_PASSWORD` from your environment
+- AGE key decrypts `secrets.enc.yaml` (per-repo file with your API keys)
 - API keys are loaded automatically
+- **Works across ALL repos** - just set the password once!
 - No manual steps needed each session!
 
 **Verify it's working:**

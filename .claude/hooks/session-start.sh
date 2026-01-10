@@ -65,22 +65,37 @@ else
     echo "      Run 'orchestrator secrets init' to set up secrets"
 fi
 
-# 4. Load password-encrypted SOPS AGE key
-KEY_FILE=".workflow-orchestrator/keys/age.key.enc"
-if [ -f "$KEY_FILE" ] && [ -n "$SOPS_KEY_PASSWORD" ] && [ -z "$SOPS_AGE_KEY" ]; then
-    AGE_KEY=$(echo "$SOPS_KEY_PASSWORD" | openssl enc -aes-256-cbc -pbkdf2 -d -in "$KEY_FILE" -pass stdin 2>/dev/null) || true
-    if [ -n "$AGE_KEY" ] && [ -n "$CLAUDE_ENV_FILE" ]; then
-        echo "export SOPS_AGE_KEY='$AGE_KEY'" >> "$CLAUDE_ENV_FILE"
-        echo "SOPS AGE key loaded from password"
+# 4. Load password-encrypted SOPS AGE key (global first, then local)
+if [ -n "$SOPS_KEY_PASSWORD" ] && [ -z "$SOPS_AGE_KEY" ]; then
+    # Try global encrypted key first
+    GLOBAL_KEY="$HOME/.config/workflow-orchestrator/keys/age.key.enc"
+    if [ -f "$GLOBAL_KEY" ]; then
+        AGE_KEY=$(echo "$SOPS_KEY_PASSWORD" | openssl enc -aes-256-cbc -pbkdf2 -d -in "$GLOBAL_KEY" -pass stdin 2>/dev/null) || true
+        if [ -n "$AGE_KEY" ] && [ -n "$CLAUDE_ENV_FILE" ]; then
+            echo "export SOPS_AGE_KEY='$AGE_KEY'" >> "$CLAUDE_ENV_FILE"
+            echo "SOPS AGE key loaded from global password-protected key"
+        fi
+    # Fall back to local encrypted key
+    elif [ -f ".workflow-orchestrator/keys/age.key.enc" ]; then
+        AGE_KEY=$(echo "$SOPS_KEY_PASSWORD" | openssl enc -aes-256-cbc -pbkdf2 -d -in ".workflow-orchestrator/keys/age.key.enc" -pass stdin 2>/dev/null) || true
+        if [ -n "$AGE_KEY" ] && [ -n "$CLAUDE_ENV_FILE" ]; then
+            echo "export SOPS_AGE_KEY='$AGE_KEY'" >> "$CLAUDE_ENV_FILE"
+            echo "SOPS AGE key loaded from local password-protected key"
+        fi
     fi
 fi
 
-# 5. Check for local unencrypted key (for desktop use)
-LOCAL_KEY=".workflow-orchestrator/keys/age.key"
-if [ -f "$LOCAL_KEY" ] && [ -z "$SOPS_AGE_KEY" ]; then
-    if [ -n "$CLAUDE_ENV_FILE" ]; then
-        echo "export SOPS_AGE_KEY='$(cat "$LOCAL_KEY")'" >> "$CLAUDE_ENV_FILE"
-        echo "SOPS AGE key loaded from local file"
+# 5. Check for unencrypted key (global first, then local - for desktop use)
+if [ -z "$SOPS_AGE_KEY" ]; then
+    # Try global unencrypted key first
+    GLOBAL_PLAIN="$HOME/.config/workflow-orchestrator/keys/age.key"
+    if [ -f "$GLOBAL_PLAIN" ] && [ -n "$CLAUDE_ENV_FILE" ]; then
+        echo "export SOPS_AGE_KEY='$(cat "$GLOBAL_PLAIN")'" >> "$CLAUDE_ENV_FILE"
+        echo "SOPS AGE key loaded from global unencrypted key"
+    # Fall back to local unencrypted key
+    elif [ -f ".workflow-orchestrator/keys/age.key" ] && [ -n "$CLAUDE_ENV_FILE" ]; then
+        echo "export SOPS_AGE_KEY='$(cat ".workflow-orchestrator/keys/age.key")'" >> "$CLAUDE_ENV_FILE"
+        echo "SOPS AGE key loaded from local unencrypted key"
     fi
 fi
 

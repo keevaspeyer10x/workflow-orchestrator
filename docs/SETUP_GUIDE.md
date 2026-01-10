@@ -407,24 +407,56 @@ export ANTHROPIC_API_KEY="sk-ant-xxxxx"
 export OPENROUTER_API_KEY="sk-or-xxxxx"
 ```
 
-### Option 3: SOPS (for Teams)
+### Option 3: Password-Protected SOPS (Recommended for Desktop)
 
-For teams with existing SOPS infrastructure:
+**Best of both worlds:** SOPS security with simple password access. Works across ALL repos!
+
+**One-time setup:**
 
 ```bash
-# Install SOPS and age
+# 1. Install SOPS and age
 sudo apt install -y sops age
 
-# Generate a key
-age-keygen -o ~/.sops-key.txt
+# 2. Generate your AGE key (if you don't have one)
+mkdir -p ~/.config/sops/age
+age-keygen -o ~/.config/sops/age/keys.txt
 
-# Create encrypted secrets
-sops --encrypt --age $(cat ~/.sops-key.txt | grep "public key" | cut -d: -f2 | tr -d ' ') \
-    secrets.yaml > .manus/secrets.enc.yaml
+# 3. Get your public key for creating encrypted files
+grep "public key:" ~/.config/sops/age/keys.txt
 
-# Set the key for decryption
-export SOPS_AGE_KEY="AGE-SECRET-KEY-..."
+# 4. Create .sops.yaml in your repo with your public key
+cat > .sops.yaml << EOF
+creation_rules:
+  - age: age1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  # Your public key
+EOF
+
+# 5. Create and encrypt your secrets file
+sops secrets.enc.yaml
+# Add your API keys in YAML format:
+# gemini_api_key: your-key-here
+# openai_api_key: your-key-here
+# openrouter_api_key: your-key-here
+# grok_api_key: your-key-here
+
+# 6. Encrypt your AGE key with a password (GLOBAL - do once for all repos)
+mkdir -p ~/.config/workflow-orchestrator/keys
+openssl enc -aes-256-cbc -pbkdf2 \
+  -in ~/.config/sops/age/keys.txt \
+  -out ~/.config/workflow-orchestrator/keys/age.key.enc
+# Choose a memorable password when prompted
+
+# 7. Set password in your shell profile (one-time)
+echo 'export SOPS_KEY_PASSWORD="your-memorable-password"' >> ~/.zshrc
+source ~/.zshrc
 ```
+
+**How it works:**
+- Your encrypted AGE key is stored globally at `~/.config/workflow-orchestrator/keys/age.key.enc`
+- Session hook auto-decrypts it using `SOPS_KEY_PASSWORD`
+- SOPS then decrypts `secrets.enc.yaml` in each repo
+- **Works across ALL repos** - just set the password once!
+
+**For Happy (mobile):** Just add `SOPS_KEY_PASSWORD` to Happy settings and it works everywhere!
 
 ### Testing Secret Access
 
