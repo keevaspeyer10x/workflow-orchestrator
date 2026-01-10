@@ -19,25 +19,6 @@ When completing a roadmap item:
 
 ### Critical - Blocking Parallel Execution
 
-#### PRD-004: Fix or Replace Claude Squad Integration
-**Status:** COMPLETED (2026-01-10)
-**Complexity:** High
-**Priority:** CRITICAL - Spawning feature is completely broken
-**Source:** Dogfood testing 2026-01-09
-
-**Solution:** Implemented Option B (direct tmux management) with Option D (subprocess) as fallback.
-
-**Implementation:**
-- Created `src/prd/tmux_adapter.py` - Direct tmux session management
-- Created `src/prd/subprocess_adapter.py` - Fallback for non-tmux environments
-- Updated `src/prd/backend_selector.py` - Auto-detects tmux, falls back to subprocess
-- Updated CLI commands (`prd sessions`, `prd attach`, `prd done`, `prd cleanup`)
-- Added 57 new tests, all passing
-- Multi-model review (Gemini, GPT, Grok, DeepSeek) approved
-
-**See CHANGELOG.md for details.**
-
----
 
 #### WF-030: Session Isolation for Multi-Workflow Support
 **Status:** Planned
@@ -119,70 +100,11 @@ Low-medium effort, high value for users who want to multitask. Option A provides
 
 ---
 
-#### CORE-023-P1: Conflict Resolution - Core (No LLM)
-**Status:** COMPLETED (2026-01-09)
-**Complexity:** Medium
-**Priority:** CRITICAL - Blocks parallel execution
-**Source:** User request - Cannot run multiple Claude Code instances in parallel without this
-**Plan:** `docs/plan.md`
-**Implementation:** `src/git_conflict_resolver.py`, CLI in `src/cli.py`
 
-**Description:** Part 1 of `orchestrator resolve` - conflict detection, fast resolution (rerere, 3-way merge), and interactive escalation. No LLM in Part 1.
-
-**Scope:**
-- Conflict detection (merge and rebase)
-- Get base/ours/theirs from git index
-- rerere integration (read existing resolutions)
-- Fast 3-way merge (git merge-file)
-- Interactive escalation with options (ours/theirs/both/editor)
-- CLI: `orchestrator resolve` (preview) + `--apply`
-- Status integration (conflict warning)
-- Basic validation and rollback
-
-**NOT in Part 1:** LLM resolution, intent extraction, learning integration (see P2, P3)
-
-**Tasks:**
-- [ ] Create `src/git_conflict_resolver.py`
-- [ ] Add `resolve` command to CLI
-- [ ] Add status conflict detection
-- [ ] Add unit tests
-- [ ] Add integration tests
-- [ ] Document in CLAUDE.md
-
----
-
-#### CORE-023-P2: Conflict Resolution - LLM Integration
-**Status:** ✅ Completed (2026-01-09)
-**Complexity:** High
-**Priority:** High
-**Depends on:** CORE-023-P1
-
-**Description:** Part 2 adds LLM-based resolution for complex conflicts that can't be auto-resolved.
-
-**Implementation:**
-- Created `src/resolution/llm_resolver.py` with full LLM resolution pipeline
-- Added `--use-llm` flag to `orchestrator resolve` command
-- Supports OpenAI, Gemini, and OpenRouter APIs
-- 36 unit tests covering all key functionality
-
-**Features delivered:**
-- LLM-based resolution (opt-in with `--use-llm`)
-- Intent extraction from code with structured JSON output
-- Context assembly with CLAUDE.md conventions and token budget
-- Tiered validation (conflict markers, syntax, JSON, YAML)
-- Confidence-based escalation (HIGH = auto-apply, MEDIUM = ask, LOW = escalate)
-- `--auto-apply-threshold` and `--confirm-all` options
-
-**Security implemented:**
-- Sensitive file detection (SENSITIVE_PATTERNS: .env, secrets, keys, etc.)
-- Only conflict hunks + context sent to LLM
-- API keys from environment only, never logged
-
----
 
 #### CORE-023-P3: Conflict Resolution - Learning & Config
-**Status:** Planned (after P2)
-**Complexity:** Medium
+**Status:** ✅ **RECOMMENDED** - Natural completion of P1/P2
+**Complexity:** MEDIUM
 **Priority:** Medium
 **Depends on:** CORE-023-P2
 
@@ -197,11 +119,36 @@ Low-medium effort, high value for users who want to multitask. Option A provides
   - Per-file resolution policies
   - LLM enable/disable
 
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (No Learning) | With P3 |
+|--------|----------------------|---------|
+| Complexity | LOW - conflicts resolved per-instance | MEDIUM - pattern detection, config management |
+| User Benefit | Good - conflicts resolved | Better - conflicts prevented over time |
+| Time Savings | Per-conflict | Cumulative (learns from past) |
+| Configuration | None | User can customize behavior |
+
+**Current Evidence:**
+- ✅ P1 and P2 already exist (partial implementation)
+- ✅ Users hit same conflicts repeatedly (naturally follows from P2)
+- ✅ Configuration requested in original design
+- ❌ No data yet on actual conflict frequency
+
+**YAGNI Check:**
+- Solving a problem we **will have** after P2 ships (repeated conflicts)
+- Would be **okay** without this for 6-12 months (P2 resolves conflicts, just doesn't learn)
+- Current solution **works** but misses opportunity for improvement
+
+**Recommendation:** ✅ **IMPLEMENT** (after P2 completes and users report repeated conflicts)
+
+**Reasoning:**
+Natural evolution of conflict resolution system. Wait until P2 is in production and users experience repeated patterns, then add learning. Low-medium effort with clear long-term value.
+
 ---
 
 #### CORE-023-T1: Golden File Tests for Conflict Resolution
-**Status:** Planned
-**Complexity:** Low
+**Status:** ✅ **RECOMMENDED** - Testing best practice
+**Complexity:** LOW
 **Priority:** Medium
 **Source:** CORE-023-P2 implementation review
 
@@ -213,13 +160,38 @@ Low-medium effort, high value for users who want to multitask. Option A provides
 - Property-based tests (Hypothesis) for fuzzing edge cases
 - Regression test framework for capturing real-world failures
 
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (Basic Tests) | With Golden Files |
+|--------|----------------------|-------------------|
+| Complexity | LOW - unit tests only | LOW - golden files are simple |
+| Test Coverage | Basic edge cases | Known real-world patterns |
+| Regression Prevention | Weak | Strong |
+| Maintenance | Low | Low (add pattern when found) |
+
+**Current Evidence:**
+- ✅ Testing best practice for complex algorithms
+- ✅ Conflict resolution has many edge cases
+- ✅ Real-world patterns are valuable test cases
+- ❌ No production data yet on actual conflict patterns
+
+**YAGNI Check:**
+- Solving a problem we **will have** (regressions in conflict resolution)
+- Would be **okay** without this for 3-6 months (until patterns emerge)
+- Current solution **works** but risks regressions
+
+**Recommendation:** ✅ **IMPLEMENT** (after collecting real-world conflict patterns)
+
+**Reasoning:**
+Low-effort testing improvement. Wait until P2 is in production and we've seen actual conflict patterns, then capture them as golden files. Prevents future regressions with minimal cost.
+
 ---
 
 #### CORE-023-T2: PRD WaveResolver Integration
-**Status:** Planned
-**Complexity:** Low
-**Priority:** Medium (when PRD conflicts are actively used)
-**Depends on:** CORE-023-P2
+**Status:** ⚠️ **DEFER** - Wait for PRD multi-agent use
+**Complexity:** LOW
+**Priority:** Low (only needed when PRD conflicts occur)
+**Depends on:** CORE-023-P2 + PRD multi-agent actually being used
 
 **Description:** Integrate LLM resolution with PRD WaveResolver for multi-agent conflicts.
 
@@ -228,11 +200,36 @@ Low-medium effort, high value for users who want to multitask. Option A provides
 - Pass PRD context (manifests, task descriptions) to `LLMResolver`
 - Test with multi-agent conflict scenarios
 
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (Manual PRD Merge) | With LLM Integration |
+|--------|---------------------------|---------------------|
+| Complexity | None needed | LOW - hook existing LLMResolver |
+| PRD Use Case | Manual merge | Auto-resolve with context |
+| Benefit | N/A | Only if PRD agents create conflicts |
+| Dependencies | None | CORE-023-P2 + active PRD usage |
+
+**Current Evidence:**
+- ❌ No evidence PRD multi-agent spawning creates file conflicts
+- ❌ No production use of PRD multi-agent yet
+- ❌ WaveResolver may not even be needed (task decomposition may prevent conflicts)
+- ✅ Low implementation cost IF needed
+
+**YAGNI Check:**
+- Solving a **hypothetical** problem (PRD agent conflicts)
+- Would be **completely fine** without this for 12+ months
+- Current solution **doesn't exist yet** because problem doesn't exist yet
+
+**Recommendation:** ⚠️ **DEFER** - Only implement when PRD multi-agent is proven to create conflicts
+
+**Reasoning:**
+Premature. PRD multi-agent spawning is not yet battle-tested. We don't know if conflicts will even occur (good task decomposition may prevent them). Wait for evidence of actual conflicts before building solution.
+
 ---
 
 #### CORE-026: Review Failure Resilience & API Key Recovery
-**Status:** Planned
-**Complexity:** Medium
+**Status:** ✅ **CRITICAL** - Reviews failing silently is unacceptable
+**Complexity:** MEDIUM
 **Priority:** HIGH
 **Source:** CORE-023 implementation - Reviews silently failed after context compaction lost API keys
 
@@ -277,6 +274,31 @@ def complete_review_item(item_id):
 - `src/cli.py` - Review item completion logic
 - `src/review/router.py` - Fix the `context_override` argument error
 - `src/engine.py` - Add review completion validation to finish
+
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (Silent Failures) | With Resilience |
+|--------|--------------------------|-----------------|
+| Complexity | None (broken) | MEDIUM - error detection, retry logic |
+| Risk | HIGH - incomplete reviews unnoticed | LOW - failures block progression |
+| User Experience | Terrible - silent failure | Good - clear errors, recovery path |
+| Workflow Integrity | Broken | Enforced |
+
+**Current Evidence:**
+- ✅ Actual production incident (CORE-023 implementation)
+- ✅ Reviews silently failed, workflow proceeded with gaps
+- ✅ Context compaction is a known issue (happens regularly)
+- ✅ API keys lost after compaction is reproducible
+
+**YAGNI Check:**
+- Solving a problem we **actually have** (observed in production)
+- Would **NOT** be okay without this for even 1 month (reviews are critical)
+- Current solution **fails catastrophically** in practice
+
+**Recommendation:** ✅ **IMPLEMENT IMMEDIATELY** - Critical quality gate
+
+**Reasoning:**
+This is a blocker for zero-human-review workflows. Reviews silently failing defeats the entire purpose of the orchestrator. Medium implementation effort but absolutely necessary for production use.
 
 **Success Criteria:**
 - [ ] Reviews that fail block workflow advancement
@@ -412,6 +434,41 @@ Instead of fighting compaction, embrace it. Design workflows for shorter session
 
 **Known:** Claude Code warns when ~10% context remains. This could serve as a trigger, though ideally we'd checkpoint earlier.
 
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (WF-012 State Injection) | Option A (Checkpoint) | Option B (Handover) | Option C (Memory File) | Option D (Short Sessions) |
+|--------|----------------------------------|---------------------|-------------------|---------------------|----------------------|
+| Complexity | LOW - simple state inject | MEDIUM - detect threshold | HIGH - spawn coordination | MEDIUM - file persistence | LOW - workflow design |
+| Context Preservation | Poor (state only) | Good (full checkpoint) | Excellent (full handover) | Good (structured memory) | N/A (avoid compaction) |
+| Implementation | Done | Moderate | Complex | Moderate | Low |
+| Reliability | Unreliable | Good | Good | Good | Excellent |
+
+**Current Evidence:**
+- ✅ User reports workflows derailing after compaction
+- ✅ Agent forgets context, abandons workflows
+- ✅ #1 cause of workflow abandonment in observation
+- ✅ Affects all complex/long-running tasks
+
+**YAGNI Check:**
+- Solving a problem we **actually have** (observed repeatedly)
+- Would **NOT** be okay without this for even 3 months (blocks complex workflows)
+- Current solution (WF-012) **fails in practice** for complex tasks
+
+**Recommendation:** 🔍 **EXPLORATORY** - Research and prototype required
+
+**Reasoning:**
+This is a critical problem but the solution is unclear. Multiple approaches exist with different tradeoffs. Need to:
+1. Research Claude Code compaction triggers and hooks
+2. Prototype simplest option (likely Option A or D)
+3. Validate effectiveness before full implementation
+4. Consider if Option D (shorter sessions) is sufficient
+
+**Next Steps (in order):**
+1. Research Claude Code compaction behavior and available hooks
+2. Prototype Option A (checkpoint) or Option D (short sessions)
+3. Test with real workflow spanning compaction
+4. Evaluate effectiveness and decide on full approach
+
 **Tasks:**
 - [ ] Research Claude Code compaction behavior and available hooks
 - [ ] Design and plan approach (evaluate options A-D)
@@ -423,8 +480,8 @@ Without solving compaction, zero-human-review workflows will always fail on comp
 ---
 
 #### CORE-024: Session Transcript Logging with Secret Scrubbing
-**Status:** Planned
-**Complexity:** Medium
+**Status:** ✅ **RECOMMENDED** - Essential for debugging and learning
+**Complexity:** MEDIUM
 **Priority:** High
 **Source:** User request - Need visibility into session failures and patterns
 
@@ -510,6 +567,32 @@ class TranscriptLogger:
         path.write_text(scrubbed)
 ```
 
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (No Logging) | With Transcript Logging |
+|--------|---------------------|------------------------|
+| Complexity | None | MEDIUM - scrubbing logic, storage, CLI |
+| Debugging Capability | Poor - memory only | Excellent - persistent forensics |
+| Pattern Detection | Impossible | Possible (cross-session analysis) |
+| Risk | Low | Low (secrets scrubbed) |
+| Storage | None | Growing (needs rotation) |
+
+**Current Evidence:**
+- ✅ User explicitly requested for debugging
+- ✅ WF-023, LEARN-001, CORE-025 all benefit from transcripts
+- ✅ Pattern detection needs historical data
+- ❌ No current workflow failure forensics capability
+
+**YAGNI Check:**
+- Solving a problem we **actually have** (workflow failures with no forensics)
+- Would be **okay** without this for 6 months (can debug manually)
+- Current solution **works** but makes debugging very difficult
+
+**Recommendation:** ✅ **IMPLEMENT** - High value for debugging and learning
+
+**Reasoning:**
+Medium effort with high long-term value. Enables pattern detection, debugging, and feeds into other features (WF-023, LEARN-001). Secret scrubbing is critical but well-understood problem with known patterns.
+
 **Tasks:**
 - [ ] Create `src/transcript_logger.py` with scrubbing logic
 - [ ] Integrate with SecretsManager for known-secret loading
@@ -525,8 +608,8 @@ class TranscriptLogger:
 ---
 
 #### WF-023: Detect and Prevent Workflow Abandonment
-**Status:** Planned
-**Complexity:** Medium
+**Status:** ✅ **RECOMMENDED** - Addresses core workflow completion problem
+**Complexity:** MEDIUM
 **Priority:** High
 **Source:** User observation - Workflows aren't finishing
 
@@ -675,6 +758,31 @@ Create commit now? [Y/n/edit message]
 - [ ] Integrate with session logging (CORE-024)
 - [ ] Document hooks setup in CLAUDE.md
 
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (No Detection) | With Detection |
+|--------|----------------------|----------------|
+| Complexity | None | MEDIUM - hooks, state tracking, reminders |
+| Workflow Completion | Low (frequent abandonment) | High (active prevention) |
+| User Awareness | Poor - silent failures | Good - explicit warnings |
+| Auto-Recovery | None | Auto-checkpoint on session end |
+
+**Current Evidence:**
+- ✅ User reports workflows not finishing
+- ✅ Context compaction causes abandonment (observed)
+- ✅ No current mechanism to prevent/detect abandonment
+- ✅ LEARN phase frequently skipped (no learnings captured)
+
+**YAGNI Check:**
+- Solving a problem we **actually have** (workflows abandoned regularly)
+- Would **NOT** be okay without this for 6 months (defeats workflow purpose)
+- Current solution **fails** - no enforcement of completion
+
+**Recommendation:** ✅ **IMPLEMENT** - Core workflow reliability feature
+
+**Reasoning:**
+Medium effort, high impact on workflow completion rates. Session hooks and state tracking prevent silent abandonment. Complements CORE-025 (compaction survival) but works independently.
+
 **Metrics to Track:**
 - Workflow completion rate (completed vs started)
 - Average phase reached before abandonment
@@ -685,9 +793,9 @@ Create commit now? [Y/n/edit message]
 ---
 
 #### WF-024: Risk-Based Multi-AI Phase Reviews
-**Status:** Planned
-**Complexity:** High
-**Priority:** High
+**Status:** ⚠️ **DEFER** - Implement basic phase reviews first, then optimize
+**Complexity:** HIGH (full risk-based routing system)
+**Priority:** Medium (nice-to-have optimization)
 **Source:** User discussion - Robust zero-human-review workflows need AI oversight at each phase
 
 **Description:** Extend multi-model AI review beyond just the REVIEW phase. Add AI review gates at PLAN approval and after high-risk EXECUTE steps, with model selection based on task risk level and cost efficiency.
@@ -843,7 +951,42 @@ orchestrator complete write_tests --risk high  # Force higher review
 - Route to appropriate reviewers based on risk
 - Track review results in workflow log
 
-**Tasks:**
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (REVIEW phase only) | Basic Phase Reviews | Full Risk-Based System |
+|--------|----------------------------|--------------------|----------------------|
+| Complexity | LOW - single phase | MEDIUM - add PLAN review | HIGH - risk routing, tiers, config |
+| Implementation | Done | Moderate | Large |
+| Cost Efficiency | N/A | Same cost, better timing | Optimized (economy tier for low-risk) |
+| Catch Rate | Good (late) | Better (earlier) | Best (optimized) |
+
+**Current Evidence:**
+- ❌ No data on how often bad plans slip through
+- ❌ No data on test design issues
+- ❌ No evidence that full risk system is needed vs simple "always review PLAN"
+- ✅ Conceptually sound (catch issues early)
+
+**YAGNI Check:**
+- Solving a **hypothetical** problem (bad plans, bad tests)
+- Would be **completely fine** without this for 12+ months
+- Current solution **works** (REVIEW phase catches issues, just later)
+- **Simpler solution exists:** Just add PLAN review for everyone, skip complexity
+
+**Recommendation:** ⚠️ **DEFER full system** - Consider simpler "PLAN + REVIEW" first
+
+**Reasoning:**
+This is over-engineered for current needs. The valuable insight is "review earlier (PLAN phase)", not "complex risk-based routing system". Simpler approach:
+
+1. **Phase 1 (Now):** Add simple PLAN review (all workflows get it)
+2. **Validate:** Does PLAN review catch real issues?
+3. **Phase 2 (If needed):** Add risk-based optimization based on data
+
+Full risk-based system is premature without evidence it's needed. Start simple, evolve based on learnings.
+
+**Simpler Alternative:**
+Just add mandatory PLAN review (2 models) before human approval. Skip all the risk levels, tier selection, and per-item configuration. If that works well, then consider optimizing.
+
+**Tasks (if pursuing full system):**
 - [ ] Add `risk` field to ChecklistItemDef schema
 - [ ] Create ModelTier enum (economy, standard, premium)
 - [ ] Add tier-based model selection to ReviewRouter
@@ -873,6 +1016,8 @@ In zero-human-review AI coding, catching issues early is critical:
 - Test review ensures we're testing the right things
 - Risk-based reviews focus expensive oversight where it matters
 - Economy models make frequent reviews affordable
+
+**BUT:** Start simple first. Prove the value before building the full system.
 
 ---
 
@@ -1030,21 +1175,54 @@ orchestrator sessions analyze-errors   # Standalone error analysis
 **Privacy Consideration:**
 Error analysis runs on already-scrubbed transcripts (CORE-024), so no secrets are exposed in error messages. However, file paths and code snippets in stack traces should be reviewed for sensitivity.
 
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (Manual LEARN) | With Automated Analysis |
+|--------|----------------------|------------------------|
+| Complexity | None | MEDIUM - pattern detection, NLP, cross-session analysis |
+| Accuracy | Low (agent forgets errors) | High (objective data from logs) |
+| Actionability | Vague ("had issues") | Specific (error types, frequencies, time costs) |
+| Pattern Detection | None | Cross-session patterns reveal systemic issues |
+
+**Current Evidence:**
+- ✅ User requests objective analysis (source of this item)
+- ✅ Depends on CORE-024 (session logging) which is highly recommended
+- ✅ LEARN phase currently produces vague learnings (observed limitation)
+- ❌ No production data yet on actual error patterns (need CORE-024 first)
+
+**YAGNI Check:**
+- Solving a problem we **actually have** (vague learnings, forgotten errors)
+- Would be **okay** without this for 6-9 months (manual LEARN works, just less effective)
+- Current solution **works but suboptimal** - learnings captured but not data-driven
+
+**Recommendation:** ✅ **IMPLEMENT** - After CORE-024 (session logging) is complete
+
+**Reasoning:**
+Medium effort, high value for continuous improvement. The key dependency is CORE-024 (session logging with transcript data). Once transcripts are available, pattern detection provides actionable insights that manual reflection cannot. This transforms LEARN from subjective reflection to objective data analysis. However, it's not urgent - manual LEARN phase works, this just makes it significantly better.
+
+**Implementation Order:**
+1. CORE-024 (Session Logging) - prerequisite
+2. Basic error detection (regex patterns)
+3. Time analysis (estimate wasted time)
+4. Cross-session patterns
+5. Automated suggestions
+
+**Tasks:**
+- [ ] Create `src/learning/error_analyzer.py`
+- [ ] Define error detection regex patterns
+- [ ] Define friction detection patterns
+- [ ] Add timing analysis (gaps between actions)
+- [ ] Implement cross-session pattern detection
+- [ ] Generate actionable suggestions from errors
+- [ ] Integrate with LEARN phase workflow items
+- [ ] Add `--analyze` flag to `learn` command
+- [ ] Add `analyze-errors` to `sessions` command
+- [ ] Link suggestions to existing roadmap items when applicable
+- [ ] Add tests for pattern detection
+- [ ] Document in CLAUDE.md
+
 ---
 
-#### WF-029: Tradeoff Analysis in Learnings-to-Roadmap Pipeline
-**Status:** ✅ COMPLETED (2026-01-11)
-**Complexity:** LOW (workflow configuration change only)
-**Priority:** HIGH - Prevents roadmap bloat with unnecessary items
-
-**Implementation:**
-- Added mandatory tradeoff analysis notes to `propose_actions` step in workflow.yaml
-- Added mandatory tradeoff analysis notes to `propose_actions` step in src/default_workflow.yaml
-- Added CHANGELOG entry documenting the change
-
-See CHANGELOG.md for details.
-
----
 
 #### WF-025: Documentation Update Step in LEARN Phase
 **Status:** Planned
@@ -1097,6 +1275,31 @@ The existing `commit_and_sync` item could be enhanced to:
 2. Auto-generate changelog entry draft from commit message
 3. Include documentation files in the commit
 
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (No Doc Step) | With Doc Update Step |
+|--------|----------------------|---------------------|
+| Complexity | None | LOW - simple workflow item, basic detection |
+| Documentation Quality | Poor (often forgotten) | Good (systematic reminders) |
+| User Experience | Outdated docs frustrate users | Up-to-date docs serve users |
+| Time Cost | None | ~2-3 min per workflow |
+
+**Current Evidence:**
+- ✅ User requests documentation updates (source of this item)
+- ✅ CHANGELOG.md and README.md exist in this repo (observed)
+- ✅ Documentation drift is common (general dev problem)
+- ❌ No data on how often docs are actually forgotten
+
+**YAGNI Check:**
+- Solving a problem we **likely have** (doc updates often forgotten)
+- Would be **okay** without this for 12+ months (nice-to-have, not critical)
+- Current solution **works** - docs can be updated manually
+
+**Recommendation:** ⚠️ **DEFER** - Low priority improvement, implement after higher-value items
+
+**Reasoning:**
+Low effort but also low urgency. Documentation updates are important for user-facing projects but not a blocker for core functionality. The workflow item is already implemented (tasks show 2 items complete), so the basic prompt exists. Additional detection logic and warnings are nice-to-haves that can wait until more critical items (like CORE-026, WF-023, CORE-025) are complete. This is a quality-of-life improvement, not a core workflow reliability feature.
+
 **Tasks:**
 - [x] Add `update_documentation` item to LEARN phase in workflow.yaml
 - [x] Update bundled default workflow
@@ -1131,32 +1334,40 @@ In the REVIEW phase, before `commit_and_sync`:
 - Auto-generate filename from workflow task + date
 - Include in `commit_and_sync` staged files
 
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (No Archive) | With Review Archive |
+|--------|---------------------|---------------------|
+| Complexity | None | LOW - simple file redirect + git add |
+| Review Evidence | Lost after commit | Permanent archive |
+| Debugging | No record of what was found | Full review history |
+| Compliance | No audit trail | Complete audit trail |
+
+**Current Evidence:**
+- ✅ User experienced this problem (review output truncated/lost)
+- ✅ Reviews are critical quality gates (high value to preserve)
+- ✅ Archive pattern already used (docs/archive/ exists)
+- ✅ Simple implementation (just redirect output to file)
+
+**YAGNI Check:**
+- Solving a problem we **actually have** (user hit this issue)
+- Would **NOT** be okay without this for long (review evidence is important)
+- Current solution **fails** - review output is lost
+
+**Recommendation:** ✅ **IMPLEMENT** - Simple, high-value preservation
+
+**Reasoning:**
+Very low effort (literally just `> file.md` and `git add`), high value for traceability and debugging. Review output documents what issues were found and addressed, which is critical for understanding workflow quality over time. This is especially important for zero-human-review workflows where the review output is the only record of quality checks performed. Implementation is trivial, benefit is clear.
+
+**Tasks:**
+- [ ] Add `save_review_output` step to REVIEW phase in workflow.yaml
+- [ ] Auto-generate filename from workflow task + date
+- [ ] Ensure docs/archive/ directory exists
+- [ ] Include review file in `commit_and_sync` staged files
+- [ ] Document review archive pattern in CLAUDE.md
+
 ---
 
-#### WF-027: Save Workflow Finish Summary to Archive
-**Status:** IMPLEMENTED (2026-01-10)
-**Complexity:** Low
-**Priority:** High - User can't see full summary
-**Source:** User request (2026-01-10) - Finish summaries truncated/hard to view in CLI
-
-**Problem:**
-The `orchestrator finish` command outputs a comprehensive summary but:
-1. Output may be truncated in terminal
-2. Not saved to a file for later reference
-3. LEARNINGS.md sometimes not updated (bug observed)
-
-**Proposed Solution:**
-1. Save full finish summary to `docs/archive/YYYY-MM-DD_<task-slug>_summary.md`
-2. Include: phase summaries, skipped items, external reviews, learnings
-3. Fix LEARNINGS.md generation to ensure it's always updated
-
-**Implementation:** ✅ DONE
-- Modified `cmd_finish` to capture output via StringIO buffer
-- Saves to `docs/archive/YYYY-MM-DD_<task-slug>_summary.md`
-- Displays file path at end: `📄 Full summary saved to: <path>`
-- LEARNINGS.md bug still needs investigation (separate issue)
-
----
 
 #### WF-028: Enforce Orchestrator Status Check at Session Start
 **Status:** ✅ **RECOMMENDED** - Critical learning from PRD-007
@@ -1253,7 +1464,7 @@ This prevents abandoning quality gates (reviews, tests, learnings).
 
 ---
 
-#### WF-030: Enforce Marking Fixed Issues as Complete
+#### WF-031: Enforce Marking Fixed Issues as Complete
 **Status:** ✅ **RECOMMENDED** - Critical learning from PRD-007
 **Complexity:** LOW
 **Priority:** HIGH - Prevents incomplete work
@@ -1344,6 +1555,47 @@ During multi-model reviews (`minds review`), models fail inconsistently:
 
 **Note:** This may require changes to the `minds` CLI tool itself.
 
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (Silent Failures) | With Reliability Improvements |
+|--------|-------------------------|-------------------------------|
+| Complexity | None | MEDIUM - error handling, retry logic, logging |
+| Review Success Rate | Low (models fail silently) | High (retries + fallbacks) |
+| Debugging | Impossible (no error details) | Easy (actual errors logged) |
+| Dependencies | orchestrator only | May need `minds` CLI changes |
+
+**Current Evidence:**
+- ✅ User observed multiple model failures (Grok, DeepSeek, Gemini)
+- ✅ No clear error messages (just "Failed")
+- ✅ Reviews are critical quality gates (failures block workflows)
+- ❌ Unknown if failures are transient or permanent
+
+**YAGNI Check:**
+- Solving a problem we **actually have** (models failing in production)
+- Would **NOT** be okay without this for 3-6 months (reviews must be reliable)
+- Current solution **fails silently** - no visibility into why
+
+**Recommendation:** ✅ **IMPLEMENT** - But investigate root causes first (CORE-029, CORE-028)
+
+**Reasoning:**
+Medium effort, high value for review reliability. However, this is a symptom item - we should first investigate and fix the root causes (CORE-029 for Gemini rate limits, CORE-028 for fallback chains). Once we understand why models are failing, we can implement targeted reliability improvements. The error logging and health check are quick wins that should be done immediately.
+
+**Implementation Order:**
+1. CORE-029 (investigate Gemini rate limits) - understand the problem
+2. CORE-028 (implement fallback chain) - solve the problem
+3. Better error logging - see what's actually failing
+4. Retry logic - handle transient failures
+5. Health check - preventive validation
+
+**Tasks:**
+- [ ] Add detailed error logging to capture API responses
+- [ ] Implement retry logic with exponential backoff
+- [ ] Add `minds status --check` health check command
+- [ ] Save raw API responses to debug log
+- [ ] Distinguish transient vs permanent failures
+- [ ] Integrate with CORE-028 fallback chain
+- [ ] Document error handling in CLAUDE.md
+
 ---
 
 #### CORE-029: Investigate Gemini API Rate Limiting
@@ -1381,6 +1633,47 @@ Gemini 3 Pro reviews are failing quickly (~1s) with what appears to be rate limi
 5. **Queue reviews** instead of parallel execution
 
 **Related:** CORE-027 (Multi-Model API Reliability), CORE-028 (Fallback Chain)
+
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (Unknown) | After Investigation |
+|--------|------------------|---------------------|
+| Complexity | None | LOW - investigation only, no code |
+| Understanding | No idea why Gemini fails | Clear understanding of limits |
+| Solution Path | Guessing | Targeted fixes possible |
+| Time Required | N/A | ~1-2 hours investigation |
+
+**Current Evidence:**
+- ✅ Gemini consistently fails after ~1s (observed pattern)
+- ✅ Likely rate limit based on failure speed
+- ❌ No actual error message captured (need CORE-027 logging first)
+- ❌ Unknown if free tier vs paid tier
+- ❌ Unknown if shared key across instances
+
+**YAGNI Check:**
+- Solving a problem we **actually have** (Gemini failing consistently)
+- Would **NOT** be okay without this for 1-3 months (one model consistently broken)
+- Current solution **fails** - Gemini reviews don't work
+
+**Recommendation:** 🔍 **INVESTIGATE IMMEDIATELY** - Quick investigation unblocks fixes
+
+**Reasoning:**
+Low effort investigation (1-2 hours) that unblocks targeted solutions. This is a prerequisite for fixing Gemini failures - we can't fix what we don't understand. The investigation tasks are concrete and answerable. Should be done before CORE-027 and CORE-028 to inform their implementation.
+
+**Investigation Priority:**
+1. Add error logging (CORE-027) to see actual error
+2. Check API key tier in Google Cloud Console
+3. Review Gemini API documentation for rate limits
+4. Test with manual delay between requests
+5. Decide on solution (upgrade tier, throttling, or fallback)
+
+**Tasks:**
+- [ ] Check Gemini API documentation for rate limits by tier
+- [ ] Add detailed error logging to capture actual error response
+- [ ] Check if error is 429 (rate limit) or something else
+- [ ] Determine if this is a free tier limitation
+- [ ] Test with delays between requests
+- [ ] Check Google Cloud Console for quota usage
 
 ---
 
@@ -1443,6 +1736,36 @@ review:
 3. If fallback fails, try next fallback (up to max_fallback_attempts)
 4. Log which model actually ran the review
 5. Include fallback info in review report
+
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (No Fallback) | With Fallback Chain |
+|--------|----------------------|---------------------|
+| Complexity | None | MEDIUM - fallback config, retry logic, model mapping |
+| Review Success Rate | ~50% (2/4 models fail) | ~95% (fallbacks rescue failures) |
+| Cost | Lower (fewer reviews complete) | Slightly higher (fallback models used) |
+| Reliability | Poor (random failures) | Excellent (graceful degradation) |
+
+**Current Evidence:**
+- ✅ User observed 50% model failure rate (2 of 4 models failed)
+- ✅ User explicitly requested this feature ("If one AI unavailable, use another")
+- ✅ Reviews are critical quality gates (failures block workflows)
+- ✅ Simple configuration (YAML fallback chains)
+
+**YAGNI Check:**
+- Solving a problem we **actually have** (models failing in production, 50% failure rate)
+- Would **NOT** be okay without this for even 1 month (reviews must be reliable)
+- Current solution **fails critically** - quality gates not enforced when models fail
+
+**Recommendation:** ✅ **IMPLEMENT IMMEDIATELY** - High priority reliability fix
+
+**Reasoning:**
+Medium effort, critical value for review reliability. With 50% model failure rate, reviews are not dependable. Fallback chains ensure that review requirements are met even when individual models fail. This is a core reliability feature for zero-human-review workflows. The implementation is straightforward (configuration + retry logic), and the benefit is immediate and measurable. This should be prioritized above most other items except CORE-026 (review failure blocking).
+
+**Implementation Priority:**
+1. CORE-029 (investigate Gemini) - understand why models fail
+2. CORE-028 (this item) - implement fallback chains
+3. CORE-027 (error logging) - visibility into what's happening
 
 **Tasks:**
 - [ ] Add fallback chain configuration to review settings
@@ -1633,6 +1956,38 @@ orchestrator context --include-prd PRD-001  # Include specific PRD
 - **WF-008** (AI Critique): Reviewers use context for alignment checks
 - **Visual Verification**: VV-001 already supports style guide path
 
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (CLAUDE.md only) | With Context Docs System |
+|--------|-------------------------|-------------------------|
+| Complexity | None | MEDIUM - injection logic, smart detection, templates |
+| Alignment | Poor (agent forgets) | Good (persistent context) |
+| Context Survival | Fails after compaction | Survives compaction (re-injected) |
+| Review Quality | Generic | Context-aware (knows vision/architecture) |
+
+**Current Evidence:**
+- ✅ User discussion requested this (source of item)
+- ✅ Context compaction is a known problem (CORE-025)
+- ✅ Agents drift from project vision (observed in practice)
+- ❌ No data yet on whether context injection prevents drift
+
+**YAGNI Check:**
+- Solving a problem we **likely have** (agent alignment, drift from vision)
+- Would be **okay** without this for 6-9 months (nice-to-have, not critical)
+- Current solution **works** - CLAUDE.md provides some context, agents can read docs
+
+**Recommendation:** ⚠️ **DEFER** - Complement to CORE-025 (compaction survival), not standalone
+
+**Reasoning:**
+Medium effort, medium value. This is fundamentally a mitigation for context compaction (CORE-025). Without solving compaction first, context documents get lost too. The value proposition is stronger after CORE-025 is solved - then context documents become the persistent "memory" that survives compaction. CLAUDE.md already provides basic context injection. More structured context docs are valuable but not urgent. Prioritize core reliability items (CORE-026, WF-023, CORE-028) first.
+
+**Implementation Order:**
+1. CORE-025 (compaction survival) - prerequisite for persistence
+2. Basic North Star injection - prove the concept
+3. Architecture + UI Style Guide - expand coverage
+4. Smart injection (detect frontend vs backend) - optimize
+5. Review integration - enhance review quality
+
 **Tasks:**
 - [ ] Define document schemas/templates
 - [ ] Create `orchestrator init-context` command
@@ -1659,146 +2014,6 @@ The AI reviewers become enforcers of these standards, catching violations that w
 ---
 
 ### High Priority - Architecture Simplification
-
-#### PRD-001: Claude Squad Integration (Replaces Multi-Agent Spawning)
-**Status:** Phase 1 Complete - Core Implementation Done
-**Complexity:** Medium
-**Priority:** Critical
-**Source:** Session 7 - Agent orchestration review
-**Design Doc:** `docs/designs/claude_squad_integration_detailed.md`
-
-**Description:** Replace complex multi-backend agent spawning with Claude Squad integration for interactive multi-agent workflows. This is a major simplification that:
-
-1. **Removes** complex spawning backends (Modal, Render, Local subprocess)
-2. **Delegates** session management to Claude Squad (tmux-based)
-3. **Keeps** merge coordination, conflict resolution, task tracking
-4. **Adds** persistent session registry, capability detection
-
-**What Gets Decommissioned:**
-| File | Status |
-|------|--------|
-| `src/prd/worker_pool.py` | PENDING REMOVAL - replaced by squad_adapter |
-| `src/prd/backends/local.py` | PENDING REMOVAL - subprocess spawning |
-| `src/prd/backends/modal_worker.py` | PENDING REMOVAL - cloud spawning |
-| `src/prd/backends/render.py` | PENDING REMOVAL - cloud spawning |
-| `src/prd/backends/sequential.py` | PENDING REMOVAL - fallback |
-
-**What Gets Added:**
-| File | Purpose | Status |
-|------|---------|--------|
-| `src/prd/squad_adapter.py` | Claude Squad integration | ✅ DONE |
-| `src/prd/squad_capabilities.py` | Capability detection | ✅ DONE |
-| `src/prd/session_registry.py` | Persistent state | ✅ DONE |
-| `src/prd/backend_selector.py` | Hybrid mode selection | ✅ DONE |
-
-**What Gets Retained:**
-- `src/prd/backends/github_actions.py` - For batch/remote execution
-- `src/prd/integration.py` - Branch management, merging
-- `src/prd/wave_resolver.py` - Conflict resolution
-- `src/prd/schema.py` - Data structures
-
-**New CLI Commands:** (All implemented ✅)
-```bash
-orchestrator prd check-squad    # Verify Claude Squad compatibility
-orchestrator prd spawn          # Spawn interactive sessions
-orchestrator prd sessions       # List active sessions
-orchestrator prd attach <id>    # Attach to session
-orchestrator prd done <id>      # Mark complete
-orchestrator prd cleanup        # Clean orphaned sessions
-```
-
-**AI Review Status:** Approved with minor changes (GPT-5.2, Gemini 2.5, Grok 4)
-- Security review: ✅ Passed (codex/gpt-5.1-codex-max)
-- Quality review: ✅ Passed (codex/gpt-5.1-codex-max)
-
-**Tasks:**
-- [x] Implement `src/prd/session_registry.py` (persistent state)
-- [x] Implement `src/prd/squad_capabilities.py` (capability detection)
-- [x] Implement `src/prd/squad_adapter.py` (main integration)
-- [x] Implement `src/prd/backend_selector.py` (hybrid selection)
-- [x] Add CLI commands
-- [x] Add comprehensive tests (66 new tests, all passing)
-- [ ] Update executor.py to use new adapters (Phase 2)
-- [ ] Remove deprecated backend files (after executor.py update)
-- [ ] Update documentation
-
-**Remaining Work (PRD-001 Phase 2):**
-1. Update `src/prd/executor.py` to use BackendSelector instead of WorkerPool
-2. Remove deprecated files after executor migration
-3. Update any references in documentation
-
----
-
-#### PRD-002: Superseded - Multi-Backend Worker Pool
-**Status:** SUPERSEDED by PRD-001
-**Reason:** Claude Squad integration provides better UX (interactive sessions) with less code complexity. The worker pool approach of fire-and-forget spawning doesn't match user needs for visibility and interaction.
-
-**Original Files (to be removed):**
-- `src/prd/worker_pool.py`
-- `src/prd/backends/local.py`
-- `src/prd/backends/modal_worker.py`
-- `src/prd/backends/render.py`
-- `src/prd/backends/sequential.py`
-
----
-
-#### PRD-005: Integrate ApprovalGate with TmuxAdapter
-**Status:** Implemented (2026-01-10)
-**Complexity:** Medium
-**Priority:** High - Enables human-in-the-loop for parallel agents
-**Source:** Approval system implementation (2026-01-10)
-**Depends On:** ApprovalQueue (v2.4.0), TmuxAdapter (v2.3.0)
-
-**Description:** Integrate the new ApprovalGate with TmuxAdapter so spawned parallel agents automatically pause at workflow gates and wait for human approval.
-
-**Delivered:**
-- `ApprovalGate.get_decision_log()` - Tracks all decisions with rationale
-- `ApprovalGate._generate_rationale()` - Risk-level explanations for transparency
-- `ApprovalQueue.decision_summary()` - Groups decisions by type (auto/human)
-- `ApprovalQueue.mark_auto_approved()` - Status for auto-approved requests
-- `generate_approval_gate_instructions()` - Prompt injection for agents
-- `orchestrator approval watch` - CLI command with tmux bell notifications
-- `orchestrator approval summary` - Decision summary display
-- 50 new tests for PRD-005 functionality
-
-**Files Modified:**
-- `src/approval_gate.py` - Decision logging, rationale generation
-- `src/approval_queue.py` - Decision summary, auto-approved status
-- `src/prd/tmux_adapter.py` - Prompt injection function
-- `src/cli.py` - Watch and summary commands
-- `tests/test_approval_gate.py` - New test file (21 tests)
-
-**Future Work:** PRD-006 below
-
----
-
-#### PRD-006: Auto-Inject ApprovalGate in TmuxAdapter.spawn_agent()
-**Status:** COMPLETED (2026-01-10)
-**Complexity:** Low
-**Priority:** Medium - Improves developer experience
-**Source:** PRD-005 implementation learnings (2026-01-10)
-**Depends On:** PRD-005 (Implemented)
-
-**Description:** Automatically inject ApprovalGate instructions into agent prompts when spawning via TmuxAdapter, eliminating the need for manual prompt modification.
-
-**Implementation:**
-1. Modify `TmuxAdapter.spawn_agent()` to call `generate_approval_gate_instructions()`
-2. Append gate instructions to agent prompt files automatically
-3. Add flag `--no-approval-gate` to opt-out if needed
-
-**Files to Modify:**
-- `src/prd/tmux_adapter.py` - Modify spawn_agent() to inject instructions
-
-**Implementation Details:**
-- Added `inject_approval_gate: bool = True` to TmuxConfig and SubprocessConfig
-- Modified `spawn_agent()` in both adapters to inject instructions when enabled
-- Updated `BackendSelector.get_adapter()` to pass config
-- Updated `PRDExecutor.spawn()` to accept `inject_approval_gate` parameter
-- Added `--no-approval-gate` CLI flag to `prd spawn` command
-- Added 13 new tests (8 for TmuxAdapter, 5 for SubprocessAdapter)
-- All 1272 tests pass
-
----
 
 #### PRD-008: Zero-Config Workflow Enforcement for Agents
 **Status:** ✅ **CRITICAL** - Enables actual dogfooding
@@ -1990,38 +2205,6 @@ $ orchestrator enforce "Add rate limiting to API"
 
 ---
 
-#### PRD-007: Agent Workflow Enforcement System
-**Status:** ✅ COMPLETED - Days 14-20 (2026-01-11) | ⚠️ **Requires PRD-008 for usability**
-**Complexity:** High
-**Priority:** CRITICAL - Blocks reliable parallel execution
-**Source:** Multi-agent orchestration session feedback (2026-01-10)
-**Depends On:** PRD-006 (Completed)
-**PRD Document:** `docs/prd/PRD-007-agent-workflow-enforcement.md`
-
-**Implementation Completed:**
-- ✅ State Management (`src/orchestrator/state.py`) - Thread-safe task tracking with JSON persistence
-- ✅ Event Bus (`src/orchestrator/events.py`) - Pub/sub coordination with 6 event types
-- ✅ Configuration System (`src/orchestrator/config.py`) - Multi-source loading (defaults→file→env)
-- ✅ Error Handling (`src/orchestrator/error_handling.py`) - Retry, circuit breaker, fallback patterns
-- ✅ Agent SDK (`src/agent_sdk/client.py`) - Python client with automatic token management
-- ✅ API Integration - StateManager and EventBus integrated into FastAPI endpoints
-- ✅ Testing - 102 new tests (100% pass rate)
-- ✅ Documentation - 125+ pages (Agent SDK Guide, Workflow Spec, Deployment Guide)
-- ✅ External Reviews - All 5 AI reviews passed (Codex, Gemini, Grok - 0 issues found)
-
-**Production Ready:**
-- Security: JWT authentication, permission enforcement, audit logging
-- Reliability: Retry logic, circuit breakers, graceful degradation
-- Scalability: Stateless API, horizontal scaling, thread-safe operations
-- Observability: Comprehensive logging, health checks, event tracking
-- Deployment: Systemd, Docker, Kubernetes manifests provided
-
-**See CHANGELOG.md v2.5.0 for full details.**
-
-**Future Enhancements** (deferred to separate PRDs):
-- See PRD-007-E1 through PRD-007-E5 below for scale and distributed deployment features
-
----
 
 #### PRD-007-E1: Multi-Instance Architecture Package (Redis + Distributed Locks + Circuit Breaker Coordination)
 **Status:** 🔍 **EXPLORATORY** - Requires complexity/benefit analysis before implementation
@@ -2182,7 +2365,7 @@ It's unclear if this needs a solution. Consider:
 
 ---
 
-#### PRD-008: Auto-Spawn Review Agents
+#### PRD-016: Auto-Spawn Review Agents
 **Status:** Planned
 **Complexity:** Medium
 **Priority:** High
@@ -2198,6 +2381,36 @@ It's unclear if this needs a solution. Consider:
 - Spawn parallel review agents (security, quality, consistency, holistic, vibe_coding)
 - Wait for all reviews to complete before allowing REVIEW → COMPLETE transition
 - Consolidate review results into single review_report artifact
+
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (Manual Review) | With Auto-Spawn |
+|--------|------------------------|-----------------|
+| Complexity | None | MEDIUM - spawn coordination, result consolidation |
+| Review Coverage | Manual (often forgotten) | Automatic (always runs) |
+| Parallelization | Sequential if done | Parallel (faster) |
+| Dependencies | PRD-007 must be solid | Depends on PRD-007 stability |
+
+**Current Evidence:**
+- ❌ PRD-007 just completed (not validated in production)
+- ❌ No evidence manual review is a bottleneck
+- ❌ Multi-agent spawning not yet proven stable
+- ❌ No user requests for auto-review spawning
+
+**YAGNI Check:**
+- Solving a **hypothetical** problem (manual review burden)
+- Would be **completely fine** without this for 12+ months (manual review works)
+- Current solution **works** - `minds review` is simple and reliable
+
+**Recommendation:** ⚠️ **DEFER** - Automation before validation is premature
+
+**Reasoning:**
+Medium effort, but built on unproven foundations. PRD-007 just completed and hasn't been battle-tested. Multi-agent spawning (PRD-004) recently had stability issues. Auto-spawning reviews adds complexity without clear benefit - current `minds review` command is simple and works well. This is automation for automation's sake. Wait until manual review becomes a clear bottleneck (it won't) or PRD-007 is proven rock-solid in production.
+
+**Reconsider when:**
+- PRD-007 proven stable in production (6+ months)
+- Manual review coordination becomes actual pain point
+- Multi-agent spawning demonstrably robust
 
 **Success Criteria:**
 - [ ] Reviews auto-spawn on IMPL → REVIEW transition
@@ -2230,6 +2443,36 @@ It's unclear if this needs a solution. Consider:
 - Alert if gate_block_rate > 50% (agents struggling)
 - Alert if task_stuck_in_phase > 2h (needs human intervention)
 
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (No Metrics) | With Metrics Export |
+|--------|---------------------|---------------------|
+| Complexity | None | LOW - event tracking, JSONL export |
+| Visibility | None | High (measurable effectiveness) |
+| Debugging | Hard (guess what went wrong) | Easy (data-driven analysis) |
+| Optimization | Impossible | Data-driven improvements |
+
+**Current Evidence:**
+- ❌ PRD-007 just completed (no production use yet)
+- ❌ No metrics = no evidence workflow enforcement helps or hurts
+- ❌ No user requests for metrics
+- ❌ No operational deployment to monitor
+
+**YAGNI Check:**
+- Solving a **hypothetical** problem (lack of visibility)
+- Would be **okay** without this for 3-6 months (can dogfood without metrics first)
+- Current solution **works** - no metrics, but also no production use
+
+**Recommendation:** ⚠️ **DEFER** - Validate PRD-007 works first, then add metrics
+
+**Reasoning:**
+Low effort, but premature. Metrics are valuable when you have a running system to optimize. PRD-007 just completed and hasn't been used in production yet. First step: dogfood PRD-007 to prove it works. Second step: identify what metrics would actually be valuable based on real usage. Third step: implement metrics. Adding metrics now is measuring something that doesn't exist yet. Wait 3-6 months of production use, then add metrics based on actual questions that arise.
+
+**Reconsider when:**
+- PRD-007 in production for 3+ months
+- Questions arise like "Why do tasks get stuck?" or "Which gates fail most?"
+- Need to optimize based on data, not guesses
+
 **Success Criteria:**
 - [ ] Metrics exported to .orchestrator/metrics.jsonl
 - [ ] Dashboard can read metrics (optional: Grafana/Prometheus)
@@ -2261,6 +2504,41 @@ It's unclear if this needs a solution. Consider:
 - If gate approval times out, escalate to human
 - Preserve all state (don't lose progress)
 - Allow human to approve/reject/retry
+
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (No Recovery) | With Recovery System |
+|--------|----------------------|---------------------|
+| Complexity | None | HIGH - checkpoints, replay, retry, escalation |
+| Crash Tolerance | None (data loss) | High (recovers gracefully) |
+| Implementation | N/A | Complex state management |
+| Testing | Easy | Hard (simulate crash scenarios) |
+
+**Current Evidence:**
+- ❌ PRD-007 just completed (no production crashes yet)
+- ❌ Unknown if crashes are frequent or rare
+- ❌ Unknown if current JSON state survives crashes
+- ❌ No user reports of crash-related data loss
+
+**YAGNI Check:**
+- Solving a **hypothetical** problem (crash recovery)
+- Would be **okay** without this for 6-9 months (crashes may be rare)
+- Current solution **unknown** - need to observe crash behavior first
+
+**Recommendation:** ⚠️ **DEFER** - Observe crash patterns before building complex recovery
+
+**Reasoning:**
+High effort for unknown problem. PRD-007 just completed - we don't know if crashes are even a real issue. JSON state files may survive crashes fine (they're written atomically). Complex recovery systems (checkpointing, replay, retries) add significant complexity and testing burden. Better approach: ship PRD-007, observe actual crash behavior and impact, then decide if recovery is needed. If crashes are rare and JSON state survives, this entire system is unnecessary.
+
+**Simpler Alternative:**
+- JSON state with atomic writes (may already survive crashes)
+- Manual recovery: restart orchestrator, resume from state file
+- Wait for evidence of crash frequency before building automation
+
+**Reconsider when:**
+- Crashes observed in production (>1 per week)
+- Data loss occurs (JSON state corrupted)
+- Manual recovery becomes actual burden
 
 **Success Criteria:**
 - [ ] Orchestrator survives restart without data loss
@@ -2323,6 +2601,36 @@ Spawning multiple parallel agents locally consumes significant resources:
 3. What are the cost implications of each approach?
 4. How does credential/secret management work across approaches?
 5. Which cloud providers offer the best dev experience?
+
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (Local Only) | Option A (Cloud Server) | Option D (Resource Limits) |
+|--------|---------------------|------------------------|---------------------------|
+| Complexity | None | LOW - just use cloud VM | LOW - add agent queue |
+| Cost | $0/month | $50-200/month | $0/month |
+| Resource Limits | 2-3 agents max | 10+ agents easily | 2-3 agents, queue rest |
+| Latency | None | Slight (network) | None |
+
+**Current Evidence:**
+- ✅ User observed laptop sluggishness with 3+ agents
+- ✅ Multi-agent spawning is a real use case (PRD execution)
+- ❌ No measurement of actual resource usage per agent
+- ❌ Unknown how often >3 parallel agents are actually needed
+
+**YAGNI Check:**
+- Solving a problem we **actually have** (laptop resource exhaustion)
+- Would **NOT** be okay without this if using multi-agent frequently
+- Current solution **fails** with >3 agents
+
+**Recommendation:** 🔍 **INVESTIGATE Option D first**, then cloud if needed
+
+**Reasoning:**
+Real problem, but solution unclear. Option D (resource limits + queuing) is simplest and may be sufficient - most workflows don't need >3 parallel agents. Option A (cloud dev server) is next simplest but adds cost and latency. Option B (remote spawning) is complex overkill. Priority: 1) Measure actual resource usage, 2) Implement Option D (5-10 agents max), 3) If still hitting limits, consider cloud. This is a real operational constraint, not YAGNI, but start with simplest solution.
+
+**Implementation Priority:**
+1. Measure resource usage per agent (1-2 hours)
+2. Implement Option D - queue-based limiting (LOW effort)
+3. If queuing is too slow, evaluate Option A (cloud server)
 
 **Next Steps:**
 - [ ] Measure actual resource usage per agent
@@ -2388,6 +2696,36 @@ Before building anything, need to define:
 
 **Implementation:** TBD after design phase
 
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (CLI Only) | With Web UI |
+|--------|-------------------|-------------|
+| Complexity | None | HIGH - full web app, frontend + backend |
+| Visibility | Good (CLI output) | Better (visual dashboard) |
+| Learning Curve | Low (CLI commands) | Lower (visual interface) |
+| Maintenance | Low | High (UI bugs, browser compat) |
+
+**Current Evidence:**
+- ✅ User requested this
+- ❌ No evidence CLI is actually a bottleneck
+- ❌ PRD-007 and PRD-009 don't exist yet (no data to show)
+- ❌ Unknown what specific problems UI would solve
+
+**YAGNI Check:**
+- Solving **hypothetical** UX problems (CLI may be fine)
+- Would be **completely fine** without this for 12+ months (CLI works)
+- Current solution **works** - CLI is simple and effective
+
+**Recommendation:** ⚠️ **DEFER INDEFINITELY** - CLI-first is a strength, not weakness
+
+**Reasoning:**
+High effort, unclear benefit. CLI tools have lower maintenance, better scriptability, and clearer mental models. Web UIs add complexity (frontend bugs, browser compatibility, responsive design) without clear value. CLAUDE.md explicitly states "CLI-first" as a design principle. User request for UI is not evidence of need - need to validate CLI is actually blocking workflows. Modern CLI tools (rich, textual) can be beautiful too. Unless usage data shows CLI is genuinely painful, this is solution looking for problem.
+
+**Reconsider if:**
+- Team size grows beyond 5 people (need shared visibility)
+- Non-technical stakeholders need access
+- Clear evidence CLI blocks specific workflows
+
 ---
 
 #### PRD-012: A/B Testing Workflows
@@ -2399,6 +2737,36 @@ Before building anything, need to define:
 
 **Solution:** Support multiple workflow definitions, randomly assign agents, compare metrics.
 
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (Single Workflow) | With A/B Testing |
+|--------|--------------------------|------------------|
+| Complexity | None | HIGH - variant management, random assignment, statistical analysis |
+| Optimization | Manual/intuitive | Data-driven |
+| Sample Size Needed | N/A | Large (hundreds of runs) |
+| Prerequisites | None | PRD-007 + PRD-009 (metrics) |
+
+**Current Evidence:**
+- ❌ PRD-007 not validated in production yet
+- ❌ No baseline workflow to optimize
+- ❌ No metrics to compare (PRD-009 doesn't exist)
+- ❌ No evidence current workflow is suboptimal
+
+**YAGNI Check:**
+- Solving **hypothetical** optimization problem
+- Would be **completely fine** without this for years
+- Current solution **unknown** - workflow not proven yet
+
+**Recommendation:** ⚠️ **DEFER INDEFINITELY** - Premature optimization is root of all evil
+
+**Reasoning:**
+Classic premature optimization. Can't A/B test what doesn't exist. PRD-007 needs 6-12 months production use before optimization makes sense. Even then, manual workflow iteration based on observation is likely sufficient. A/B testing requires statistical rigor, large sample sizes, and careful variant design - huge investment for unclear payoff. This is enterprise-scale thinking for a tool that hasn't proven core value yet.
+
+**Reconsider if:**
+- Workflow in production >1 year
+- Hundreds of workflow runs per week
+- Clear hypothesis about what to optimize
+
 ---
 
 #### PRD-013: ML-Based Gate Optimization
@@ -2409,6 +2777,37 @@ Before building anything, need to define:
 **Problem:** Gates may be too strict or too lenient.
 
 **Solution:** Machine learning model learns from historical gate pass/fail decisions, suggests optimizations.
+
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (Manual Gates) | With ML Optimization |
+|--------|----------------------|---------------------|
+| Complexity | None | VERY HIGH - ML pipeline, feature engineering, training, deployment |
+| Data Requirements | None | Thousands of gate decisions |
+| Maintenance | Low | High (model retraining, drift detection) |
+| Interpretability | High (rules explicit) | Low (black box) |
+
+**Current Evidence:**
+- ❌ No gates exist yet (PRD-007 just completed)
+- ❌ No historical data (need years of production use)
+- ❌ No evidence gates are misconfigured
+- ❌ No user complaints about gate strictness
+
+**YAGNI Check:**
+- Solving **hypothetical** optimization problem
+- Would be **completely fine** without this for years (decades?)
+- Current solution **doesn't exist yet** to optimize
+
+**Recommendation:** ⚠️ **DEFER INDEFINITELY** - ML is massive overkill
+
+**Reasoning:**
+This is absurdly premature. PRD-007 gates don't exist in production. Even if they did, manual tuning based on observation is sufficient for years. ML requires thousands of samples, careful feature engineering, model maintenance, and addresses a problem that likely doesn't exist. Gates are simple boolean rules - if they're wrong, just change the YAML. This is "let's use ML because it sounds cool" not "we have a problem that requires ML." Hard pass.
+
+**Simpler Alternative:**
+- Use manual gate tuning based on observation
+- Add logging to see which gates fail most often
+- Adjust thresholds in YAML based on data
+- Never build this ML system
 
 ---
 
@@ -2430,6 +2829,31 @@ Do not modify database schema
 All changes must be backwards compatible
 Follow PEP 8 style guide
 ```
+
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (Inline Only) | With File Support |
+|--------|----------------------|------------------|
+| Complexity | None | LOW - read file, split lines |
+| Usability | Awkward for many constraints | Easy (edit file) |
+| Reusability | None | High (reuse file) |
+| Effort | ~30 min implementation | ~30 min implementation |
+
+**Current Evidence:**
+- ❌ No user reports of constraints being unwieldy
+- ❌ No evidence multiple constraints are common
+- ❌ Inline constraints work fine for known use cases
+- ✅ Very low implementation cost
+
+**YAGNI Check:**
+- Solving a **hypothetical** usability problem
+- Would be **completely fine** without this for 12+ months
+- Current solution **works** - inline constraints are simple
+
+**Recommendation:** ⚠️ **DEFER** - Wait for user pain point
+
+**Reasoning:**
+Very low effort (~30 min), but also unclear need. Inline `--constraints` flags work fine for 1-3 constraints. If users commonly need 5-10 constraints, this becomes valuable. But no evidence of that yet. This is a nice-to-have convenience feature, not a core capability. Implement when users actually complain about inline constraints being awkward, not before.
 
 **Tasks:**
 - [ ] Add `--constraints-file` argument to start command
@@ -2469,6 +2893,36 @@ class SQLiteBackend(CheckpointBackend): ...  # New
 class PostgresBackend(CheckpointBackend): ...  # New
 ```
 
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (File Backend) | With DB Backends |
+|--------|----------------------|------------------|
+| Complexity | LOW - simple JSON files | MEDIUM - DB schema, migrations, connections |
+| Multi-Node | No | Yes (PostgreSQL) |
+| Querying | Parse all files | SQL queries |
+| Team Use | Copy files manually | Shared database |
+
+**Current Evidence:**
+- ❌ No multi-node deployment exists
+- ❌ No team collaboration use case observed
+- ❌ No reports of checkpoint querying being slow
+- ❌ File backend works fine for current use
+
+**YAGNI Check:**
+- Solving **hypothetical** scaling problem
+- Would be **completely fine** without this for 12+ months
+- Current solution **works** - files are simple and reliable
+
+**Recommendation:** ⚠️ **DEFER** - Wait for team/multi-node need
+
+**Reasoning:**
+Medium effort for unclear benefit. Checkpoints are infrequent (manual save points), not high-throughput data. File backend is simple, reliable, and git-friendly (can commit checkpoints). Database adds operational complexity (backups, migrations, connection management) without solving an actual problem. If orchestrator becomes a team tool with shared state, then PostgreSQL makes sense. But that's a big "if" that hasn't materialized yet.
+
+**Reconsider when:**
+- Team size >3 people sharing checkpoints
+- Multi-node deployment actually needed
+- Checkpoint querying becomes bottleneck (unlikely)
+
 **Tasks:**
 - [ ] Create `CheckpointBackend` abstract base class
 - [ ] Refactor current file-based storage to `FileBackend`
@@ -2503,7 +2957,7 @@ from datetime import datetime, timedelta
 class CachedProvider:
     _availability_cache: dict[str, tuple[bool, datetime]] = {}
     _cache_ttl = timedelta(minutes=5)
-    
+
     def is_available(self) -> bool:
         cached = self._availability_cache.get(self.name)
         if cached and datetime.now() - cached[1] < self._cache_ttl:
@@ -2512,6 +2966,31 @@ class CachedProvider:
         self._availability_cache[self.name] = (result, datetime.now())
         return result
 ```
+
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (No Cache) | With Caching |
+|--------|-------------------|--------------|
+| Complexity | None | LOW - simple TTL cache |
+| Speed | Subprocess/HTTP each time | Instant (cached) |
+| Freshness | Always current | 5-min stale |
+| Value | N/A | Only matters if availability checks are slow |
+
+**Current Evidence:**
+- ❌ No measurement of availability check latency
+- ❌ No user complaints about slowness
+- ❌ Provider selection happens infrequently (once per workflow)
+- ❌ Unknown if subprocess spawn is actually slow
+
+**YAGNI Check:**
+- Solving **hypothetical** performance problem
+- Would be **completely fine** without this for 12+ months
+- Current solution **works** - no observed slowness
+
+**Recommendation:** ⚠️ **DEFER** - Measure first, optimize if needed
+
+**Reasoning:**
+Low effort, but solving imaginary problem. Provider availability checks happen once per workflow start - not in a hot loop. Even if subprocess spawn takes 50ms, that's imperceptible to users. Caching adds complexity (TTL management, invalidation, stale data) for unclear benefit. This is textbook premature optimization. If profiling shows availability checks are actually slow, then cache. But don't assume.
 
 **Tasks:**
 - [ ] Add caching to `AgentProvider` base class
@@ -2548,6 +3027,31 @@ for ep in importlib.metadata.entry_points(group='orchestrator.providers'):
     register_provider(ep.name, provider_class)
 ```
 
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (Built-in Only) | With Plugin System |
+|--------|------------------------|-------------------|
+| Complexity | LOW - providers in core | HIGH - entry points, validation, docs |
+| Extensibility | Modify core code | External packages |
+| Maintenance | Orchestrator team | Community |
+| Use Case | Core providers only | Custom/niche providers |
+
+**Current Evidence:**
+- ❌ No user requests for custom providers
+- ❌ No evidence built-in providers are insufficient
+- ❌ No ecosystem of external providers exists
+- ❌ No community contributions yet
+
+**YAGNI Check:**
+- Solving **hypothetical** extensibility need
+- Would be **completely fine** without this for years
+- Current solution **works** - add providers to core if needed
+
+**Recommendation:** ⚠️ **DEFER INDEFINITELY** - Build when ecosystem demands
+
+**Reasoning:**
+High effort for imaginary need. Plugin systems are valuable when there's an ecosystem of external contributors. But orchestrator doesn't have that - it's a single-user tool. If someone needs a custom provider, they can fork or PR. Building plugin infrastructure before there are plugins is premature. Wait until multiple external contributors actually want to add providers, then build the system.
+
 **Tasks:**
 - [ ] Define entry point group `orchestrator.providers`
 - [ ] Add provider discovery on startup
@@ -2573,17 +3077,42 @@ for ep in importlib.metadata.entry_points(group='orchestrator.providers'):
 class EncryptedCheckpointBackend(CheckpointBackend):
     def __init__(self, key: str):
         self._key = key
-    
+
     def save(self, checkpoint: CheckpointData) -> None:
         data = json.dumps(checkpoint.to_dict())
         encrypted = age_encrypt(data, self._key)
         # Save encrypted blob
-    
+
     def load(self, checkpoint_id: str) -> Optional[CheckpointData]:
         encrypted = # Load encrypted blob
         data = age_decrypt(encrypted, self._key)
         return CheckpointData.from_dict(json.loads(data))
 ```
+
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (Plaintext) | With Encryption |
+|--------|---------------------|----------------|
+| Complexity | None | HIGH - encryption lib, key mgmt, recovery |
+| Security | Checkpoints readable | Checkpoints encrypted |
+| Use Case | Development checkpoints | Sensitive proprietary work |
+| Risk | Secrets may leak in checkpoints | Secrets protected |
+
+**Current Evidence:**
+- ❌ No reports of secrets in checkpoints
+- ❌ No compliance requirement for encrypted checkpoints
+- ❌ Checkpoints are developer-local (not shared)
+- ✅ Secrets already handled by SOPS (separate system)
+
+**YAGNI Check:**
+- Solving **hypothetical** security problem
+- Would be **completely fine** without this for years
+- Current solution **works** - secrets handled separately
+
+**Recommendation:** ⚠️ **DEFER INDEFINITELY** - No evidence of need
+
+**Reasoning:**
+High effort for unclear threat model. Checkpoints are local dev artifacts, not shared data. If they contain secrets, that's a bug in checkpoint creation (should scrub secrets). Encryption adds key management complexity, recovery challenges, and doesn't solve root cause. Better approach: ensure checkpoints never contain secrets (validation/scrubbing) rather than encrypt them. Only consider if compliance requires encrypted-at-rest for all local dev artifacts.
 
 **Tasks:**
 - [ ] Add `pyage` or similar library dependency
@@ -2619,6 +3148,31 @@ The original vision of fully autonomous distributed agents with locking/claiming
 - Wave resolver handles merge conflicts
 - User maintains visibility and control
 
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (Single Agent) | Original (Distributed) | Revised (PRD-001) |
+|--------|----------------------|----------------------|------------------|
+| Complexity | LOW | VERY HIGH - full distributed system | MEDIUM - session mgmt |
+| Coordination | None needed | Item locking, claiming | Session registry |
+| Merge Handling | Simple | Complex conflict resolution | Wave resolver |
+| User Control | Full | Limited | Maintained |
+
+**Current Evidence:**
+- ✅ PRD-001 (Claude Squad) completed and simpler
+- ✅ Original approach was over-engineered
+- ✅ Session-based approach proven effective
+- ❌ No evidence full distributed system needed
+
+**YAGNI Check:**
+- Original problem **over-solved** by distributed system design
+- Current PRD-001 approach **sufficient** for known use cases
+- Full distributed coordination **not needed**
+
+**Recommendation:** ✅ **SUPERSEDED by PRD-001** - Simpler approach won
+
+**Reasoning:**
+This item is effectively complete via PRD-001's simpler approach. The original distributed workflow vision (item locking, claiming, central coordination) was over-engineered. Claude Squad + session management + wave-based merging solves the actual problem (parallel agent work) without distributed systems complexity. This is a great example of reconsidering and simplifying. Mark as superseded, not deferred.
+
 ---
 
 ## Visual Verification Improvements
@@ -2635,6 +3189,36 @@ The original vision of fully autonomous distributed agents with locking/claiming
 - Run against preview/staging deployment
 - Post results as PR comment
 - Block merge on failure
+
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (Manual Visual Testing) | With CI/CD |
+|--------|---------------------------------|------------|
+| Complexity | None | MEDIUM - GitHub Actions, preview deploy, screenshot compare |
+| Coverage | Manual (often skipped) | Automated (every PR) |
+| Feedback Speed | Slow (manual test) | Fast (automated) |
+| Prerequisites | Visual verification system | Visual verification system + CI setup |
+
+**Current Evidence:**
+- ❌ No visual verification system exists yet (VV-001, VV-002, VV-003 not implemented)
+- ❌ No preview/staging deployment setup
+- ❌ No evidence manual visual testing is bottleneck
+- ❌ Visual testing may not be core to orchestrator (CLI tool)
+
+**YAGNI Check:**
+- Solving **hypothetical** CI problem for **nonexistent** visual testing
+- Would be **completely fine** without this for years
+- Current solution **doesn't exist** - building automation before feature
+
+**Recommendation:** ⚠️ **DEFER** - Build visual verification first, automate later
+
+**Reasoning:**
+Classic cart-before-horse. Can't automate visual testing that doesn't exist. VV-001 through VV-004 need to be implemented and proven valuable first. Only then does CI integration make sense. Also, orchestrator is primarily a CLI tool - visual testing may not even be relevant except for hypothetical web UI (PRD-011, also deferred). This is automation looking for a feature to automate.
+
+**Reconsider when:**
+- Visual verification system exists and is used regularly
+- Manual visual testing becomes bottleneck
+- Web UI (PRD-011) actually gets built and needs testing
 
 ---
 
