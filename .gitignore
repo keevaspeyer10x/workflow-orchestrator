@@ -55,6 +55,7 @@ htmlcov/
 .workflow_state.json
 .workflow_log.jsonl
 .workflow_checkpoints/
+.workflow_sessions/
 
 # Model registry cache (local per-project)
 .model_registry.json

@@ -20,7 +20,7 @@ from typing import Optional, List
 from datetime import datetime, timezone
 import logging
 
-from .session_registry import SessionRegistry, SessionRecord
+from ..session_registry import SessionRegistry, SessionRecord
 from .squad_capabilities import CapabilityDetector, SquadCapabilities
 from src.secrets import get_user_config_value
 

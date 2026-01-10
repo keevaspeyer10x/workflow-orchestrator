@@ -319,6 +319,46 @@ orchestrator resolve --abort
 
 **Note:** `orchestrator status` will show a conflict warning if git has unresolved conflicts.
 
+### Conflict Resolution Configuration
+
+Configure conflict resolution behavior in `~/.orchestrator/config.yaml`:
+
+```yaml
+# Per-file resolution policies
+# Override how specific files are resolved during conflicts
+file_policies:
+  "package-lock.json": "regenerate"   # Regenerate lock files
+  "*.lock": "theirs"                  # Accept target branch for lock files
+  ".env*": "ours"                     # Keep our environment files
+  "*.min.js": "theirs"                # Accept minified files from target
+
+# Sensitive file globs (never sent to LLM for resolution)
+sensitive_globs:
+  - "secrets/*"
+  - "*.pem"
+  - ".env*"
+  - "*.key"
+  - "*credential*"
+
+# LLM resolution settings
+resolution:
+  disable_llm: false              # Set to true for air-gapped environments
+  max_file_size_for_llm: 10485760 # 10MB - skip LLM for larger files
+  max_conflicts_for_llm: 50       # Skip LLM if >50 conflicts
+  timeout_per_file: 120           # 2 min timeout per file
+
+# Conflict learning settings
+learning:
+  auto_roadmap_suggestions: true  # Auto-add suggestions to ROADMAP.md
+  conflict_threshold: 3           # Flag files with >= 3 conflicts
+  session_window: 10              # Analyze last 10 sessions
+```
+
+**Conflict Learning:**
+- Conflict resolutions are logged to `.workflow_log.jsonl`
+- The LEARN phase analyzes patterns (frequently conflicted files)
+- Suggestions are auto-added to ROADMAP.md when patterns detected
+
 ## Secrets Management
 
 The orchestrator supports multiple secret sources (checked in priority order):

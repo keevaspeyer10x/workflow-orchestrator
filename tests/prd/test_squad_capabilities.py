@@ -5,7 +5,7 @@ Tests for Claude Squad capability detection.
 import pytest
 from unittest.mock import patch, MagicMock
 
-from src.prd.squad_capabilities import CapabilityDetector, SquadCapabilities
+from src.prd._deprecated.squad_capabilities import CapabilityDetector, SquadCapabilities
 
 
 class TestSquadCapabilities:

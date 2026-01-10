@@ -61,7 +61,7 @@ class BackendSelector:
         # Check Claude Squad (deprecated, kept for backwards compat)
         squad_available = False
         try:
-            from .squad_capabilities import CapabilityDetector
+            from ._deprecated.squad_capabilities import CapabilityDetector
             detector = CapabilityDetector()
             caps = detector.detect()
             squad_available = caps.is_compatible

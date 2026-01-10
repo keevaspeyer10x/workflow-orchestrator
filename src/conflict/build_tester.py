@@ -44,19 +44,6 @@ class BuildTester:
     4. Clean up temporary branch
     """
 
-    # Build system detection priority
-    BUILD_SYSTEMS = [
-        # (indicator_file, build_command, test_command)
-        ("package.json", "npm run build", "npm test"),
-        ("Cargo.toml", "cargo build", "cargo test"),
-        ("go.mod", "go build ./...", "go test ./..."),
-        ("pyproject.toml", "pip install -e . -q", "pytest"),
-        ("setup.py", "pip install -e . -q", "pytest"),
-        ("requirements.txt", None, "pytest"),
-        ("Makefile", "make", "make test"),
-        ("CMakeLists.txt", "cmake --build .", "ctest"),
-    ]
-
     def __init__(
         self,
         base_branch: str = "main",
@@ -215,17 +202,13 @@ class BuildTester:
 
     def _detect_build_command(self) -> Optional[str]:
         """Auto-detect the appropriate build command."""
-        for indicator, build_cmd, _ in self.BUILD_SYSTEMS:
-            if Path(indicator).exists():
-                return build_cmd
-        return None
+        from src.config import get_project_commands
+        return get_project_commands().get("build_command")
 
     def _detect_test_command(self) -> Optional[str]:
         """Auto-detect the appropriate test command."""
-        for indicator, _, test_cmd in self.BUILD_SYSTEMS:
-            if Path(indicator).exists():
-                return test_cmd
-        return None
+        from src.config import get_project_commands
+        return get_project_commands().get("test_command")
 
     def _get_targeted_test_command(
         self,

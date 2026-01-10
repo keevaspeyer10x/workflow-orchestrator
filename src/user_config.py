@@ -65,6 +65,10 @@ class UserConfig:
                 "*.pyc": "delete",
                 "__pycache__/*": "delete",
             },
+            # Per-file resolution policies (CORE-023-P3)
+            # Override how specific files are resolved during conflicts
+            # Policies: "ours" | "theirs" | "regenerate" | "manual"
+            "file_policies": {},
             "resolution": {
                 "disable_llm": False,
                 "max_file_size_for_llm": 10485760,  # 10MB (from source)
@@ -133,6 +137,11 @@ class UserConfig:
         return self._data.get("generated_files", {})
 
     @property
+    def file_policies(self) -> dict[str, str]:
+        """Get per-file resolution policies (CORE-023-P3)."""
+        return self._data.get("file_policies", {})
+
+    @property
     def resolution(self) -> dict:
         """Get resolution settings."""
         return self._data.get("resolution", {})
@@ -193,6 +202,33 @@ class UserConfig:
             # Also check basename
             if fnmatch.fnmatch(Path(path).name, pattern):
                 return policy
+        return None
+
+    def get_file_policy(self, path: str) -> Optional[str]:
+        """
+        Get per-file resolution policy (CORE-023-P3).
+
+        Checks file_policies first (user overrides), then generated_files.
+
+        Args:
+            path: File path to check
+
+        Returns:
+            Policy string ("ours", "theirs", "regenerate", "manual")
+            or None if no policy defined
+        """
+        # Check user-defined file_policies first (takes precedence)
+        for pattern, policy in self.file_policies.items():
+            if fnmatch.fnmatch(path, pattern):
+                return policy
+            # Also check basename
+            if fnmatch.fnmatch(Path(path).name, pattern):
+                return policy
+
+        # Fall back to generated_files (for backwards compatibility)
+        # Note: This is intentionally NOT called to separate concerns
+        # generated_files is for auto-generated files
+        # file_policies is for conflict resolution
         return None
 
     # ========================================================================

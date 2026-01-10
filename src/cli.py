@@ -2626,6 +2626,60 @@ def cmd_secrets(args):
         sys.exit(1)
 
 
+def cmd_sessions(args):
+    """Manage session transcripts (CORE-024)."""
+    from src.transcript_logger import TranscriptLogger, get_transcript_logger
+
+    working_dir = Path(args.dir or '.')
+    action = args.action
+
+    logger = get_transcript_logger(working_dir=working_dir)
+
+    if action == "list":
+        limit = getattr(args, 'limit', None) or 20
+        sessions = logger.list_sessions(limit=limit)
+
+        if not sessions:
+            print("No sessions found.")
+            return
+
+        print(f"Recent Sessions ({len(sessions)} shown):")
+        print("")
+        for s in sessions:
+            size_kb = s['size_bytes'] / 1024
+            modified = s['modified'].strftime("%Y-%m-%d %H:%M")
+            print(f"  {s['session_id']}")
+            print(f"    Date: {modified}  Size: {size_kb:.1f} KB")
+        print("")
+        print(f"Sessions stored in: {logger._sessions_dir}")
+
+    elif action == "show":
+        if not args.session_id:
+            print("Error: 'sessions show' requires SESSION_ID argument")
+            sys.exit(1)
+
+        content = logger.get_session(args.session_id)
+        if content:
+            print(content)
+        else:
+            print(f"Session not found: {args.session_id}")
+            sys.exit(1)
+
+    elif action == "clean":
+        days = getattr(args, 'older', None) or 30
+        removed = logger.clean(older_than_days=days)
+
+        if removed:
+            print(f"Removed {removed} session(s) older than {days} days")
+        else:
+            print(f"No sessions older than {days} days")
+
+    else:
+        print(f"Unknown action: {action}")
+        print("Available actions: list, show, clean")
+        sys.exit(1)
+
+
 def cmd_update_models(args):
     """Update the model registry from OpenRouter API (CORE-017)."""
     from src.model_registry import get_model_registry
@@ -2675,40 +2729,46 @@ def cmd_update_models(args):
 # Claude Squad Integration Commands (PRD-001)
 # ============================================================================
 
-def cmd_prd_check_squad(args):
-    """Check Claude Squad compatibility."""
-    from src.prd.squad_capabilities import CapabilityDetector
+def cmd_prd_check_backend(args):
+    """Check execution backend availability."""
+    from src.prd.backend_selector import BackendSelector, ExecutionMode
+    from src.prd.tmux_adapter import TmuxAdapter
+    import shutil
 
-    detector = CapabilityDetector()
-    caps = detector.detect()
-
-    print("Claude Squad Compatibility Check")
+    print("Execution Backend Check")
     print("=" * 40)
 
-    if not caps.installed:
-        print("  Status: NOT INSTALLED")
-        print("  Install: https://github.com/smtg-ai/claude-squad")
-        sys.exit(1)
+    # 1. Check Tmux
+    tmux_path = shutil.which("tmux")
+    if tmux_path:
+        print(f"  tmux: INSTALLED ({tmux_path})")
+        # Check if we can create sessions
+        try:
+            adapter = TmuxAdapter(Path("."))
+            info = adapter.get_session_info()
+            print(f"  tmux session: {'Active' if info['exists'] else 'Can be created'}")
+        except Exception as e:
+            print(f"  tmux error: {e}")
+    else:
+        print("  tmux: NOT INSTALLED (Required for interactive sessions)")
 
-    print(f"  Version: {caps.version or 'unknown'}")
-    print(f"  Status: {'Compatible' if caps.is_compatible else 'INCOMPATIBLE'}")
+    # 2. Check Subprocess (always available)
+    print("  Subprocess: AVAILABLE (Fallback)")
+
+    # 3. Detect Mode
+    mode = BackendSelector.detect(Path(".")).select(interactive=True)
     print()
-    print("Capabilities:")
-    print(f"  Commands: new={caps.supports_new}, list={caps.supports_list}, "
-          f"attach={caps.supports_attach}, kill={caps.supports_kill}")
-    print(f"  Flags: prompt_file={caps.supports_prompt_file}, branch={caps.supports_branch}, "
-          f"dir={caps.supports_dir}, autoyes={caps.supports_autoyes}")
-    print(f"  JSON output: {caps.supports_json_output}")
+    print(f"  Detected Mode: {mode.value.upper()}")
 
-    if caps.compatibility_issues:
-        print()
-        print("Issues:")
-        for issue in caps.compatibility_issues:
-            print(f"  - {issue}")
-        sys.exit(1)
-
-    print()
-    print("Ready for PRD execution with Claude Squad!")
+    if mode == ExecutionMode.INTERACTIVE:
+        print("  ✓ Ready for interactive execution (tmux)")
+    elif mode == ExecutionMode.SUBPROCESS:
+        print("  ✓ Ready for background execution (subprocess)")
+        print("    (Install tmux for interactive features)")
+    elif mode == ExecutionMode.BATCH:
+        print("  ✓ Ready for batch execution (GitHub Actions)")
+    else:
+        print(f"  Status: {mode.value}")
 
 
 def cmd_prd_spawn(args):
@@ -3723,6 +3783,15 @@ Examples:
     update_models_parser.add_argument('--check', action='store_true', help='Only check if registry is stale')
     update_models_parser.set_defaults(func=cmd_update_models)
 
+    # Sessions command (CORE-024)
+    sessions_parser = subparsers.add_parser('sessions', help='Manage session transcripts')
+    sessions_parser.add_argument('action', choices=['list', 'show', 'clean'], help='Sessions action')
+    sessions_parser.add_argument('session_id', nargs='?', help='Session ID (for show)')
+    sessions_parser.add_argument('--limit', type=int, default=20, help='Max sessions to list (default: 20)')
+    sessions_parser.add_argument('--older', type=int, default=30, help='Remove sessions older than N days (default: 30)')
+    sessions_parser.add_argument('-d', '--dir', help='Working directory')
+    sessions_parser.set_defaults(func=cmd_sessions)
+
     # PRD command (Phase 6)
     prd_parser = subparsers.add_parser('prd', help='Execute PRD mode with multiple concurrent agents')
     prd_subparsers = prd_parser.add_subparsers(dest='prd_command', help='PRD subcommands')
@@ -3761,8 +3830,9 @@ Examples:
 
     # Claude Squad Integration Commands (PRD-001)
     # prd check-squad
-    prd_check_squad = prd_subparsers.add_parser('check-squad', help='Check Claude Squad compatibility')
-    prd_check_squad.set_defaults(func=cmd_prd_check_squad)
+    # check-backend (was check-squad)
+    prd_check_backend = prd_subparsers.add_parser('check-backend', help='Check execution backend availability')
+    prd_check_backend.set_defaults(func=cmd_prd_check_backend)
 
     # prd spawn
     prd_spawn = prd_subparsers.add_parser('spawn', help='Spawn next wave of tasks via Claude Squad')

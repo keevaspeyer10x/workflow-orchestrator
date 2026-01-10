@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock, PropertyMock
 from datetime import datetime, timezone
 
-from src.prd.squad_adapter import (
+from src.prd._deprecated.squad_adapter import (
     ClaudeSquadAdapter,
     SquadConfig,
     ClaudeSquadError,
@@ -16,7 +16,7 @@ from src.prd.squad_adapter import (
     SessionError,
 )
 from src.prd.session_registry import SessionRecord
-from src.prd.squad_capabilities import SquadCapabilities
+from src.prd._deprecated.squad_capabilities import SquadCapabilities
 
 
 class TestSquadConfig:
@@ -38,7 +38,7 @@ class TestSquadConfig:
         old_val = os.environ.pop("CLAUDE_BINARY", None)
         try:
             # Also mock the config lookup to return None
-            with patch('src.prd.squad_adapter.get_user_config_value', return_value=None):
+            with patch('src.prd._deprecated.squad_adapter.get_user_config_value', return_value=None):
                 config = SquadConfig()
                 assert config.claude_binary == "claude"
         finally:
@@ -51,7 +51,7 @@ class TestSquadConfig:
         old_val = os.environ.get("CLAUDE_BINARY")
         try:
             os.environ["CLAUDE_BINARY"] = "happy"
-            with patch('src.prd.squad_adapter.get_user_config_value', return_value=None):
+            with patch('src.prd._deprecated.squad_adapter.get_user_config_value', return_value=None):
                 config = SquadConfig()
                 assert config.claude_binary == "happy"
         finally:
@@ -65,7 +65,7 @@ class TestSquadConfig:
         import os
         old_val = os.environ.pop("CLAUDE_BINARY", None)
         try:
-            with patch('src.prd.squad_adapter.get_user_config_value', return_value="happy"):
+            with patch('src.prd._deprecated.squad_adapter.get_user_config_value', return_value="happy"):
                 config = SquadConfig()
                 assert config.claude_binary == "happy"
         finally:
@@ -78,7 +78,7 @@ class TestSquadConfig:
         old_val = os.environ.get("CLAUDE_BINARY")
         try:
             os.environ["CLAUDE_BINARY"] = "env-binary"
-            with patch('src.prd.squad_adapter.get_user_config_value', return_value="config-binary"):
+            with patch('src.prd._deprecated.squad_adapter.get_user_config_value', return_value="config-binary"):
                 config = SquadConfig()
                 assert config.claude_binary == "env-binary"
         finally:
@@ -122,7 +122,7 @@ class TestClaudeSquadAdapter:
     @pytest.fixture
     def adapter(self, temp_dir, mock_capabilities):
         """Create an adapter with mocked capabilities."""
-        with patch('src.prd.squad_adapter.CapabilityDetector') as mock_detector:
+        with patch('src.prd._deprecated.squad_adapter.CapabilityDetector') as mock_detector:
             mock_detector.return_value.detect.return_value = mock_capabilities
             adapter = ClaudeSquadAdapter(temp_dir)
             # Also mock _list_squad_sessions to avoid subprocess calls
@@ -131,7 +131,7 @@ class TestClaudeSquadAdapter:
 
     def test_init_checks_capabilities(self, temp_dir):
         """Should check capabilities on init."""
-        with patch('src.prd.squad_adapter.CapabilityDetector') as mock_detector:
+        with patch('src.prd._deprecated.squad_adapter.CapabilityDetector') as mock_detector:
             mock_caps = SquadCapabilities(
                 installed=False,
                 is_compatible=False,
@@ -222,9 +222,9 @@ class TestClaudeSquadAdapter:
 
     def test_spawn_session_includes_p_flag(self, temp_dir, mock_capabilities):
         """Should include -p flag with claude_binary in spawn command."""
-        with patch('src.prd.squad_adapter.CapabilityDetector') as mock_detector:
+        with patch('src.prd._deprecated.squad_adapter.CapabilityDetector') as mock_detector:
             mock_detector.return_value.detect.return_value = mock_capabilities
-            with patch('src.prd.squad_adapter.get_user_config_value', return_value=None):
+            with patch('src.prd._deprecated.squad_adapter.get_user_config_value', return_value=None):
                 config = SquadConfig(claude_binary="happy")
                 adapter = ClaudeSquadAdapter(temp_dir, config=config)
                 adapter._list_squad_sessions = MagicMock(return_value=[])
@@ -248,9 +248,9 @@ class TestClaudeSquadAdapter:
         import os
         old_val = os.environ.pop("CLAUDE_BINARY", None)
         try:
-            with patch('src.prd.squad_adapter.CapabilityDetector') as mock_detector:
+            with patch('src.prd._deprecated.squad_adapter.CapabilityDetector') as mock_detector:
                 mock_detector.return_value.detect.return_value = mock_capabilities
-                with patch('src.prd.squad_adapter.get_user_config_value', return_value=None):
+                with patch('src.prd._deprecated.squad_adapter.get_user_config_value', return_value=None):
                     adapter = ClaudeSquadAdapter(temp_dir)
                     adapter._list_squad_sessions = MagicMock(return_value=[])
 

@@ -494,6 +494,60 @@ class SecretsManager:
         self._cache.clear()
         logger.debug("Secrets cache cleared")
 
+    def get_all_known_secrets(self) -> Dict[str, str]:
+        """
+        Get all known secrets from all sources.
+
+        This is used by TranscriptLogger for secret scrubbing.
+        Returns a dict of {secret_name: secret_value} for all
+        secrets that can be found.
+
+        Note: This method may trigger source lookups (SOPS, GitHub)
+        which could be slow. Results are cached.
+
+        Returns:
+            Dict mapping secret names to their values
+        """
+        # Common secret names to check
+        common_names = [
+            'OPENAI_API_KEY',
+            'ANTHROPIC_API_KEY',
+            'OPENROUTER_API_KEY',
+            'GEMINI_API_KEY',
+            'XAI_API_KEY',
+            'GITHUB_TOKEN',
+            'GH_TOKEN',
+            'AWS_ACCESS_KEY_ID',
+            'AWS_SECRET_ACCESS_KEY',
+            'STRIPE_API_KEY',
+            'STRIPE_SECRET_KEY',
+            'DATABASE_URL',
+            'DB_PASSWORD',
+            'API_KEY',
+            'SECRET_KEY',
+            'PRIVATE_KEY',
+        ]
+
+        secrets = {}
+
+        # First, include any cached secrets
+        secrets.update(self._cache)
+
+        # Check each common name
+        for name in common_names:
+            if name not in secrets:
+                value = self.get_secret(name)
+                if value:
+                    secrets[name] = value
+
+        # Also include any secrets from simple_secrets_cache
+        if self._simple_secrets_cache:
+            for name, value in self._simple_secrets_cache.items():
+                if name not in secrets and value:
+                    secrets[name] = value
+
+        return secrets
+
 
 def save_user_config(config: Dict[str, Any]) -> None:
     """

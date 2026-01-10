@@ -1,73 +1,53 @@
-# PRD-004: TmuxAdapter Test Cases
+# Test Cases for CORE-024: Session Transcript Logging
 
-## Unit Tests: TmuxAdapter
+## TranscriptLogger Tests
 
-### test_tmux_adapter.py
+### TC-SCRUB-001: Known Secrets Scrubbing
+- Input: Text containing actual API key from SecretsManager
+- Expected: Key replaced with `[REDACTED:SECRET_NAME]`
 
-| Test | Description | Mocks |
-|------|-------------|-------|
-| `test_spawn_agent_creates_session` | Spawns agent, verifies tmux commands called | subprocess.run |
-| `test_spawn_agent_creates_window` | Verifies new-window command for each task | subprocess.run |
-| `test_spawn_agent_sends_claude_command` | Verifies send-keys with correct prompt | subprocess.run |
-| `test_spawn_agent_registers_in_registry` | Session saved to SessionRegistry | subprocess.run |
-| `test_spawn_agent_reuses_existing_session` | Second spawn uses existing tmux session | subprocess.run |
-| `test_list_agents_parses_tmux_output` | Parses `tmux list-windows` output | subprocess.run |
-| `test_list_agents_empty_session` | Handles no windows gracefully | subprocess.run |
-| `test_capture_output_returns_pane_content` | Gets output via capture-pane | subprocess.run |
-| `test_kill_agent_removes_window` | Calls kill-window for task | subprocess.run |
-| `test_cleanup_kills_entire_session` | Calls kill-session | subprocess.run |
-| `test_attach_execs_tmux` | Verifies os.execvp called | os.execvp |
-| `test_happy_integration_uses_custom_binary` | Uses CLAUDE_BINARY env | subprocess.run |
-| `test_session_name_sanitization` | Special chars in task_id handled | - |
-| `test_tmux_not_available_raises` | Error when tmux missing | shutil.which |
+### TC-SCRUB-002: Pattern-based Scrubbing (OpenAI)
+- Input: Text containing `sk-abc123xyz`
+- Expected: Replaced with `[REDACTED:OPENAI_KEY]`
 
-## Unit Tests: SubprocessAdapter
+### TC-SCRUB-003: Pattern-based Scrubbing (GitHub)
+- Input: Text containing `ghp_abc123xyz`
+- Expected: Replaced with `[REDACTED:GITHUB_TOKEN]`
 
-### test_subprocess_adapter.py
+### TC-SCRUB-004: Pattern-based Scrubbing (xAI)
+- Input: Text containing `xai-abc123xyz`
+- Expected: Replaced with `[REDACTED:XAI_KEY]`
 
-| Test | Description | Mocks |
-|------|-------------|-------|
-| `test_spawn_agent_starts_process` | subprocess.Popen called | subprocess.Popen |
-| `test_spawn_agent_creates_log_file` | Log file created at expected path | subprocess.Popen |
-| `test_spawn_agent_registers_pid` | PID saved in SessionRegistry | subprocess.Popen |
-| `test_list_agents_returns_active` | Lists processes from registry | - |
-| `test_capture_output_reads_log` | Returns content from log file | - |
-| `test_kill_agent_terminates_process` | Sends SIGTERM to PID | os.kill |
-| `test_kill_agent_handles_already_dead` | No error if process gone | os.kill |
+### TC-SCRUB-005: Pattern-based Scrubbing (Stripe)
+- Input: Text containing `pk_live_xxx` or `sk_live_xxx`
+- Expected: Replaced with `[REDACTED:STRIPE_KEY]`
 
-## Unit Tests: BackendSelector
+### TC-SCRUB-006: Bearer Token Scrubbing
+- Input: Text containing `Bearer eyJhbGc...`
+- Expected: Replaced with `[REDACTED:BEARER_TOKEN]`
 
-### test_backend_selector.py
+### TC-LOG-001: Session Logging
+- Input: Session ID and content
+- Expected: File created in `.workflow_sessions/`
 
-| Test | Description |
-|------|-------------|
-| `test_detect_tmux_available` | Returns INTERACTIVE when tmux found |
-| `test_detect_tmux_unavailable` | Falls back to SUBPROCESS |
-| `test_detect_gha_available` | Returns BATCH when GHA configured |
-| `test_select_prefers_interactive` | INTERACTIVE over SUBPROCESS |
-| `test_select_respects_prefer_remote` | BATCH when prefer_remote=True |
-| `test_get_available_modes` | Lists all detected modes |
+### TC-LOG-002: Session Directory Auto-creation
+- Input: Log to non-existent directory
+- Expected: Directory created automatically
 
-## Integration Tests
+### TC-LIST-001: List Sessions
+- Input: Multiple sessions in directory
+- Expected: List sorted by date, newest first
 
-### test_integration_tmux.py
+### TC-SHOW-001: Get Session Content
+- Input: Valid session ID
+- Expected: Session content returned
 
-| Test | Conditions | Description |
-|------|------------|-------------|
-| `test_spawn_real_agent` | Requires tmux | Actually creates tmux session |
-| `test_list_real_sessions` | Requires tmux | Lists real windows |
-| `test_capture_real_output` | Requires tmux | Captures real pane content |
-| `test_cleanup_real_sessions` | Requires tmux | Cleans up test sessions |
+### TC-CLEAN-001: Clean Old Sessions
+- Input: Sessions older than N days
+- Expected: Old sessions removed, new ones kept
 
-## Edge Cases
+## CLI Tests
 
-| Case | Expected Behavior |
-|------|-------------------|
-| Task ID with spaces | Sanitized to dashes |
-| Task ID with unicode | Sanitized to ASCII |
-| Very long task ID | Truncated to 50 chars |
-| Empty prompt | Still spawns (empty file) |
-| Working dir doesn't exist | Creates .wfo_prompt dir |
-| Multiple spawn same task | Idempotent - returns existing |
-| Kill non-existent task | No error, logs warning |
-| Attach to completed task | Error with helpful message |
+### TC-CLI-001: sessions list command
+### TC-CLI-002: sessions show command
+### TC-CLI-003: sessions clean command

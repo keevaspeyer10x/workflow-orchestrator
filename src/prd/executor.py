@@ -27,11 +27,10 @@ from .schema import (
     WorkerBackend,
 )
 from .queue import FileJobQueue
-from ._deprecated.worker_pool import WorkerPool  # Deprecated - use ClaudeSquadAdapter
+from ._deprecated.worker_pool import WorkerPool  # Deprecated - kept for async execute_prd()
 from .integration import IntegrationBranchManager, CheckpointPR
 from .wave_resolver import WaveResolver, WaveResolutionResult
 from .spawn_scheduler import SpawnScheduler, SpawnWave, ScheduleResult
-from .squad_adapter import ClaudeSquadAdapter, SquadConfig
 from .backend_selector import BackendSelector, ExecutionMode
 
 logger = logging.getLogger(__name__)
@@ -497,38 +496,36 @@ Dependencies: {task.dependencies if task.dependencies else 'None'}
                 dry_run=True,
             )
 
-        # Actually spawn via Claude Squad
+        # Actually spawn via TmuxAdapter (or SubprocessAdapter fallback)
         backend_selector = BackendSelector.detect(self.working_dir)
-        mode = backend_selector.select(task_count=len(wave.tasks), interactive=True)
+        adapter = backend_selector.get_adapter()
 
-        if mode != ExecutionMode.INTERACTIVE:
+        if adapter is None:
             return SpawnResult(
                 spawned_count=0,
                 wave_number=wave.wave_number,
                 task_ids=wave.task_ids,
-                explanation=f"Claude Squad not available (mode={mode.value}). Use manual backend.",
-                error="Claude Squad required for spawn",
+                explanation="No execution backend available. Install tmux for interactive sessions.",
+                error="No backend available for spawn",
             )
-
-        # Spawn sessions
-        squad_config = SquadConfig(working_dir=self.working_dir)
-        adapter = ClaudeSquadAdapter(squad_config)
 
         session_ids = []
         for task in wave.tasks:
             try:
                 prompt = self._generate_task_prompt(task, prd.id)
-                session_id = adapter.spawn_session(
+                branch = f"claude/{task.id}"
+                session = adapter.spawn_agent(
                     task_id=task.id,
                     prompt=prompt,
-                    branch=f"claude/{task.id}",
+                    working_dir=self.working_dir,
+                    branch=branch,
                 )
-                session_ids.append(session_id)
+                session_ids.append(session.session_id)
                 task.status = TaskStatus.RUNNING
-                task.agent_id = session_id
-                task.branch = f"claude/{task.id}"
+                task.agent_id = session.session_id
+                task.branch = branch
                 task.started_at = datetime.now(timezone.utc)
-                logger.info(f"Spawned session for task {task.id}: {session_id}")
+                logger.info(f"Spawned session for task {task.id}: {session.session_name}")
             except Exception as e:
                 logger.error(f"Failed to spawn session for task {task.id}: {e}")
                 task.status = TaskStatus.FAILED
@@ -678,7 +675,7 @@ Dependencies: {task.dependencies if task.dependencies else 'None'}
 
     def get_sessions_status(self, prd: PRDDocument) -> list[dict]:
         """
-        Get status of all Claude Squad sessions for this PRD.
+        Get status of all active sessions for this PRD.
 
         Returns list of session info dicts with:
         - task_id
@@ -687,36 +684,29 @@ Dependencies: {task.dependencies if task.dependencies else 'None'}
         - idle_time (seconds since last activity)
         """
         backend_selector = BackendSelector.detect(self.working_dir)
-        mode = backend_selector.select(task_count=1, interactive=True)
+        adapter = backend_selector.get_adapter()
 
-        if mode != ExecutionMode.INTERACTIVE:
+        if adapter is None:
             return []
 
-        squad_config = SquadConfig(working_dir=self.working_dir)
-        adapter = ClaudeSquadAdapter(squad_config)
+        # Get all active sessions from the adapter
+        active_sessions = adapter.list_agents()
+        session_map = {s.task_id: s for s in active_sessions}
 
         sessions = []
         for task in prd.tasks:
             if task.status == TaskStatus.RUNNING and task.agent_id:
-                try:
-                    session_info = adapter.get_session_info(task.agent_id)
-                    idle_time = None
-                    if task.started_at:
-                        idle_time = (datetime.now(timezone.utc) - task.started_at).total_seconds()
-                    sessions.append({
-                        "task_id": task.id,
-                        "session_id": task.agent_id,
-                        "status": session_info.get("status", "unknown") if session_info else "unknown",
-                        "idle_time": idle_time,
-                        "branch": task.branch,
-                    })
-                except Exception:
-                    sessions.append({
-                        "task_id": task.id,
-                        "session_id": task.agent_id,
-                        "status": "error",
-                        "idle_time": None,
-                        "branch": task.branch,
-                    })
+                session = session_map.get(task.id)
+                idle_time = None
+                if task.started_at:
+                    idle_time = (datetime.now(timezone.utc) - task.started_at).total_seconds()
+
+                sessions.append({
+                    "task_id": task.id,
+                    "session_id": task.agent_id,
+                    "status": session.status if session else "unknown",
+                    "idle_time": idle_time,
+                    "branch": task.branch,
+                })
 
         return sessions

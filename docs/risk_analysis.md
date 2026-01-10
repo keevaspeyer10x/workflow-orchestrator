@@ -1,61 +1,33 @@
-# PRD-004 Risk Analysis
+# Risk Analysis: CORE-023-P3
 
-## Risk Matrix
+## Risk Assessment
 
-| Risk | Likelihood | Impact | Mitigation |
-|------|------------|--------|------------|
-| tmux not installed on target system | Medium | Low | Subprocess fallback handles this |
-| tmux session name collisions | Low | Medium | Use unique prefix `wfo-{workflow_id}` |
-| Orphaned tmux sessions on crash | Medium | Low | Cleanup command + reconciliation |
-| Breaking existing tests | High | Medium | Update tests before merging |
-| Claude --print behavior changes | Low | High | Pin to known-good behavior |
-| Prompt file left on disk | Low | Low | Cleanup in done/cleanup commands |
+### Low Risk
 
-## Detailed Analysis
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| Log file format changes | May break existing log readers | Use existing event types, extend details field |
+| Config file migration | Old configs may not have new fields | Use defaults for missing fields |
+| Roadmap format mismatch | Auto-added suggestions may look different | Follow exact existing ROADMAP.md format |
 
-### 1. tmux Availability
-- **Risk:** tmux not installed in CI, containers, Windows
-- **Mitigation:** SubprocessAdapter as automatic fallback
-- **Detection:** `shutil.which("tmux")` returns None
+### Medium Risk
 
-### 2. Session Naming
-- **Risk:** Multiple workflows create conflicting session names
-- **Mitigation:** Include workflow ID in session name: `wfo-{wf_id}-main`
-- **Already handled:** `_generate_session_name()` sanitizes task IDs
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| Performance with large log files | Slow pattern analysis | Limit session window (default: 10 sessions) |
+| Race conditions in log/roadmap writes | Corrupted files | Use file locking (already in engine.py) |
 
-### 3. Orphaned Sessions
-- **Risk:** Orchestrator crashes, tmux sessions keep running
-- **Mitigation:**
-  - `orchestrator prd cleanup` kills all wfo-* sessions
-  - SessionRegistry marks orphaned on reconciliation
-  - tmux sessions are visible (`tmux ls`) for manual cleanup
+### No Significant Risks
 
-### 4. Test Breakage
-- **Risk:** Existing squad_adapter tests fail
-- **Mitigation:** Create new test file, deprecate old tests gradually
-- **Approach:** Tests mock subprocess, don't need real tmux
+This is a low-risk addition:
+- Extends existing functionality (logging, config)
+- No changes to core resolution logic
+- No external API calls added
+- Backwards compatible (new config fields are optional)
 
-### 5. Claude CLI Changes
-- **Risk:** `claude --print` flag changes or removed
-- **Mitigation:** Adapter abstraction allows quick fix
-- **Detection:** Validate output on spawn
+## Testing Strategy
 
-### 6. File Cleanup
-- **Risk:** `.wfo_prompt_*.txt` files accumulate
-- **Mitigation:** Delete in `kill_agent()` and `cleanup()`
-
-## Security Considerations
-
-| Concern | Assessment |
-|---------|------------|
-| Prompt injection via task_id | Low - sanitized with regex |
-| tmux command injection | Low - using list args, not shell |
-| Sensitive data in prompt files | Medium - files in working dir, user-controlled |
-| Session hijacking | Low - requires local access |
-
-## Rollback Plan
-
-If issues discovered:
-1. `backend_selector.py` can force `MANUAL` mode
-2. Old `squad_adapter.py` remains (deprecated, not deleted)
-3. SessionRegistry format unchanged - no migration needed
+1. Unit tests for learning module
+2. Integration tests with mock log files
+3. Config validation tests
+4. Manual verification of ROADMAP format
