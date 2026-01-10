@@ -1816,6 +1816,7 @@ with quality gates enforced by multi-model review.
 - All code changes go through external model review
 - Workflows must complete (no silent abandonment)
 - Secrets never appear in logs or transcripts
+- **Stand-alone, agent-agnostic design**: The orchestrator must work independently of Claude Code, without requiring CLAUDE.md or Claude Code-specific features. It should be usable by any AI agent (Codex, Cursor, Windsurf, etc.) and in any environment (CLI, CI/CD, web). Avoid tight coupling to any specific AI coding assistant.
 
 ## Architecture Decisions
 | Decision | Date | Rationale |
@@ -2808,6 +2809,104 @@ This is absurdly premature. PRD-007 gates don't exist in production. Even if the
 - Add logging to see which gates fail most often
 - Adjust thresholds in YAML based on data
 - Never build this ML system
+
+---
+
+### Critical - Agent Independence
+
+#### CORE-030: Audit and Remove Claude Code Dependencies
+**Status:** Planned
+**Complexity:** LOW (audit) to MEDIUM (if refactoring needed)
+**Priority:** HIGH - Core architectural principle
+**Source:** User feedback (2026-01-11) - "I'm nervous about ever including things in Claude.md as I want this to be a stand alone program which others can use"
+
+**Problem Statement:**
+The orchestrator currently has implicit dependencies on Claude Code environment:
+1. **CLAUDE.md documentation** - Contains orchestrator usage instructions
+2. **Installation via Claude Code session hooks** - install.sh assumes Claude Code
+3. **CLI integration examples** - Documented for Claude Code specifically
+4. **Happy integration** - Mobile access assumes Claude Code + Happy
+
+**Real-World Impact:**
+- Codex, Cursor, Windsurf, or other AI agents cannot easily adopt the orchestrator
+- CI/CD pipelines may have Claude Code assumptions
+- Documentation is Claude Code-centric rather than tool-agnostic
+- Users may be locked into Claude Code ecosystem
+
+**Non-Negotiable Principle:**
+> The orchestrator must work independently of Claude Code, without requiring CLAUDE.md or Claude Code-specific features. It should be usable by any AI agent (Codex, Cursor, Windsurf, etc.) and in any environment (CLI, CI/CD, web).
+
+**Proposed Solution:**
+
+**Phase 1: Audit** (1-2 hours)
+1. Grep codebase for "claude", "CLAUDE", "happy", "Happy" references
+2. Document all Claude Code-specific features/assumptions
+3. Identify which are:
+   - **Essential to keep** (e.g., agent SDK is agent-agnostic)
+   - **Can be generalized** (e.g., "AI agent" instead of "Claude Code")
+   - **Should be removed** (e.g., tight coupling to Happy)
+
+**Phase 2: Refactor** (if needed, 4-8 hours)
+1. Move Claude Code-specific docs from CLAUDE.md → separate `docs/integrations/claude-code.md`
+2. Make README.md agent-agnostic (works for any AI agent)
+3. Ensure CLI commands work standalone (no Claude Code assumptions)
+4. Update installation to work without session hooks (pure pip install)
+5. Add integration guides for other agents: `docs/integrations/cursor.md`, `docs/integrations/codex.md`
+
+**Phase 3: Testing** (2-4 hours)
+1. Test orchestrator in vanilla terminal (no Claude Code)
+2. Test with pure Python environment (no AI agent)
+3. Test CI/CD usage (GitHub Actions, GitLab CI)
+4. Verify all CLI commands work standalone
+
+**Expected Findings:**
+- Most code is already agent-agnostic (core functionality doesn't know about Claude Code)
+- Documentation is the main culprit (assumes Claude Code context)
+- Installation script may need --standalone flag
+- Agent SDK is already generic (good!)
+
+**Success Criteria:**
+- [ ] All code works in vanilla terminal (no AI agent)
+- [ ] README.md mentions zero AI agent brands
+- [ ] Installation: `pip install workflow-orchestrator` works standalone
+- [ ] CLAUDE.md becomes `docs/integrations/claude-code.md` (optional integration guide)
+- [ ] New doc: `docs/integrations/README.md` explains how to integrate with any agent
+
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (Claude Code-centric) | After Refactor (Agent-agnostic) |
+|--------|-------------------------------|--------------------------------|
+| Complexity | LOW - existing code | LOW - mostly docs changes |
+| Adoption | Claude Code users only | Any AI agent |
+| Maintenance | Coupled to Claude Code ecosystem | Independent evolution |
+| Testing | Claude Code environment | Any environment |
+| CI/CD | Requires workarounds | Native support |
+
+**Current Evidence:**
+- ✅ User explicitly concerned about Claude Code lock-in
+- ✅ Project goal: "stand alone program which others can use"
+- ✅ Future goal: "runnable by other agents like Codex"
+- ✅ Aligns with architectural principle
+
+**YAGNI Check:**
+- This is **NOT speculative** - it's enforcing existing architectural principle
+- Validates that current implementation matches stated goals
+- Prevents accumulation of Claude Code-specific assumptions
+
+**Recommendation:** ✅ **RECOMMEND** - High priority, low effort, core principle
+
+**Reasoning:**
+This isn't feature creep - it's ensuring the project adheres to its stated goal of being a standalone, agent-agnostic tool. The audit phase is very low effort (1-2 hours) and will reveal if any refactoring is needed. Most likely, the code is already independent and only documentation needs updating. This should be done sooner rather than later to prevent Claude Code assumptions from accumulating.
+
+**Tasks:**
+- [ ] Audit: Grep for "claude", "CLAUDE", "happy", "Happy" in codebase
+- [ ] Audit: List all Claude Code-specific assumptions
+- [ ] Refactor: Move CLAUDE.md → `docs/integrations/claude-code.md`
+- [ ] Refactor: Make README.md agent-agnostic
+- [ ] Refactor: Add `docs/integrations/README.md` (integration guide template)
+- [ ] Test: Run orchestrator in vanilla terminal (no AI agent)
+- [ ] Test: Run in CI/CD environment
+- [ ] Document: Add examples for Cursor, Codex, Windsurf integrations
 
 ---
 
