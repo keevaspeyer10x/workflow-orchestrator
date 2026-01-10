@@ -157,6 +157,22 @@ phases:
           type: "file_exists"
           path: "{{tests_dir}}/test_cases.md"
 
+      - id: "parallel_execution_check"
+        name: "Assess Parallel Execution Opportunity"
+        description: "Before starting implementation, determine if tasks can be parallelized using multiple agents. Document your decision and reasoning."
+        required: true
+        skippable: true
+        skip_conditions: ["single_task_only", "tasks_are_dependent"]
+        notes:
+          - "[critical] Are there 2+ independent tasks? Consider parallel agents (e.g., 'orchestrator prd spawn --count 3' or multiple Task tool calls)"
+          - "[howto] Launch parallel agents: Send ONE message with MULTIPLE Task tool calls - NOT separate messages"
+          - "[example] Good: Task(description='Fix auth', ...) + Task(description='Fix API', ...) in SAME message"
+          - "[example] Bad: Task for auth in message 1, then Task for API in message 2 (sequential, not parallel)"
+          - "[plan] Use Plan agent FIRST (subagent_type='Plan') if implementation approach is unclear"
+          - "[verify] Will you verify agent output by reading files, not trusting summaries?"
+          - "[decision] Document in plan.md: Will use [sequential/parallel] execution because [reason]"
+          - "[learning] From WF-034: Multiple sessions showed agents launching 1 agent instead of 3-4 parallel agents, wasting time"
+
       - id: "user_approval"
         name: "Get User Approval"
         description: "The user must approve the plan before execution can begin."
@@ -403,6 +419,20 @@ phases:
           - "[api] Update API documentation if public interfaces changed"
           - "[tip] The commit message often contains good starting content for changelog entries"
           - "[caution] Don't skip this for user-facing changes - outdated docs frustrate users"
+
+      - id: "capture_workflow_feedback"
+        name: "Capture Workflow Feedback (Automatic)"
+        description: "AUTOMATIC: Capture structured feedback about workflow adherence and experience. This runs automatically and is opt-out (set ORCHESTRATOR_SKIP_FEEDBACK=1 to disable). Saves to .workflow_feedback.jsonl for aggregation across repos."
+        required: true
+        skippable: true
+        skip_conditions: ["feedback_disabled_by_env_var"]
+        notes:
+          - "[auto] This runs AUTOMATICALLY using 'orchestrator feedback --auto' - no user prompt needed"
+          - "[questions] Captures: parallel agents used? reviews performed? what went well? challenges? improvements?"
+          - "[storage] Saves to .workflow_feedback.jsonl (gitignored, safe for aggregation)"
+          - "[opt-out] To disable: export ORCHESTRATOR_SKIP_FEEDBACK=1"
+          - "[learning] From WF-034: Two sessions showed identical problems - systematic feedback needed"
+          - "[privacy] Only captures workflow metadata, no code or sensitive data"
 
       - id: "commit_and_sync"
         name: "Commit and Sync Changes"
