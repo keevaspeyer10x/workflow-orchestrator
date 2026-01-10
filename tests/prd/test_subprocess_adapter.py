@@ -243,3 +243,74 @@ class TestSubprocessAdapterEdgeCases:
 
             with pytest.raises(Exception):  # Should raise some error
                 adapter.spawn_agent("task-1", "Test", temp_dir, "main")
+
+
+@pytest.mark.skipif(not IMPORTS_AVAILABLE, reason="SubprocessAdapter not implemented yet")
+class TestSubprocessAdapterApprovalGateInjection:
+    """Tests for PRD-006: Auto-inject ApprovalGate in spawn_agent()."""
+
+    @pytest.fixture
+    def temp_dir(self, tmp_path):
+        return tmp_path
+
+    def test_spawn_agent_injects_approval_gate_by_default(self, temp_dir):
+        """spawn_agent() should inject approval gate instructions by default."""
+        with patch('subprocess.Popen') as mock_popen:
+            mock_process = MagicMock()
+            mock_process.pid = 12345
+            mock_popen.return_value = mock_process
+
+            adapter = SubprocessAdapter(working_dir=temp_dir)
+            record = adapter.spawn_agent("test-task", "Do something", temp_dir, "main")
+
+            prompt_file = Path(record.prompt_file)
+            content = prompt_file.read_text()
+
+            assert "## Approval Gate Integration" in content
+            assert 'agent_id="test-task"' in content
+            assert ".workflow_approvals.db" in content
+
+    def test_spawn_agent_no_injection_when_disabled(self, temp_dir):
+        """spawn_agent() should not inject when inject_approval_gate=False."""
+        with patch('subprocess.Popen') as mock_popen:
+            mock_process = MagicMock()
+            mock_process.pid = 12345
+            mock_popen.return_value = mock_process
+
+            config = SubprocessConfig(inject_approval_gate=False)
+            adapter = SubprocessAdapter(working_dir=temp_dir, config=config)
+            record = adapter.spawn_agent("test-task", "Do something", temp_dir, "main")
+
+            prompt_file = Path(record.prompt_file)
+            content = prompt_file.read_text()
+
+            assert "## Approval Gate Integration" not in content
+            assert "request_approval" not in content
+
+    def test_spawn_agent_preserves_original_prompt(self, temp_dir):
+        """Original prompt content should be preserved when injecting."""
+        with patch('subprocess.Popen') as mock_popen:
+            mock_process = MagicMock()
+            mock_process.pid = 12345
+            mock_popen.return_value = mock_process
+
+            adapter = SubprocessAdapter(working_dir=temp_dir)
+            original_prompt = "# My Task\n\nDo this specific thing."
+
+            record = adapter.spawn_agent("test-task", original_prompt, temp_dir, "main")
+
+            content = Path(record.prompt_file).read_text()
+
+            assert "# My Task" in content
+            assert "Do this specific thing" in content
+            assert content.startswith("# My Task")  # Original comes first
+
+    def test_config_inject_approval_gate_default_true(self):
+        """SubprocessConfig.inject_approval_gate should default to True."""
+        config = SubprocessConfig()
+        assert config.inject_approval_gate is True
+
+    def test_config_inject_approval_gate_can_be_false(self):
+        """SubprocessConfig.inject_approval_gate can be set to False."""
+        config = SubprocessConfig(inject_approval_gate=False)
+        assert config.inject_approval_gate is False

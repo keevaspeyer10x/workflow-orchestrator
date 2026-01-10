@@ -132,6 +132,7 @@ class TmuxConfig:
     claude_binary: str = field(default_factory=get_claude_binary)
     session_prefix: str = "wfo"  # workflow-orchestrator prefix
     command_timeout: int = 30
+    inject_approval_gate: bool = True  # PRD-006: Auto-inject gate instructions
 
 
 class TmuxError(Exception):
@@ -269,6 +270,15 @@ class TmuxAdapter:
 
         window_name = self._generate_window_name(task_id)
 
+        # PRD-006: Inject approval gate instructions if enabled
+        if self.config.inject_approval_gate:
+            db_path = str(working_dir / ".workflow_approvals.db")
+            gate_instructions = generate_approval_gate_instructions(
+                agent_id=task_id,
+                db_path=db_path
+            )
+            prompt = prompt + "\n\n" + gate_instructions
+
         # Write prompt to file (avoids shell escaping issues)
         # Use sanitized task_id for filename
         safe_task_id = re.sub(r'[^a-zA-Z0-9_-]', '-', task_id)[:50]
@@ -286,7 +296,7 @@ class TmuxAdapter:
         ])
 
         # Build claude command
-        claude_cmd = f"{self.config.claude_binary} --print < {prompt_file}"
+        claude_cmd = f"cat {prompt_file} | {self.config.claude_binary}"
 
         # Send command to the window
         self._run_tmux([

@@ -3090,11 +3090,15 @@ def cmd_prd_spawn(args):
 
     force_tasks = [args.force] if args.force else None
 
+    # PRD-006: Handle --no-approval-gate flag
+    inject_approval_gate = not getattr(args, 'no_approval_gate', False)
+
     result = executor.spawn(
         prd=prd,
         explain=args.explain,
         dry_run=args.dry_run,
         force_tasks=force_tasks,
+        inject_approval_gate=inject_approval_gate,
     )
 
     # Display results
@@ -4130,6 +4134,7 @@ Examples:
     prd_spawn.add_argument('--explain', action='store_true', help='Show wave groupings without spawning')
     prd_spawn.add_argument('--dry-run', action='store_true', help='Show what would be spawned without acting')
     prd_spawn.add_argument('--force', metavar='TASK_ID', help='Force spawn specific task (bypasses scheduler)')
+    prd_spawn.add_argument('--no-approval-gate', action='store_true', help='Disable automatic approval gate injection in prompts')
     prd_spawn.add_argument('-d', '--dir', help='Working directory')
     prd_spawn.set_defaults(func=cmd_prd_spawn)
 

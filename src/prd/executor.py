@@ -443,6 +443,7 @@ Dependencies: {task.dependencies if task.dependencies else 'None'}
         explain: bool = False,
         dry_run: bool = False,
         force_tasks: Optional[list[str]] = None,
+        inject_approval_gate: bool = True,
     ) -> SpawnResult:
         """
         Spawn the next wave of tasks via Claude Squad.
@@ -457,6 +458,7 @@ Dependencies: {task.dependencies if task.dependencies else 'None'}
             explain: If True, show wave groupings without spawning
             dry_run: If True, show what would happen without actually spawning
             force_tasks: If provided, force spawn these specific tasks (bypasses scheduler)
+            inject_approval_gate: If True, inject approval gate instructions into prompts (PRD-006)
 
         Returns:
             SpawnResult with details about spawned tasks
@@ -498,7 +500,7 @@ Dependencies: {task.dependencies if task.dependencies else 'None'}
 
         # Actually spawn via TmuxAdapter (or SubprocessAdapter fallback)
         backend_selector = BackendSelector.detect(self.working_dir)
-        adapter = backend_selector.get_adapter()
+        adapter = backend_selector.get_adapter(inject_approval_gate=inject_approval_gate)
 
         if adapter is None:
             return SpawnResult(

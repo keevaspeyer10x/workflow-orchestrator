@@ -171,20 +171,26 @@ class BackendSelector:
             },
         }
 
-    def get_adapter(self):
+    def get_adapter(self, inject_approval_gate: bool = True):
         """
         Get the appropriate adapter based on current selection.
+
+        Args:
+            inject_approval_gate: Whether to inject approval gate instructions
+                into agent prompts (PRD-006). Default: True.
 
         Returns TmuxAdapter, SubprocessAdapter, or None (for manual/batch).
         """
         mode = self.select(task_count=1, interactive=True)
 
         if mode == ExecutionMode.INTERACTIVE:
-            from .tmux_adapter import TmuxAdapter
-            return TmuxAdapter(working_dir=self.working_dir)
+            from .tmux_adapter import TmuxAdapter, TmuxConfig
+            config = TmuxConfig(inject_approval_gate=inject_approval_gate)
+            return TmuxAdapter(working_dir=self.working_dir, config=config)
 
         if mode == ExecutionMode.SUBPROCESS:
-            from .subprocess_adapter import SubprocessAdapter
-            return SubprocessAdapter(working_dir=self.working_dir)
+            from .subprocess_adapter import SubprocessAdapter, SubprocessConfig
+            config = SubprocessConfig(inject_approval_gate=inject_approval_gate)
+            return SubprocessAdapter(working_dir=self.working_dir, config=config)
 
         return None

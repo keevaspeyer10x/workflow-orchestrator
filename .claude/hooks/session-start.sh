@@ -99,4 +99,40 @@ if [ -z "$SOPS_AGE_KEY" ]; then
     fi
 fi
 
+# 6. Load secrets from SOPS file if available (skip ANTHROPIC_API_KEY if Claude is authenticated)
+if [ -n "$SOPS_AGE_KEY" ] && [ -f "secrets.enc.yaml" ] && command -v sops &> /dev/null; then
+    # Check if Claude is authenticated (claude.ai token exists)
+    CLAUDE_AUTHENTICATED=false
+    if [ -f "$HOME/.claude/.credentials.json" ]; then
+        CLAUDE_AUTHENTICATED=true
+    fi
+
+    # Decrypt and load secrets
+    SOPS_SECRETS=$(sops -d secrets.enc.yaml 2>/dev/null) || true
+    if [ -n "$SOPS_SECRETS" ] && [ -n "$CLAUDE_ENV_FILE" ]; then
+        while IFS=': ' read -r key value; do
+            # Skip empty lines and comments
+            [[ -z "$key" || "$key" =~ ^# ]] && continue
+
+            # Skip ANTHROPIC_API_KEY if Claude is authenticated
+            if [ "$CLAUDE_AUTHENTICATED" = true ] && ([[ "$key" =~ ^anthropic_api_key$ ]] || [[ "$key" =~ ^ANTHROPIC_API_KEY$ ]]); then
+                echo "Skipping $key (Claude authenticated via claude.ai)"
+                continue
+            fi
+
+            # Remove quotes if present
+            value="${value%\"}"
+            value="${value#\"}"
+            value="${value%\'}"
+            value="${value#\'}"
+            if [ -n "$key" ] && [ -n "$value" ]; then
+                # Export with uppercase key name
+                KEY_UPPER=$(echo "$key" | tr '[:lower:]' '[:upper:]')
+                echo "export $KEY_UPPER='$value'" >> "$CLAUDE_ENV_FILE"
+            fi
+        done <<< "$SOPS_SECRETS"
+        echo "SOPS secrets loaded (excluding ANTHROPIC_API_KEY)"
+    fi
+fi
+
 echo "=== Session Start Complete ==="

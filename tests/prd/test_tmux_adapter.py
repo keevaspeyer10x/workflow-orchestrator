@@ -383,3 +383,113 @@ class TestTmuxAdapterIntegration:
             assert isinstance(output, str)
         finally:
             adapter.cleanup()
+
+
+@pytest.mark.skipif(not IMPORTS_AVAILABLE, reason="TmuxAdapter not implemented yet")
+class TestTmuxAdapterApprovalGateInjection:
+    """Tests for PRD-006: Auto-inject ApprovalGate in spawn_agent()."""
+
+    @pytest.fixture
+    def temp_dir(self, tmp_path):
+        return tmp_path
+
+    @pytest.fixture
+    def mock_tmux_available(self):
+        with patch('shutil.which', return_value='/usr/bin/tmux'):
+            yield
+
+    def test_spawn_agent_injects_approval_gate_by_default(self, temp_dir, mock_tmux_available):
+        """spawn_agent() should inject approval gate instructions by default."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+            adapter = TmuxAdapter(working_dir=temp_dir)
+            record = adapter.spawn_agent("test-task", "Do something", temp_dir, "main")
+
+            prompt_file = Path(record.prompt_file)
+            content = prompt_file.read_text()
+
+            assert "## Approval Gate Integration" in content
+            assert 'agent_id="test-task"' in content
+            assert ".workflow_approvals.db" in content
+
+    def test_spawn_agent_no_injection_when_disabled(self, temp_dir, mock_tmux_available):
+        """spawn_agent() should not inject when inject_approval_gate=False."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+            config = TmuxConfig(inject_approval_gate=False)
+            adapter = TmuxAdapter(working_dir=temp_dir, config=config)
+            record = adapter.spawn_agent("test-task", "Do something", temp_dir, "main")
+
+            prompt_file = Path(record.prompt_file)
+            content = prompt_file.read_text()
+
+            assert "## Approval Gate Integration" not in content
+            assert "request_approval" not in content
+
+    def test_spawn_agent_preserves_original_prompt(self, temp_dir, mock_tmux_available):
+        """Original prompt content should be preserved when injecting."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+            adapter = TmuxAdapter(working_dir=temp_dir)
+            original_prompt = "# My Task\n\nDo this specific thing."
+
+            record = adapter.spawn_agent("test-task", original_prompt, temp_dir, "main")
+
+            content = Path(record.prompt_file).read_text()
+
+            assert "# My Task" in content
+            assert "Do this specific thing" in content
+            assert content.startswith("# My Task")  # Original comes first
+
+    def test_spawn_agent_uses_correct_db_path(self, temp_dir, mock_tmux_available):
+        """Injected instructions should use working_dir/.workflow_approvals.db."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+            working_dir = temp_dir / "myproject"
+            working_dir.mkdir()
+
+            adapter = TmuxAdapter(working_dir=temp_dir)
+            record = adapter.spawn_agent("test-task", "Test", working_dir, "main")
+
+            content = Path(record.prompt_file).read_text()
+            expected_path = str(working_dir / ".workflow_approvals.db")
+
+            assert expected_path in content
+
+    def test_spawn_agent_uses_task_id_as_agent_id(self, temp_dir, mock_tmux_available):
+        """agent_id in instructions should match task_id."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+            adapter = TmuxAdapter(working_dir=temp_dir)
+            record = adapter.spawn_agent("my-unique-task-123", "Test", temp_dir, "main")
+
+            content = Path(record.prompt_file).read_text()
+
+            assert 'agent_id="my-unique-task-123"' in content
+
+    def test_config_inject_approval_gate_default_true(self):
+        """TmuxConfig.inject_approval_gate should default to True."""
+        config = TmuxConfig()
+        assert config.inject_approval_gate is True
+
+    def test_config_inject_approval_gate_can_be_false(self):
+        """TmuxConfig.inject_approval_gate can be set to False."""
+        config = TmuxConfig(inject_approval_gate=False)
+        assert config.inject_approval_gate is False
+
+    def test_spawn_agent_with_empty_prompt_still_injects(self, temp_dir, mock_tmux_available):
+        """Should inject gate instructions even with empty original prompt."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+            adapter = TmuxAdapter(working_dir=temp_dir)
+            record = adapter.spawn_agent("test-task", "", temp_dir, "main")
+
+            content = Path(record.prompt_file).read_text()
+
+            assert "## Approval Gate Integration" in content

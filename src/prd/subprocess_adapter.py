@@ -16,6 +16,7 @@ from typing import Optional, List, Dict
 from datetime import datetime, timezone
 
 from .session_registry import SessionRegistry, SessionRecord
+from .tmux_adapter import generate_approval_gate_instructions
 from src.secrets import get_user_config_value
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,7 @@ class SubprocessConfig:
     claude_binary: str = field(default_factory=get_claude_binary)
     session_prefix: str = "wfo"
     log_dir_name: str = ".wfo_logs"
+    inject_approval_gate: bool = True  # PRD-006: Auto-inject gate instructions
 
 
 class SubprocessError(Exception):
@@ -116,6 +118,15 @@ class SubprocessAdapter:
                     return existing
 
         session_name = self._generate_session_name(task_id)
+
+        # PRD-006: Inject approval gate instructions if enabled
+        if self.config.inject_approval_gate:
+            db_path = str(working_dir / ".workflow_approvals.db")
+            gate_instructions = generate_approval_gate_instructions(
+                agent_id=task_id,
+                db_path=db_path
+            )
+            prompt = prompt + "\n\n" + gate_instructions
 
         # Write prompt to file
         prompt_file = self._get_prompt_file(task_id)

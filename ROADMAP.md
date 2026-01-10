@@ -1095,6 +1095,77 @@ During multi-model reviews (`minds review`), models fail inconsistently:
 
 ---
 
+#### CORE-028: Review Model Fallback Chain
+**Status:** Planned
+**Complexity:** Medium
+**Priority:** HIGH
+**Source:** User request (2026-01-11) - If one AI unavailable, use another
+
+**Problem:**
+When a review model fails (rate limit, API error, timeout), the review just fails. No automatic fallback to an alternative model.
+
+**Current Behavior:**
+```
+Running reviews...
+✓ GPT-5.2 Max: Passed (45s)
+✗ Gemini 3 Pro: Failed (1s) - Rate limited
+✗ Grok 4.1: Failed (62s) - API error
+✓ DeepSeek V3.2: Passed (38s)
+
+2/4 reviews completed. Some reviews failed.
+```
+
+**Desired Behavior:**
+```
+Running reviews...
+✓ GPT-5.2 Max: Passed (45s)
+⟳ Gemini 3 Pro: Rate limited, falling back to Gemini 2.5 Flash...
+✓ Gemini 2.5 Flash: Passed (12s)
+⟳ Grok 4.1: API error, falling back to Claude 3.5 Sonnet...
+✓ Claude 3.5 Sonnet: Passed (28s)
+✓ DeepSeek V3.2: Passed (38s)
+
+4/4 reviews completed (2 used fallbacks).
+```
+
+**Implementation:**
+
+```yaml
+# In workflow.yaml or config
+review:
+  models:
+    - name: gemini-3-pro
+      fallbacks: [gemini-2.5-flash, claude-3.5-sonnet]
+    - name: grok-4.1
+      fallbacks: [grok-3, claude-3.5-sonnet]
+    - name: gpt-5.2-max
+      fallbacks: [gpt-4o, claude-3.5-sonnet]
+    - name: deepseek-v3.2
+      fallbacks: [deepseek-v3, claude-3.5-sonnet]
+
+  fallback_policy:
+    max_fallback_attempts: 2
+    retry_original_after: 300  # seconds
+```
+
+**Logic:**
+1. Try primary model
+2. If fail (rate limit, timeout, API error), try first fallback
+3. If fallback fails, try next fallback (up to max_fallback_attempts)
+4. Log which model actually ran the review
+5. Include fallback info in review report
+
+**Tasks:**
+- [ ] Add fallback chain configuration to review settings
+- [ ] Implement fallback logic in ReviewRouter
+- [ ] Distinguish retriable errors (rate limit, timeout) from permanent (auth)
+- [ ] Log fallback usage for analysis
+- [ ] Update review output to show fallback usage
+- [ ] Add `--no-fallback` flag to force specific model
+- [ ] Document fallback configuration
+
+---
+
 #### CONTEXT-001: Context Documents System (North Star, Architecture, UI Style Guide)
 **Status:** Planned
 **Complexity:** Medium
@@ -1413,7 +1484,7 @@ orchestrator prd cleanup        # Clean orphaned sessions
 ---
 
 #### PRD-006: Auto-Inject ApprovalGate in TmuxAdapter.spawn_agent()
-**Status:** Planned
+**Status:** COMPLETED (2026-01-10)
 **Complexity:** Low
 **Priority:** Medium - Improves developer experience
 **Source:** PRD-005 implementation learnings (2026-01-10)
@@ -1428,6 +1499,367 @@ orchestrator prd cleanup        # Clean orphaned sessions
 
 **Files to Modify:**
 - `src/prd/tmux_adapter.py` - Modify spawn_agent() to inject instructions
+
+**Implementation Details:**
+- Added `inject_approval_gate: bool = True` to TmuxConfig and SubprocessConfig
+- Modified `spawn_agent()` in both adapters to inject instructions when enabled
+- Updated `BackendSelector.get_adapter()` to pass config
+- Updated `PRDExecutor.spawn()` to accept `inject_approval_gate` parameter
+- Added `--no-approval-gate` CLI flag to `prd spawn` command
+- Added 13 new tests (8 for TmuxAdapter, 5 for SubprocessAdapter)
+- All 1272 tests pass
+
+---
+
+#### PRD-007: Agent Workflow Enforcement System
+**Status:** Planned
+**Complexity:** High
+**Priority:** CRITICAL - Blocks reliable parallel execution
+**Source:** Multi-agent orchestration session feedback (2026-01-10)
+**Depends On:** PRD-006 (Completed)
+**PRD Document:** `docs/prd/PRD-007-agent-workflow-enforcement.md`
+
+**Problem:** Spawned agents currently bypass workflow gates:
+- TDD violations (code written without tests)
+- Skipped plan approval
+- Missing reviews
+- No completion verification
+- Untracked state changes
+
+**Solution:** Contract-based enforcement where:
+1. `agent_workflow.yaml` defines the workflow contract (declarative)
+2. Orchestrator enforces contract via REST API + cryptographic tokens (firm)
+3. Agent SDK makes compliance mandatory (impossible to bypass)
+4. Tool access capability-scoped by workflow phase
+
+**Architecture:**
+```
+agent_workflow.yaml (contract)
+        ↓
+Orchestrator Enforcement Engine (validation)
+        ↓
+REST API (/api/v1/tasks/*, /api/v1/tools/*)
+        ↓
+Agent SDK (required, enforced)
+        ↓
+Agent Implementation (must use SDK)
+```
+
+**Key Features:**
+- **Phase Tokens:** JWT-based proof of gate passage (cryptographic, unforgeable)
+- **Tool ACLs:** Tools allowed/forbidden per phase (PLAN can't write code, IMPL can't skip tests)
+- **Artifact Validation:** JSON schema validation before phase transitions
+- **Gate Enforcement:** Automated blockers (tests must fail in TDD, pass in IMPL)
+- **State Coordination:** Read-only snapshots, orchestrator-mediated mutations
+
+**Implementation Phases:**
+1. Core infrastructure (enforcement engine, API, SDK)
+2. Tool enforcement (permission checks on every tool call)
+3. Phase transitions (artifact validation, gate checking)
+4. Agent integration (inject SDK usage, workflow contract)
+5. State coordination (snapshots, event bus, PRD updates)
+
+**Success Metrics:**
+- [ ] 100% phase transitions validated by orchestrator
+- [ ] 0 tool calls bypass permission checks
+- [ ] All agents use SDK (enforced)
+- [ ] Phase tokens cryptographically secure
+- [ ] <100ms latency for tool permission checks
+- [ ] Gate pass rate >90%
+
+**Files Created:**
+- `agent_workflow.yaml` - Workflow contract (phases, gates, tools, schemas)
+- `src/orchestrator/enforcement.py` - Enforcement engine
+- `src/orchestrator/api.py` - REST API for agents
+- `src/agent_sdk/client.py` - Agent SDK (pip-installable)
+- `docs/prd/PRD-007-agent-workflow-enforcement.md` - Full PRD
+
+**Risks:**
+- SDK adoption (mitigated by making it the ONLY way)
+- Performance overhead (mitigated by local SQLite, in-memory caching)
+- Token security (mitigated by short expiry, rotation)
+- YAML complexity (mitigated by schema validation, documentation)
+
+---
+
+#### PRD-014: File Conflict Prevention for Parallel Agents
+**Status:** Planned
+**Complexity:** High
+**Priority:** HIGH - Critical for reliable parallel execution
+**Source:** User observation (2026-01-11) - Two agents working on same file causes conflicts
+
+**Problem:**
+When multiple PRD agents (or multiple Claude Code instances) work on the same file simultaneously:
+- Race conditions on file writes
+- Lost changes when both agents edit
+- Merge conflicts that are hard to resolve
+- No visibility into who's editing what
+
+**Scenarios:**
+1. Two spawned PRD agents assigned overlapping tasks
+2. User running two Claude Code instances manually
+3. Agent editing file while user also editing
+
+**Potential Solutions:**
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| **File locks (flock)** | Simple, OS-level | Blocks agents, may deadlock |
+| **Pessimistic locking (claim files)** | Clear ownership | Requires coordination layer |
+| **Optimistic locking (version check)** | No blocking | Conflict on save, needs merge |
+| **File partitioning** | No conflicts | Requires task decomposition |
+| **Real-time sync (CRDT)** | Seamless collaboration | Complex, overkill? |
+
+**Recommended Approach:** Pessimistic locking with orchestrator coordination
+
+```yaml
+# In agent_workflow.yaml or task manifest
+file_claims:
+  task-1:
+    exclusive: ["src/api/client.py", "src/api/server.py"]
+    shared_read: ["src/config.py"]
+  task-2:
+    exclusive: ["src/cli.py"]
+    shared_read: ["src/config.py"]
+```
+
+**Implementation:**
+1. Task manifest declares file intentions (exclusive write, shared read)
+2. Orchestrator validates no overlapping exclusive claims before spawn
+3. Agents check claim before writing (fail-fast if conflict)
+4. Release claims on task completion
+5. For manual Claude Code instances: advisory locks via `.file_locks/` directory
+
+**CLI Commands:**
+```bash
+orchestrator files claim src/api/*.py --task task-1  # Claim files
+orchestrator files list                               # Show claimed files
+orchestrator files release --task task-1              # Release claims
+orchestrator files check src/cli.py                   # Check if file is claimed
+```
+
+**Tasks:**
+- [ ] Design file claim schema for task manifests
+- [ ] Implement claim validation in orchestrator
+- [ ] Add `.file_locks/` directory for advisory locks
+- [ ] Add CLI commands for file management
+- [ ] Integrate with TmuxAdapter spawn
+- [ ] Handle claim expiration/timeout
+- [ ] Document best practices for task decomposition
+
+---
+
+#### PRD-008: Auto-Spawn Review Agents
+**Status:** Planned
+**Complexity:** Medium
+**Priority:** High
+**Depends On:** PRD-007 (Agent Workflow Enforcement)
+
+**Problem:** Reviews still require manual orchestration to start.
+
+**Solution:** Orchestrator auto-spawns review agents when task transitions IMPL → REVIEW.
+
+**Implementation:**
+- Detect IMPL → REVIEW transition trigger in enforcement engine
+- Read `auto_spawn` section from agent_workflow.yaml
+- Spawn parallel review agents (security, quality, consistency, holistic, vibe_coding)
+- Wait for all reviews to complete before allowing REVIEW → COMPLETE transition
+- Consolidate review results into single review_report artifact
+
+**Success Criteria:**
+- [ ] Reviews auto-spawn on IMPL → REVIEW transition
+- [ ] All 5 review models run in parallel
+- [ ] Consolidated review report generated
+- [ ] Agent blocked until all reviews complete
+
+---
+
+#### PRD-009: Monitoring & Metrics Export
+**Status:** Planned
+**Complexity:** Low
+**Priority:** Medium
+**Depends On:** PRD-007 (Agent Workflow Enforcement)
+
+**Problem:** No visibility into enforcement effectiveness.
+
+**Solution:** Export metrics defined in agent_workflow.yaml monitoring section.
+
+**Metrics to Track:**
+- phase_transition_time (how long in each phase)
+- gate_pass_rate (% of transitions that pass gates)
+- gate_block_rate (% of transitions blocked)
+- tool_usage_by_phase (which tools used where)
+- artifact_validation_failures (what's failing validation)
+
+**Export Format:** JSONL to `.orchestrator/metrics.jsonl`
+
+**Alerting:**
+- Alert if gate_block_rate > 50% (agents struggling)
+- Alert if task_stuck_in_phase > 2h (needs human intervention)
+
+**Success Criteria:**
+- [ ] Metrics exported to .orchestrator/metrics.jsonl
+- [ ] Dashboard can read metrics (optional: Grafana/Prometheus)
+- [ ] Alerts trigger on thresholds
+
+---
+
+#### PRD-010: Recovery & Failure Handling
+**Status:** Planned
+**Complexity:** High
+**Priority:** High
+**Depends On:** PRD-007 (Agent Workflow Enforcement)
+
+**Problem:** Agent/orchestrator crashes leave tasks in inconsistent state.
+
+**Solution:** Implement recovery strategies from agent_workflow.yaml.
+
+**Agent Crash Handling:**
+- Detect when agent stops sending heartbeats
+- Retry task up to 3 times with 60s backoff
+- If retries exhausted, escalate to human
+
+**Orchestrator Crash Handling:**
+- Checkpoint state every 5 minutes to `.orchestrator/checkpoints/`
+- On restart, resume from last checkpoint
+- Replay event log to rebuild in-memory state
+
+**Gate Timeout Handling:**
+- If gate approval times out, escalate to human
+- Preserve all state (don't lose progress)
+- Allow human to approve/reject/retry
+
+**Success Criteria:**
+- [ ] Orchestrator survives restart without data loss
+- [ ] Agent crashes trigger automatic retry
+- [ ] Gate timeouts escalate to human
+- [ ] Zero data loss on crash
+
+---
+
+#### PRD-015: Cloud Agent Spawning
+**Status:** Planned
+**Complexity:** High
+**Priority:** HIGH - Local spawning exhausts laptop resources
+**Source:** User observation (2026-01-11) - Too much memory/compute on laptop
+
+**Problem:**
+Spawning multiple parallel agents locally consumes significant resources:
+- Each Claude Code instance uses ~500MB-1GB RAM
+- Multiple tmux sessions with active agents
+- CPU spikes during concurrent operations
+- Laptop becomes sluggish with 3+ agents
+
+**Desired Behavior:**
+```bash
+# Spawn agents in the cloud instead of locally
+orchestrator prd spawn --count 5 --backend cloud
+
+# Mix local and cloud
+orchestrator prd spawn --count 2 --backend local   # For interactive work
+orchestrator prd spawn --count 3 --backend cloud   # For background tasks
+```
+
+**Cloud Backend Options:**
+
+| Backend | Pros | Cons | Cost |
+|---------|------|------|------|
+| **GitHub Codespaces** | Easy setup, git integration | Limited free tier | ~$0.18/hr |
+| **Modal** | Fast cold start, pay-per-use | New platform | ~$0.10/hr |
+| **Fly.io** | Global edge, fast spawn | More setup | ~$0.05/hr |
+| **AWS EC2 Spot** | Cheap compute | Complex setup | ~$0.03/hr |
+| **Render** | Simple deployment | Slower spawn | ~$0.10/hr |
+
+**Recommended Approach:** Start with Modal or GitHub Codespaces
+
+**Architecture:**
+```
+Local Machine                          Cloud
+┌─────────────────┐                   ┌─────────────────┐
+│ Orchestrator    │ ───spawn────────▶ │ Cloud Agent 1   │
+│                 │ ───spawn────────▶ │ Cloud Agent 2   │
+│ (coordination)  │ ◀───heartbeat──── │ Cloud Agent 3   │
+│                 │ ◀───results─────  │                 │
+└─────────────────┘                   └─────────────────┘
+```
+
+**Requirements:**
+1. Cloud agents can clone repo and access code
+2. Secure credential passing (not in logs)
+3. Real-time status updates to local orchestrator
+4. Results pushed back (commits, artifacts)
+5. Auto-shutdown on idle (cost control)
+
+**Implementation Phases:**
+
+**Phase 1: GitHub Codespaces Backend**
+- Leverage existing `gh codespace` CLI
+- Agent runs in Codespace with full dev environment
+- Git push/pull for coordination
+
+**Phase 2: Modal Backend**
+- Custom container with Claude Code pre-installed
+- Function-based spawning (fast cold start)
+- Webhook-based status updates
+
+**Phase 3: Generic Cloud Adapter**
+- Abstract interface for cloud backends
+- User-configurable backend selection
+- Cost tracking and budget limits
+
+**Tasks:**
+- [ ] Research GitHub Codespaces API/CLI for spawning
+- [ ] Research Modal for serverless agent execution
+- [ ] Design cloud adapter interface
+- [ ] Implement Codespaces backend (Phase 1)
+- [ ] Add `--backend cloud` flag to spawn command
+- [ ] Implement secure credential passing
+- [ ] Add cost tracking and budget limits
+- [ ] Implement auto-shutdown on idle
+- [ ] Document cloud setup requirements
+
+---
+
+#### PRD-011: Visual Workflow Dashboard
+**Status:** Planned
+**Complexity:** Medium
+**Priority:** Low
+**Depends On:** PRD-007, PRD-009 (Monitoring)
+
+**Problem:** No visual way to see agent workflow states.
+
+**Solution:** Web dashboard showing real-time agent status.
+
+**Features:**
+- Live view of all active agents and their current phase
+- Phase transition history timeline
+- Tool usage heatmap by phase
+- Gate block reasons
+- Review status for each task
+
+**Tech Stack:** FastAPI + WebSockets + React (or simple HTML/JS)
+
+---
+
+#### PRD-012: A/B Testing Workflows
+**Status:** Planned
+**Complexity:** High
+**Priority:** Low
+
+**Problem:** Don't know if workflow is optimal.
+
+**Solution:** Support multiple workflow definitions, randomly assign agents, compare metrics.
+
+---
+
+#### PRD-013: ML-Based Gate Optimization
+**Status:** Planned
+**Complexity:** Very High
+**Priority:** Low
+
+**Problem:** Gates may be too strict or too lenient.
+
+**Solution:** Machine learning model learns from historical gate pass/fail decisions, suggests optimizations.
 
 ---
 
