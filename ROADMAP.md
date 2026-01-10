@@ -1095,6 +1095,44 @@ During multi-model reviews (`minds review`), models fail inconsistently:
 
 ---
 
+#### CORE-029: Investigate Gemini API Rate Limiting
+**Status:** Planned
+**Complexity:** Low (Investigation)
+**Priority:** Medium
+**Source:** User observation (2026-01-11) - Gemini failing with rate limits
+
+**Problem:**
+Gemini 3 Pro reviews are failing quickly (~1s) with what appears to be rate limiting:
+```
+✗ Gemini 3 Pro: Failed (1s)
+```
+
+**Questions to Answer:**
+1. What are the actual Gemini API rate limits?
+2. Are we hitting RPM (requests per minute) or TPM (tokens per minute) limits?
+3. Is the API key on free tier vs paid tier?
+4. Are multiple orchestrator instances sharing the same key?
+5. Is there a way to check current usage/quota?
+
+**Investigation Steps:**
+- [ ] Check Gemini API documentation for rate limits by tier
+- [ ] Add detailed error logging to capture actual error response
+- [ ] Check if error is 429 (rate limit) or something else
+- [ ] Determine if this is a free tier limitation
+- [ ] Test with delays between requests
+- [ ] Check Google Cloud Console for quota usage
+
+**Potential Solutions:**
+1. **Upgrade to paid tier** if on free tier
+2. **Add request throttling** to stay under limits
+3. **Implement backoff/retry** for transient rate limits
+4. **Use fallback models** (see CORE-028)
+5. **Queue reviews** instead of parallel execution
+
+**Related:** CORE-027 (Multi-Model API Reliability), CORE-028 (Fallback Chain)
+
+---
+
 #### CORE-028: Review Model Fallback Chain
 **Status:** Planned
 **Complexity:** Medium
@@ -1582,70 +1620,51 @@ Agent Implementation (must use SDK)
 
 ---
 
-#### PRD-014: File Conflict Prevention for Parallel Agents
-**Status:** Planned
-**Complexity:** High
-**Priority:** HIGH - Critical for reliable parallel execution
-**Source:** User observation (2026-01-11) - Two agents working on same file causes conflicts
+#### PRD-014: File Conflict Management for Parallel Agents
+**Status:** Exploration Needed
+**Complexity:** TBD
+**Priority:** Medium (may not be a real problem)
+**Source:** User question (2026-01-11) - How do we handle two agents working on the same file?
 
-**Problem:**
-When multiple PRD agents (or multiple Claude Code instances) work on the same file simultaneously:
-- Race conditions on file writes
-- Lost changes when both agents edit
-- Merge conflicts that are hard to resolve
-- No visibility into who's editing what
+**Question:**
+How should we manage when two spawned PRD agents (or two manual Claude Code instances) are working on the same file? Is this even a problem that needs solving?
 
-**Scenarios:**
-1. Two spawned PRD agents assigned overlapping tasks
-2. User running two Claude Code instances manually
+**Scenarios to Consider:**
+1. Two spawned PRD agents assigned tasks that touch the same file
+2. User running two Claude Code instances manually in same repo
 3. Agent editing file while user also editing
 
-**Potential Solutions:**
+**Is This Actually a Problem?**
 
-| Approach | Pros | Cons |
-|----------|------|------|
-| **File locks (flock)** | Simple, OS-level | Blocks agents, may deadlock |
-| **Pessimistic locking (claim files)** | Clear ownership | Requires coordination layer |
-| **Optimistic locking (version check)** | No blocking | Conflict on save, needs merge |
-| **File partitioning** | No conflicts | Requires task decomposition |
-| **Real-time sync (CRDT)** | Seamless collaboration | Complex, overkill? |
+It's unclear if this needs a solution. Consider:
+- Git already handles merges - maybe that's sufficient?
+- Good task decomposition may naturally avoid overlaps
+- Conflicts might be rare in practice
+- Existing merge conflict resolution (CORE-023) handles post-hoc conflicts
 
-**Recommended Approach:** Pessimistic locking with orchestrator coordination
+**If It Is a Problem, Potential Approaches:**
 
-```yaml
-# In agent_workflow.yaml or task manifest
-file_claims:
-  task-1:
-    exclusive: ["src/api/client.py", "src/api/server.py"]
-    shared_read: ["src/config.py"]
-  task-2:
-    exclusive: ["src/cli.py"]
-    shared_read: ["src/config.py"]
-```
+| Approach | Description |
+|----------|-------------|
+| **Do nothing** | Rely on git merge + conflict resolution |
+| **Task decomposition** | Design tasks to not overlap (prevention) |
+| **File locks (OS-level)** | flock or similar |
+| **Advisory locks (app-level)** | Orchestrator-managed claims |
+| **Optimistic locking** | Version check on save, merge if needed |
+| **Real-time sync (CRDT)** | Collaborative editing |
 
-**Implementation:**
-1. Task manifest declares file intentions (exclusive write, shared read)
-2. Orchestrator validates no overlapping exclusive claims before spawn
-3. Agents check claim before writing (fail-fast if conflict)
-4. Release claims on task completion
-5. For manual Claude Code instances: advisory locks via `.file_locks/` directory
+**Open Questions:**
+1. How often do parallel agents actually touch the same file?
+2. When they do, how bad are the resulting conflicts?
+3. Is git merge + human resolution sufficient?
+4. Would better task decomposition eliminate the problem?
+5. Is the complexity of a locking solution worth it?
 
-**CLI Commands:**
-```bash
-orchestrator files claim src/api/*.py --task task-1  # Claim files
-orchestrator files list                               # Show claimed files
-orchestrator files release --task task-1              # Release claims
-orchestrator files check src/cli.py                   # Check if file is claimed
-```
-
-**Tasks:**
-- [ ] Design file claim schema for task manifests
-- [ ] Implement claim validation in orchestrator
-- [ ] Add `.file_locks/` directory for advisory locks
-- [ ] Add CLI commands for file management
-- [ ] Integrate with TmuxAdapter spawn
-- [ ] Handle claim expiration/timeout
-- [ ] Document best practices for task decomposition
+**Next Steps:**
+- [ ] Observe: Track how often file conflicts occur in practice
+- [ ] Assess: Evaluate severity when they do occur
+- [ ] Decide: Is this worth solving, or is git merge enough?
+- [ ] If needed: Design solution based on findings
 
 ---
 
@@ -1737,9 +1756,9 @@ orchestrator files check src/cli.py                   # Check if file is claimed
 
 ---
 
-#### PRD-015: Cloud Agent Spawning
-**Status:** Planned
-**Complexity:** High
+#### PRD-015: Cloud-Based Development / Agent Spawning
+**Status:** Exploration Needed
+**Complexity:** TBD (depends on approach)
 **Priority:** HIGH - Local spawning exhausts laptop resources
 **Source:** User observation (2026-01-11) - Too much memory/compute on laptop
 
@@ -1750,94 +1769,110 @@ Spawning multiple parallel agents locally consumes significant resources:
 - CPU spikes during concurrent operations
 - Laptop becomes sluggish with 3+ agents
 
-**Desired Behavior:**
-```bash
-# Spawn agents in the cloud instead of locally
-orchestrator prd spawn --count 5 --backend cloud
+**Question:** What's the best way to handle resource-intensive parallel agent work?
 
-# Mix local and cloud
-orchestrator prd spawn --count 2 --backend local   # For interactive work
-orchestrator prd spawn --count 3 --backend cloud   # For background tasks
-```
+**Potential Approaches:**
 
-**Cloud Backend Options:**
+| Approach | Description | Complexity |
+|----------|-------------|------------|
+| **A. Cloud Dev Server** | Do all development on a scalable cloud VM (e.g., EC2, GCP) that can spin up/down capacity as needed | Low |
+| **B. Remote Agent Spawning** | Keep orchestrator local, spawn agents in cloud (Codespaces, Modal) | High |
+| **C. Hybrid** | Local for interactive, cloud for batch/parallel | Medium |
+| **D. Resource Limits** | Limit concurrent local agents, queue the rest | Low |
 
-| Backend | Pros | Cons | Cost |
-|---------|------|------|------|
-| **GitHub Codespaces** | Easy setup, git integration | Limited free tier | ~$0.18/hr |
-| **Modal** | Fast cold start, pay-per-use | New platform | ~$0.10/hr |
-| **Fly.io** | Global edge, fast spawn | More setup | ~$0.05/hr |
-| **AWS EC2 Spot** | Cheap compute | Complex setup | ~$0.03/hr |
-| **Render** | Simple deployment | Slower spawn | ~$0.10/hr |
+**Option A: Cloud Dev Server (Simplest?)**
+- Run entire dev environment on a cloud VM
+- Scale VM size based on workload
+- No architecture changes needed
+- Orchestrator + agents all run on same (beefier) machine
+- Examples: EC2 with auto-scaling, Google Cloud Workstations, Gitpod
 
-**Recommended Approach:** Start with Modal or GitHub Codespaces
+**Option B: Remote Agent Spawning**
+- Orchestrator stays local
+- Agents spawn in cloud environments
+- Requires coordination layer, credential passing, result syncing
+- More complex but keeps local machine light
 
-**Architecture:**
-```
-Local Machine                          Cloud
-┌─────────────────┐                   ┌─────────────────┐
-│ Orchestrator    │ ───spawn────────▶ │ Cloud Agent 1   │
-│                 │ ───spawn────────▶ │ Cloud Agent 2   │
-│ (coordination)  │ ◀───heartbeat──── │ Cloud Agent 3   │
-│                 │ ◀───results─────  │                 │
-└─────────────────┘                   └─────────────────┘
-```
+**Option C: Hybrid**
+- Use local for 1-2 interactive agents
+- Offload batch work to cloud
+- Best of both worlds but more complex to manage
 
-**Requirements:**
-1. Cloud agents can clone repo and access code
-2. Secure credential passing (not in logs)
-3. Real-time status updates to local orchestrator
-4. Results pushed back (commits, artifacts)
-5. Auto-shutdown on idle (cost control)
+**Option D: Resource Limits**
+- Cap concurrent agents (e.g., max 2 local)
+- Queue additional tasks
+- Simple but slower throughput
 
-**Implementation Phases:**
+**Open Questions:**
+1. What's the actual resource usage per agent? (need to measure)
+2. Is latency acceptable for cloud-based development?
+3. What are the cost implications of each approach?
+4. How does credential/secret management work across approaches?
+5. Which cloud providers offer the best dev experience?
 
-**Phase 1: GitHub Codespaces Backend**
-- Leverage existing `gh codespace` CLI
-- Agent runs in Codespace with full dev environment
-- Git push/pull for coordination
-
-**Phase 2: Modal Backend**
-- Custom container with Claude Code pre-installed
-- Function-based spawning (fast cold start)
-- Webhook-based status updates
-
-**Phase 3: Generic Cloud Adapter**
-- Abstract interface for cloud backends
-- User-configurable backend selection
-- Cost tracking and budget limits
-
-**Tasks:**
-- [ ] Research GitHub Codespaces API/CLI for spawning
-- [ ] Research Modal for serverless agent execution
-- [ ] Design cloud adapter interface
-- [ ] Implement Codespaces backend (Phase 1)
-- [ ] Add `--backend cloud` flag to spawn command
-- [ ] Implement secure credential passing
-- [ ] Add cost tracking and budget limits
-- [ ] Implement auto-shutdown on idle
-- [ ] Document cloud setup requirements
+**Next Steps:**
+- [ ] Measure actual resource usage per agent
+- [ ] Research cloud dev environments (Codespaces, Gitpod, EC2, etc.)
+- [ ] Estimate costs for each approach
+- [ ] Prototype simplest option (likely A or D)
+- [ ] Document findings and recommendation
 
 ---
 
-#### PRD-011: Visual Workflow Dashboard
-**Status:** Planned
-**Complexity:** Medium
+#### PRD-011: Orchestrator Web UI
+**Status:** Design Phase Needed
+**Complexity:** TBD (depends on scope)
 **Priority:** Low
-**Depends On:** PRD-007, PRD-009 (Monitoring)
+**Depends On:** PRD-007, PRD-009 (Monitoring) - for data to display
+**Source:** User request (2026-01-11) - Visual interface for orchestrator management
 
-**Problem:** No visual way to see agent workflow states.
+**Problem:**
+CLI-only interface has limitations for visibility and control when managing multiple agents and complex workflows.
 
-**Solution:** Web dashboard showing real-time agent status.
+**What's Needed First: Design Phase**
 
-**Features:**
-- Live view of all active agents and their current phase
-- Phase transition history timeline
-- Tool usage heatmap by phase
-- Gate block reasons
-- Review status for each task
+Before building anything, need to define:
 
-**Tech Stack:** FastAPI + WebSockets + React (or simple HTML/JS)
+1. **Functionality** - What should the UI actually do?
+   - What are the core use cases?
+   - What problems is it solving that CLI can't?
+   - What's MVP vs nice-to-have?
+
+2. **UX** - How should users interact with it?
+   - What workflows does it support?
+   - What's the information hierarchy?
+   - How does it complement (not replace) CLI?
+
+3. **UI** - What should it look like?
+   - Wireframes / mockups
+   - Visual design system
+   - Responsive requirements?
+
+**Initial Ideas (to explore in design phase):**
+- View files and changes
+- Monitor sub-agents
+- Understand skips and decisions
+- Provide guidance to agents
+- Look at learnings
+
+**Open Questions:**
+1. Who is the primary user? (Developer? Team lead? Both?)
+2. Is this a "dashboard" (read-mostly) or "control panel" (interactive)?
+3. Web app, desktop app, or terminal UI (Textual)?
+4. How much real-time updating is needed?
+5. Should it work on mobile?
+6. What data is already available via CLI that just needs visualization?
+
+**Design Phase Tasks:**
+- [ ] Define primary use cases and user personas
+- [ ] List must-have vs nice-to-have features
+- [ ] Create low-fidelity wireframes
+- [ ] Get user feedback on wireframes
+- [ ] Define MVP scope
+- [ ] Choose tech stack based on requirements
+- [ ] Create detailed design document
+
+**Implementation:** TBD after design phase
 
 ---
 
