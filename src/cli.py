@@ -2910,19 +2910,23 @@ def cmd_prd_sync(args):
 
 
 def cmd_prd_sessions(args):
-    """List active Claude Squad sessions."""
-    from src.prd.squad_adapter import ClaudeSquadAdapter, CapabilityError
+    """List active agent sessions (tmux or subprocess)."""
+    from src.prd.backend_selector import BackendSelector
     from datetime import datetime, timezone
 
     working_dir = Path(args.dir or '.')
 
     try:
-        adapter = ClaudeSquadAdapter(working_dir)
-    except CapabilityError as e:
+        selector = BackendSelector.detect(working_dir)
+        adapter = selector.get_adapter()
+        if adapter is None:
+            print("No execution backend available")
+            sys.exit(1)
+    except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
 
-    sessions = adapter.list_sessions()
+    sessions = adapter.list_agents()
 
     if not sessions:
         print("No active sessions")
@@ -2946,61 +2950,74 @@ def cmd_prd_sessions(args):
 
 
 def cmd_prd_attach(args):
-    """Attach to a Claude Squad session."""
-    from src.prd.squad_adapter import ClaudeSquadAdapter, CapabilityError, SessionError
+    """Attach to an agent session (tmux only)."""
+    from src.prd.backend_selector import BackendSelector
+    from src.prd.tmux_adapter import TmuxError, SessionNotFoundError
 
     working_dir = Path(args.dir or '.')
 
     try:
-        adapter = ClaudeSquadAdapter(working_dir)
+        selector = BackendSelector.detect(working_dir)
+        adapter = selector.get_adapter()
+        if adapter is None:
+            print("No execution backend available")
+            sys.exit(1)
         adapter.attach(args.task_id)
-    except CapabilityError as e:
+    except NotImplementedError as e:
+        print(f"Error: {e}")
+        print("Attach is only supported with tmux backend")
+        sys.exit(1)
+    except (TmuxError, SessionNotFoundError) as e:
         print(f"Error: {e}")
         sys.exit(1)
-    except SessionError as e:
+    except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
 
 
 def cmd_prd_done(args):
-    """Mark a Claude Squad task as complete."""
-    from src.prd.squad_adapter import ClaudeSquadAdapter, CapabilityError, SessionError
+    """Mark a task as complete and terminate its session."""
+    from src.prd.backend_selector import BackendSelector
 
     working_dir = Path(args.dir or '.')
 
     try:
-        adapter = ClaudeSquadAdapter(working_dir)
-        adapter.mark_complete(args.task_id, terminate_session=not args.keep_session)
+        selector = BackendSelector.detect(working_dir)
+        adapter = selector.get_adapter()
+        if adapter is None:
+            print("No execution backend available")
+            sys.exit(1)
+        adapter.mark_complete(args.task_id)
         print(f"Task {args.task_id} marked complete")
-        if not args.keep_session:
-            print("Session terminated")
-    except CapabilityError as e:
-        print(f"Error: {e}")
-        sys.exit(1)
-    except SessionError as e:
+        print("Session terminated")
+    except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
 
 
 def cmd_prd_cleanup(args):
-    """Clean up orphaned Claude Squad sessions."""
-    from src.prd.squad_adapter import ClaudeSquadAdapter, CapabilityError
+    """Clean up all agent sessions."""
+    from src.prd.backend_selector import BackendSelector
 
     working_dir = Path(args.dir or '.')
 
     try:
-        adapter = ClaudeSquadAdapter(working_dir)
+        selector = BackendSelector.detect(working_dir)
+        adapter = selector.get_adapter()
+        if adapter is None:
+            print("No execution backend available")
+            sys.exit(1)
 
-        # Clean orphaned sessions
-        cleaned = adapter.cleanup_orphaned()
-        print(f"Cleaned {cleaned} orphaned session(s)")
+        # Clean all sessions
+        adapter.cleanup()
+        print("All sessions cleaned up")
 
-        # Optionally clean old records
+        # Optionally clean old records from registry
         if args.days:
             removed = adapter.registry.cleanup_old(days=args.days)
             print(f"Removed {removed} old record(s) (>{args.days} days)")
 
-    except CapabilityError as e:
+    except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
 

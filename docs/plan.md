@@ -1,81 +1,130 @@
-# Implementation Plan: Full Integration of Step Enforcement
+# PRD-004: Replace Claude Squad with Direct tmux Management
 
-## Overview
+## Summary
 
-Integrate the step enforcement system (StepType, evidence validation, skip reasoning validation, HardGateExecutor) into the core engine and CLI for full functionality.
+Replace the broken `squad_adapter.py` (which expects non-existent Claude Squad CLI commands) with a `TmuxAdapter` that manages tmux sessions directly. Include subprocess fallback for non-tmux environments.
 
-## Changes Required
+## Background
 
-### 1. engine.py Updates
+The current `ClaudeSquadAdapter` expects commands like:
+- `claude-squad new --name X --dir Y --prompt-file Z`
+- `claude-squad list --json`
+- `claude-squad attach <session>`
 
-**Add imports:**
+But Claude Squad (`cs`) is a **TUI** - it has no CLI interface. This makes the entire spawning subsystem non-functional.
+
+**Validation:** Prototype testing confirmed direct tmux management works with `claude --print`.
+
+## Implementation Plan
+
+### Phase 1: Create TmuxAdapter
+
+**File:** `src/prd/tmux_adapter.py`
+
 ```python
-from .schema import StepType
-from .enforcement import (
-    HardGateExecutor,
-    validate_skip_reasoning,
-    validate_evidence_depth,
-    get_evidence_schema
-)
+class TmuxAdapter:
+    """Direct tmux management for parallel Claude Code agents."""
+
+    def spawn_agent(task_id, prompt, working_dir, branch) -> SessionRecord
+    def list_agents() -> List[SessionRecord]
+    def attach(task_id) -> None  # replaces current process
+    def capture_output(task_id, lines=100) -> str
+    def kill_agent(task_id) -> None
+    def cleanup() -> None  # kill entire session
 ```
 
-**Add gate executor instance to WorkflowEngine.__init__:**
+Key implementation details:
+- Session name: `wfo-main` (workflow-orchestrator main session)
+- Window names: `task-{task_id}`
+- Uses `tmux send-keys` to run `claude --print < prompt_file`
+- Reuses existing `SessionRegistry` for persistence
+- Supports `get_claude_binary()` for Happy integration
+
+### Phase 2: Create SubprocessFallback
+
+**File:** `src/prd/subprocess_adapter.py`
+
 ```python
-self.gate_executor = HardGateExecutor()
+class SubprocessAdapter:
+    """Fallback when tmux not available."""
+
+    def spawn_agent(task_id, prompt, working_dir, branch) -> SessionRecord
+    def list_agents() -> List[SessionRecord]
+    def capture_output(task_id) -> str  # from log file
+    def kill_agent(task_id) -> None
 ```
 
-**Modify complete_item() to:**
-- Check step_type before completing
-- For `gate` steps: run HardGateExecutor, store result in gate_result
-- For `documented` steps: validate evidence if provided, store in evidence field
-- For `required` steps: allow completion without evidence
-- For `flexible` steps: allow completion without evidence
+- Fire-and-forget subprocess spawning
+- Logs to `.wfo_log_{task_id}.txt`
+- No attach capability (limitation of fallback)
 
-**Modify skip_item() to:**
-- Check step_type - reject skip for `gate` and `required` types
-- Use validate_skip_reasoning() for stricter validation on `documented` and `flexible` steps
-- Store skip_context_considered if provided
+### Phase 3: Update BackendSelector
 
-**Add new method execute_gate():**
-- Runs gate command with retry logic (max 3 retries)
-- Feeds error back for potential fix attempts
-- Logs GATE_EXECUTED, GATE_PASSED, GATE_FAILED, GATE_RETRY events
+**File:** `src/prd/backend_selector.py`
 
-### 2. cli.py Updates
-
-**Add --evidence option to complete command:**
+Add new execution mode and detection:
 ```python
-@click.option('--evidence', type=str, help='JSON evidence artifact for documented steps')
+class ExecutionMode(Enum):
+    INTERACTIVE = "interactive"  # TmuxAdapter
+    BATCH = "batch"              # GitHub Actions
+    SUBPROCESS = "subprocess"    # SubprocessAdapter fallback
+    MANUAL = "manual"            # Generate prompts only
 ```
 
-**Add --context option to skip command:**
-```python
-@click.option('--context', type=str, help='Context considered before skipping (comma-separated)')
-```
+Detection priority:
+1. tmux available → `TmuxAdapter`
+2. GitHub Actions available → `GitHubActionsBackend`
+3. Neither → `SubprocessAdapter`
+4. User override → `MANUAL`
 
-**Update complete command handler:**
-- Parse evidence JSON if provided
-- Pass to engine.complete_item()
+### Phase 4: Update CLI Commands
 
-**Update skip command handler:**
-- Parse context list if provided
-- Pass to engine.skip_item()
+**File:** `src/cli.py`
 
-### 3. default_workflow.yaml Updates
+Update these functions to use new adapters:
+- `cmd_prd_spawn` - Use TmuxAdapter.spawn_agent()
+- `cmd_prd_sessions` - Use TmuxAdapter.list_agents()
+- `cmd_prd_attach` - Use TmuxAdapter.attach()
+- `cmd_prd_done` - Use TmuxAdapter.kill_agent()
+- `cmd_prd_cleanup` - Use TmuxAdapter.cleanup()
+- `cmd_prd_check_squad` → rename to `cmd_prd_check_backend`
 
-Update key items with appropriate step_type:
-- `run_tests` → step_type: gate
-- `initial_plan` → step_type: required
-- `clarifying_questions` → step_type: documented, evidence_schema: SpecReviewEvidence
-- Other items → step_type: flexible (default)
+### Phase 5: Deprecate/Remove Old Code
 
-## Implementation Order
+Files to deprecate:
+- `src/prd/squad_adapter.py` - Replace with tmux_adapter.py
+- `src/prd/squad_capabilities.py` - No longer needed
 
-1. Update engine.py imports and __init__
-2. Add execute_gate() method
-3. Modify complete_item() for step enforcement
-4. Modify skip_item() for step enforcement
-5. Update cli.py with new options
-6. Update default_workflow.yaml
-7. Add integration tests
-8. Run full test suite
+Keep:
+- `src/prd/session_registry.py` - Reuse as-is
+- `src/prd/backends/github_actions.py` - Still used for batch mode
+
+### Phase 6: Tests
+
+- Unit tests for TmuxAdapter (mock subprocess calls)
+- Unit tests for SubprocessAdapter
+- Integration tests (actually spawn tmux sessions)
+- Update existing squad_adapter tests
+
+## Files Changed
+
+| File | Action | Description |
+|------|--------|-------------|
+| `src/prd/tmux_adapter.py` | CREATE | New tmux-based adapter |
+| `src/prd/subprocess_adapter.py` | CREATE | Fallback adapter |
+| `src/prd/backend_selector.py` | MODIFY | Add new modes, detection |
+| `src/cli.py` | MODIFY | Update prd commands |
+| `src/prd/squad_adapter.py` | DEPRECATE | Mark for removal |
+| `src/prd/squad_capabilities.py` | DEPRECATE | Mark for removal |
+| `tests/prd/test_tmux_adapter.py` | CREATE | New tests |
+| `tests/prd/test_subprocess_adapter.py` | CREATE | New tests |
+
+## Success Criteria
+
+1. `orchestrator prd spawn --count 3` creates 3 tmux windows with Claude agents
+2. `orchestrator prd sessions` lists active agents
+3. `orchestrator prd attach task-1` attaches to agent window
+4. `orchestrator prd done task-1` terminates agent
+5. Fallback to subprocess when tmux unavailable
+6. Happy integration works (`CLAUDE_BINARY=happy`)
+7. All existing tests pass (or are updated)

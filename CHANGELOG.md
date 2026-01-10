@@ -2,6 +2,27 @@
 
 All notable changes to the workflow-orchestrator.
 
+## [2.3.0] - 2026-01-10
+
+### Added
+- **PRD-004: Direct tmux Agent Management**: Replaced broken Claude Squad integration with direct tmux session management
+  - `TmuxAdapter`: Spawns Claude Code agents in tmux windows for interactive sessions
+  - `SubprocessAdapter`: Fire-and-forget fallback when tmux unavailable
+  - `BackendSelector`: Auto-detects tmux, falls back to subprocess
+  - Happy integration via `CLAUDE_BINARY=happy` config
+  - 57 new tests covering both adapters
+
+### Changed
+- **CLI prd commands**: Now use new adapters instead of broken ClaudeSquadAdapter
+  - `prd sessions`: Lists active agent sessions
+  - `prd attach`: Attaches to tmux session (tmux only)
+  - `prd done`: Marks task complete and terminates session
+  - `prd cleanup`: Cleans up all sessions
+- **ExecutionMode**: Added `SUBPROCESS` mode for non-tmux environments
+
+### Deprecated
+- `ClaudeSquadAdapter` and `squad_capabilities.py` - kept for reference but no longer used
+
 ## [2.2.2] - 2026-01-10
 
 ### Fixed

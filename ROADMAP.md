@@ -20,65 +20,22 @@ When completing a roadmap item:
 ### Critical - Blocking Parallel Execution
 
 #### PRD-004: Fix or Replace Claude Squad Integration
-**Status:** BLOCKED - Current integration non-functional
+**Status:** COMPLETED (2026-01-10)
 **Complexity:** High
 **Priority:** CRITICAL - Spawning feature is completely broken
 **Source:** Dogfood testing 2026-01-09
 
-**Description:** The Claude Squad integration (PRD-001) is non-functional. The `squad_adapter.py` was designed expecting a CLI interface that doesn't exist.
+**Solution:** Implemented Option B (direct tmux management) with Option D (subprocess) as fallback.
 
-**Problem:**
-Our adapter expects commands like:
-```bash
-claude-squad new --name X --dir Y --prompt-file Z
-claude-squad list --json
-claude-squad attach <session>
-```
+**Implementation:**
+- Created `src/prd/tmux_adapter.py` - Direct tmux session management
+- Created `src/prd/subprocess_adapter.py` - Fallback for non-tmux environments
+- Updated `src/prd/backend_selector.py` - Auto-detects tmux, falls back to subprocess
+- Updated CLI commands (`prd sessions`, `prd attach`, `prd done`, `prd cleanup`)
+- Added 57 new tests, all passing
+- Multi-model review (Gemini, GPT, Grok, DeepSeek) approved
 
-But Claude Squad (`cs`) is a **TUI (Terminal User Interface)** - you launch it interactively and use keyboard commands (`n` for new, etc.). There is no programmatic CLI.
-
-**Impact:**
-- `orchestrator prd spawn` falls back to "manual" mode
-- No actual parallel agent spawning occurs
-- PRD-001 Phase 1 "Complete" status is misleading
-- The entire spawning subsystem is untestable
-
-**Options:**
-
-| Option | Pros | Cons |
-|--------|------|------|
-| **A: Fix Claude Squad integration** | Reuse existing tool | May require upstream changes to `cs`; TUI not designed for automation |
-| **B: Direct tmux management** | Full control; no external deps | Reinvent wheel; session management complexity |
-| **C: Use Happy API** | User already uses Happy; mobile access | Requires Happy API; coupling to specific tool |
-| **D: Simple subprocess spawning** | Minimal complexity | No session management; orphan risk |
-
-**Recommended: Option B or D**
-
-Option B (direct tmux) gives us control without depending on external TUI tools:
-```python
-# Direct tmux approach
-def spawn_session(task_id: str, prompt: str, working_dir: Path):
-    session_name = f"wfo-{task_id}"
-    subprocess.run(["tmux", "new-session", "-d", "-s", session_name, "-c", str(working_dir)])
-    subprocess.run(["tmux", "send-keys", "-t", session_name, f"claude --print '{prompt}'", "Enter"])
-```
-
-Option D (simple subprocess) is even simpler for non-interactive batch execution.
-
-**Tasks:**
-- [ ] Decide on approach (A/B/C/D)
-- [ ] If B: Implement direct tmux session management
-- [ ] If D: Implement simple subprocess spawning
-- [ ] Remove or deprecate broken Claude Squad adapter
-- [ ] Update capability detection for chosen approach
-- [ ] Add integration tests that actually spawn agents
-- [ ] Update documentation
-
-**Files Affected:**
-- `src/prd/squad_adapter.py` - Replace or fix
-- `src/prd/squad_capabilities.py` - Update for new approach
-- `src/prd/backend_selector.py` - Update mode detection
-- `tests/prd/test_squad_adapter.py` - Fix tests
+**See CHANGELOG.md for details.**
 
 ---
 

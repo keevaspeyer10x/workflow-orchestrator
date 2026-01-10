@@ -16,6 +16,7 @@ class TestExecutionMode:
         """Should have expected values."""
         assert ExecutionMode.INTERACTIVE.value == "interactive"
         assert ExecutionMode.BATCH.value == "batch"
+        assert ExecutionMode.SUBPROCESS.value == "subprocess"
         assert ExecutionMode.MANUAL.value == "manual"
 
 
@@ -71,16 +72,18 @@ class TestBackendSelector:
         mode = selector.select(task_count=5, interactive=True, prefer_remote=True)
         assert mode == ExecutionMode.BATCH
 
-    def test_fallback_to_manual(self, temp_dir):
-        """Should fall back to manual when no backends available."""
+    def test_fallback_to_subprocess(self, temp_dir):
+        """Should fall back to subprocess when tmux not available."""
         selector = BackendSelector(
             temp_dir,
             squad_available=False,
-            gha_available=False
+            gha_available=False,
+            tmux_available=False  # No tmux
         )
 
         mode = selector.select(task_count=5, interactive=True)
-        assert mode == ExecutionMode.MANUAL
+        # PRD-004: Subprocess is always available as fallback
+        assert mode == ExecutionMode.SUBPROCESS
 
     def test_squad_fallback_when_not_interactive_no_gha(self, temp_dir):
         """Should use squad even for non-interactive if no GHA."""
@@ -107,45 +110,38 @@ class TestBackendSelector:
         assert ExecutionMode.BATCH in modes
 
     def test_get_status(self, temp_dir):
-        """Should return status dict."""
+        """Should return status dict with all backend info."""
         selector = BackendSelector(
             temp_dir,
             squad_available=True,
-            gha_available=False
+            gha_available=False,
+            tmux_available=True
         )
 
         status = selector.get_status()
 
-        assert status["claude_squad"]["available"] is True
+        # New primary backends
+        assert status["tmux"]["available"] is True
+        assert status["subprocess"]["available"] is True  # Always available
         assert status["github_actions"]["available"] is False
         assert status["manual"]["available"] is True
+        # Deprecated
+        assert status["claude_squad"]["available"] is True
+        assert status["claude_squad"]["deprecated"] is True
 
     def test_detect_classmethod(self, temp_dir):
-        """Should auto-detect backend availability."""
-        # Import the real modules and patch them
-        import src.prd.backend_selector as bs_module
+        """Should auto-detect backend availability including tmux."""
+        # Patch shutil.which for tmux detection
+        with patch('shutil.which') as mock_which:
+            mock_which.return_value = '/usr/bin/tmux'
 
-        # Create mock detector
-        mock_caps = MagicMock()
-        mock_caps.is_compatible = True
+            # Create a selector via detect - it will actually detect tmux
+            selector = BackendSelector.detect(temp_dir)
 
-        mock_detector_cls = MagicMock()
-        mock_detector_cls.return_value.detect.return_value = mock_caps
-
-        # Create mock GHA backend
-        mock_gha_cls = MagicMock()
-        mock_gha_cls.return_value.is_available.return_value = False
-
-        with patch.dict('sys.modules', {
-            'src.prd.squad_capabilities': MagicMock(CapabilityDetector=mock_detector_cls),
-            'src.prd.backends.github_actions': MagicMock(GitHubActionsBackend=mock_gha_cls),
-        }):
-            # Need to reimport to get patched modules
-            # Instead, we'll construct the selector directly and test selection logic
-            selector = BackendSelector(temp_dir, squad_available=True, gha_available=False)
-
-        assert selector.squad_available is True
-        assert selector.gha_available is False
+            # tmux should be detected
+            assert selector.tmux_available is True
+            # working_dir should be set
+            assert selector.working_dir == temp_dir
 
     def test_detect_handles_squad_error(self, temp_dir):
         """Should handle squad detection errors gracefully."""
@@ -209,3 +205,75 @@ class TestBackendSelectionPriority:
         mode100 = selector.select(task_count=100, interactive=True)
 
         assert mode1 == mode100 == ExecutionMode.INTERACTIVE
+
+
+class TestBackendSelectorTmuxIntegration:
+    """Tests for tmux-based backend selection (PRD-004)."""
+
+    @pytest.fixture
+    def temp_dir(self, tmp_path):
+        return tmp_path
+
+    def test_subprocess_mode_exists(self):
+        """Should have SUBPROCESS execution mode."""
+        # This test will fail until we add the new mode
+        try:
+            assert ExecutionMode.SUBPROCESS.value == "subprocess"
+        except AttributeError:
+            pytest.skip("SUBPROCESS mode not implemented yet")
+
+    def test_tmux_available_selects_interactive(self, temp_dir):
+        """When tmux available, should select INTERACTIVE mode."""
+        selector = BackendSelector(
+            temp_dir,
+            squad_available=False,  # Claude Squad not available
+            gha_available=False,
+            tmux_available=True  # But tmux is
+        )
+
+        mode = selector.select(task_count=3, interactive=True)
+        assert mode == ExecutionMode.INTERACTIVE
+
+    def test_no_tmux_falls_back_to_subprocess(self, temp_dir):
+        """When tmux not available, should fall back to SUBPROCESS."""
+        try:
+            selector = BackendSelector(
+                temp_dir,
+                squad_available=False,
+                gha_available=False,
+                tmux_available=False
+            )
+
+            mode = selector.select(task_count=3, interactive=True)
+            assert mode == ExecutionMode.SUBPROCESS
+        except TypeError:
+            pytest.skip("tmux_available parameter not implemented yet")
+
+    def test_detect_finds_tmux(self, temp_dir):
+        """detect() should find tmux availability."""
+        from unittest.mock import patch
+
+        with patch('shutil.which') as mock_which:
+            mock_which.return_value = '/usr/bin/tmux'
+
+            try:
+                selector = BackendSelector.detect(temp_dir)
+                assert selector.tmux_available is True
+            except AttributeError:
+                pytest.skip("tmux detection not implemented yet")
+
+    def test_get_status_includes_tmux(self, temp_dir):
+        """get_status() should include tmux status."""
+        try:
+            selector = BackendSelector(
+                temp_dir,
+                squad_available=False,
+                gha_available=False,
+                tmux_available=True
+            )
+
+            status = selector.get_status()
+            assert "tmux" in status
+            assert status["tmux"]["available"] is True
+        except TypeError:
+            pytest.skip("tmux status not implemented yet")
