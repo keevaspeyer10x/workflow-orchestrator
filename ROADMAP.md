@@ -39,6 +39,86 @@ When completing a roadmap item:
 
 ---
 
+#### WF-030: Session Isolation for Multi-Workflow Support
+**Status:** Planned
+**Complexity:** MEDIUM (requires state file refactoring + locking)
+**Priority:** HIGH - Blocks parallel multi-session workflows
+**Source:** User observation (2026-01-11) - "It will break the process if I run 2 at once won't it?"
+
+**Problem Statement:**
+Currently, the orchestrator uses a single `.workflow_state.json` file per repository, which means:
+1. **Cannot run multiple workflows simultaneously** in different Claude Code sessions
+2. **State corruption risk** if two sessions modify the file concurrently
+3. **Workflow isolation impossible** - starting new workflow abandons previous one
+4. **No safe handoff between sessions** without finishing current workflow
+
+**Real-World Impact:**
+User wanted to work on WF-029 in one session while PRD-008 was active in another session. This is currently impossible without breaking the orchestrator state.
+
+**Proposed Solution:**
+
+**Option A: Session-Scoped State Files** (RECOMMENDED)
+```bash
+# State files include session/workflow ID
+.workflow_state_prd-008.json
+.workflow_state_wf-029.json
+
+# Commands specify which workflow to use
+orchestrator status --workflow prd-008
+orchestrator advance --workflow wf-029
+
+# Default workflow (most recent or user-selected)
+orchestrator status  # Uses default workflow
+```
+
+**Option B: File Locking**
+- Use file locks (fcntl/flock) on `.workflow_state.json`
+- Block if another session holds the lock
+- Simpler but prevents parallel workflows entirely
+
+**Option C: Workflow Database**
+- SQLite database instead of JSON files
+- Transaction-based isolation
+- Supports concurrent reads, serialized writes
+- Higher complexity, better for many workflows
+
+**Complexity vs Benefit Analysis:**
+
+| Factor | Current | Option A | Option B | Option C |
+|--------|---------|----------|----------|----------|
+| Complexity | N/A | MEDIUM (refactor state access) | LOW (add locking) | HIGH (DB migration) |
+| Parallel workflows | ❌ No | ✅ Yes | ❌ No | ✅ Yes |
+| Session isolation | ❌ No | ✅ Yes | ⚠️ Queued | ✅ Yes |
+| Backward compat | N/A | ✅ (auto-migrate) | ✅ | ⚠️ (migration req'd) |
+
+**Current Evidence:**
+- ✅ User actively blocked by this limitation
+- ✅ Natural use case (work on different features in parallel)
+- ✅ Aligns with parallel agent spawning (PRD execution)
+- ❌ No production data (not shipped yet)
+
+**YAGNI Check:**
+- Solving a problem we **actually have** (user hit this today)
+- Would **NOT** be okay without this for 6-12 months (blocks parallel work)
+- Current solution **fails in practice** (user had to ask before breaking state)
+
+**Recommendation:** ✅ IMPLEMENT (Option A)
+
+**Reasoning:**
+Low-medium effort, high value for users who want to multitask. Option A provides full isolation without DB complexity. Should trigger implementation when users attempt parallel workflows (not before).
+
+**Tasks:**
+- [ ] Design session-scoped state file naming scheme
+- [ ] Refactor StateManager to support multiple state files
+- [ ] Add `--workflow` flag to all orchestrator commands
+- [ ] Add workflow selection/switching UX
+- [ ] Auto-migrate existing `.workflow_state.json` to new format
+- [ ] Add `orchestrator workflows list` command
+- [ ] Update CLAUDE.md with multi-workflow usage
+- [ ] Add tests for concurrent workflow state access
+
+---
+
 #### CORE-023-P1: Conflict Resolution - Core (No LLM)
 **Status:** COMPLETED (2026-01-09)
 **Complexity:** Medium
@@ -953,97 +1033,16 @@ Error analysis runs on already-scrubbed transcripts (CORE-024), so no secrets ar
 ---
 
 #### WF-029: Tradeoff Analysis in Learnings-to-Roadmap Pipeline
-**Status:** ✅ **RECOMMENDED** - Critical learning from PRD-007
-**Complexity:** MEDIUM (requires AI judgment + user approval)
+**Status:** ✅ COMPLETED (2026-01-11)
+**Complexity:** LOW (workflow configuration change only)
 **Priority:** HIGH - Prevents roadmap bloat with unnecessary items
-**Source:** User feedback (2026-01-11) - "Don't want unnecessary or unhelpful functionality"
 
-**Problem Statement:**
-The current `propose_actions` step in LEARN phase automatically suggests adding items to ROADMAP without evaluating complexity vs benefit tradeoff. This leads to:
-1. **Roadmap bloat** - Items added that will never be implemented
-2. **No prioritization** - Everything marked "Planned" regardless of actual value
-3. **Premature optimization** - YAGNI violations (E1/E4/E5 in PRD-007)
-4. **Analysis paralysis** - Users must evaluate dozens of low-value items
+**Implementation:**
+- Added mandatory tradeoff analysis notes to `propose_actions` step in workflow.yaml
+- Added mandatory tradeoff analysis notes to `propose_actions` step in src/default_workflow.yaml
+- Added CHANGELOG entry documenting the change
 
-**Evidence from PRD-007:**
-- Proposed 5 enhancement items without tradeoff analysis
-- 4 out of 5 had no evidence of need
-- Only 1 out of 5 (Prometheus) worth implementing
-- User had to request tradeoff analysis after the fact
-
-**Proposed Solution:**
-
-Add **mandatory tradeoff analysis** to `propose_actions` step:
-
-```yaml
-- id: "propose_actions"
-  name: "Propose Recommended Actions"
-  notes:
-    - "[critical] For each ROADMAP item, include complexity vs benefit analysis"
-    - "[critical] Categorize as: ✅ RECOMMEND / ⚠️ DEFER / 🔍 EXPLORATORY"
-    - "[template] Use standard tradeoff template (see below)"
-```
-
-**Standard Tradeoff Template:**
-
-For each proposed roadmap item, AI must evaluate:
-
-```markdown
-**Complexity vs Benefit Tradeoff:**
-| Factor | Current State | With This Change |
-|--------|---------------|------------------|
-| Complexity | [LOW/MEDIUM/HIGH/VERY HIGH] | Impact description |
-| Operational Overhead | Current cost | New cost/burden |
-| [Other relevant factors] | ... | ... |
-
-**Current Evidence:**
-- ✅/❌ Production data showing need?
-- ✅/❌ User requests for this?
-- ✅/❌ Observed bottleneck/pain point?
-- ✅/❌ Compliance/security requirement?
-
-**YAGNI Check:**
-- Is this solving a problem we actually have? (Not hypothetical future)
-- Would we be okay WITHOUT this for next 6-12 months?
-- Does current solution fail in practice?
-
-**Recommendation:** ✅ IMPLEMENT / ⚠️ DEFER / 🔍 EXPLORATORY
-**Reasoning:** [Clear explanation with specific triggers for reconsideration]
-```
-
-**AI Evaluation Criteria:**
-
-| Recommendation | Criteria |
-|----------------|----------|
-| ✅ **IMPLEMENT** | Low effort + High value, OR addresses active pain point with evidence |
-| ⚠️ **DEFER** | No current evidence of need, wait for user request or production data |
-| 🔍 **EXPLORATORY** | High complexity requiring separate analysis, unclear if needed |
-
-**Examples from PRD-007:**
-
-| Item | Old | New (with analysis) | Why |
-|------|-----|---------------------|-----|
-| E3: Prometheus | "Add to roadmap" | ✅ IMPLEMENT | Low effort (2-3h), standard practice, high ops value |
-| E2: Event Store | "Add to roadmap" | ⚠️ DEFER | No user need, in-memory works, wait for request |
-| E1: Redis State | "Add to roadmap" | 🔍 EXPLORATORY - DEFER | Very high complexity, no evidence of >1000 tasks, YAGNI |
-
-**Integration with Workflow:**
-
-1. **During `propose_actions`**: AI must provide tradeoff analysis for each item
-2. **Before `approve_actions`**: User reviews analysis (not just item list)
-3. **In `apply_approved_actions`**: Only approved items with recommendation preserved
-4. **ROADMAP.md entry**: Includes full tradeoff analysis, not just description
-
-**User Benefits:**
-- Roadmap stays lean (only valuable items)
-- Clear decision criteria (not gut feel)
-- Easy to say "no" to low-value items
-- Revisit triggers clearly defined
-
-**Success Metrics:**
-- Roadmap items added drop by >50% (quality over quantity)
-- >80% of "IMPLEMENT" items actually get implemented
-- <20% of items marked "DEFER" ever reconsidered
+See CHANGELOG.md for details.
 
 ---
 
@@ -1251,6 +1250,68 @@ This prevents abandoning quality gates (reviews, tests, learnings).
 1. Option B (quick win, immediate value)
 2. Option C (documentation update)
 3. Option A (requires workflow YAML updates, broader impact)
+
+---
+
+#### WF-030: Enforce Marking Fixed Issues as Complete
+**Status:** ✅ **RECOMMENDED** - Critical learning from PRD-007
+**Complexity:** LOW
+**Priority:** HIGH - Prevents incomplete work
+**Source:** PRD-007 learnings (2026-01-11) - Agent didn't mark fixed review issues as complete
+
+**Problem Statement:**
+AI agents fix issues identified during REVIEW phase but forget to mark them as complete in the orchestrator workflow, leading to:
+1. Workflow appears incomplete even when all work is done
+2. User must manually verify every fix was made
+3. Unable to advance workflow without manually marking items complete
+4. Lost tracking of what was actually fixed vs what was skipped
+
+**Root Cause:**
+No enforcement mechanism to ensure agents complete the full cycle:
+1. Identify issue
+2. Fix the issue
+3. Mark item as complete in workflow
+
+**Proposed Solutions:**
+
+**Option A: REVIEW Phase Documentation Enhancement**
+Add explicit reminder to REVIEW phase items in workflow YAML:
+```yaml
+items:
+  - id: "fix_review_issues"
+    name: "Fix All Review Issues"
+    required: true
+    notes:
+      - "[critical] After fixing each issue, mark it complete: orchestrator complete <item_id>"
+      - "[critical] Do NOT move on to next phase until ALL fixes are marked complete"
+      - "[info] Use 'orchestrator status' to verify all items show ✓"
+```
+
+**Option B: Pre-Advance Validation**
+Enhance `orchestrator advance` to check for unfixed review issues:
+- Scan git diff for TODOs, FIXMEs, review comments
+- Check if external review files still exist in `.review_history/`
+- Warn if issues found but not all items marked complete
+- Require `--force` to bypass check
+
+**Option C: Auto-Complete Detection**
+Add `orchestrator detect-completions` command:
+```bash
+# Analyze git history and mark items that were clearly fixed
+orchestrator detect-completions --phase REVIEW
+
+# Preview what would be marked complete
+orchestrator detect-completions --dry-run
+```
+
+**Recommendation:** ✅ **IMPLEMENT OPTIONS A + B**
+- Option A: Immediate documentation fix (prevents future issues)
+- Option B: Guard rail to catch missed completions (safety net)
+- Option C: Nice-to-have but adds complexity (defer for now)
+
+**Implementation Priority:**
+1. Option A (quick documentation update)
+2. Option B (validation logic in advance command)
 
 ---
 

@@ -356,9 +356,15 @@ phases:
         required: true
         skippable: false
         notes:
+          - "[critical] For each ROADMAP item, include mandatory complexity vs benefit tradeoff analysis"
+          - "[critical] Categorize each item as: ✅ RECOMMEND (implement) / ⚠️ DEFER (no evidence of need) / 🔍 EXPLORATORY (needs separate analysis)"
+          - "[template] Use standard tradeoff template: Complexity table + Current Evidence + YAGNI Check + Recommendation with reasoning"
+          - "[yagni] Is this solving a problem we actually have? Would we be okay WITHOUT this for 6-12 months? Does current solution fail in practice?"
+          - "[evidence] Include: ✅/❌ Production data showing need, ✅/❌ User requests, ✅/❌ Observed bottleneck, ✅/❌ Compliance requirement"
           - "[tip] Be specific: 'Reorder EXECUTE items in workflow.yaml' not 'improve workflow'"
           - "[tip] Categorize: APPLY NOW (small, safe) vs ROADMAP (large, needs design)"
           - "[caution] User must approve actions before any changes are made"
+          - "[learning] From PRD-007: 4 out of 5 proposed items had no evidence of need - tradeoff analysis prevents roadmap bloat"
 
       - id: "approve_actions"
         name: "User Approval of Proposed Actions"

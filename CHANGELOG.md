@@ -5,6 +5,14 @@ All notable changes to the workflow-orchestrator.
 ## [2.5.0] - 2026-01-11
 
 ### Added
+- **WF-029: Tradeoff Analysis in LEARN Phase**: Mandatory complexity vs benefit analysis for roadmap items
+  - Added tradeoff analysis requirements to `propose_actions` workflow step
+  - Requires categorization: ✅ RECOMMEND / ⚠️ DEFER / 🔍 EXPLORATORY
+  - Includes YAGNI check and evidence evaluation (production data, user requests, bottlenecks)
+  - Prevents roadmap bloat from low-value items without implementation evidence
+  - Applied to both workflow.yaml and src/default_workflow.yaml
+
+### Added
 - **PRD-007: Agent Workflow Enforcement System (Days 14-20)**: Complete orchestration server for multi-agent workflows
   - **State Management** (`src/orchestrator/state.py`): Thread-safe task tracking with JSON persistence
     - Task registration and phase tracking
