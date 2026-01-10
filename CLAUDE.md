@@ -107,6 +107,48 @@ This installs the orchestrator AND enables automatic updates for future sessions
 
 **Note:** Auto-updates only update the orchestrator code. Your repo-specific files (`workflow.yaml`, workflow state, logs) are never modified.
 
+## Automatic Updates
+
+The orchestrator automatically updates itself at the start of each Claude Code session via the session-start hook:
+
+**What gets auto-updated:**
+- ✅ Orchestrator Python package (from GitHub main branch)
+- ✅ All CLI commands and features
+- ✅ Bundled default workflow template (`src/default_workflow.yaml`)
+- ❌ Your project's `workflow.yaml` (intentionally preserved - you customize this per-project)
+
+**Why your workflow.yaml doesn't auto-update:**
+- Each project customizes workflow.yaml for their specific needs
+- Auto-updating would overwrite your customizations
+- Workflow schema is backward compatible (new features are additive)
+- When you start a workflow, the definition is version-locked to that workflow instance
+
+**Getting new workflow features:**
+If the bundled workflow gets new improvements (like WF-029 tradeoff analysis), you have options:
+
+1. **Create a new workflow** - New workflows created with `orchestrator init` get the latest template
+2. **Manual merge** - Copy specific improvements from `src/default_workflow.yaml` to your `workflow.yaml`
+3. **Keep as-is** - Old workflows continue working (backward compatible)
+
+**Recent workflow improvements:**
+- **WF-029 (v2.5.0)**: Mandatory tradeoff analysis in LEARN phase prevents roadmap bloat
+  - Requires complexity vs benefit analysis for all roadmap items
+  - Categorizes as ✅ RECOMMEND / ⚠️ DEFER / 🔍 EXPLORATORY
+  - Includes YAGNI checks and evidence evaluation
+  - See workflow.yaml:359-367 for implementation
+
+**Verifying updates:**
+```bash
+# Check orchestrator version
+orchestrator --version
+
+# Check workflow version (in your workflow.yaml)
+grep "^version:" workflow.yaml
+
+# View bundled default workflow
+cat $(python -c "import workflow_orchestrator; print(workflow_orchestrator.__file__.replace('__init__.py', 'default_workflow.yaml'))")
+```
+
 ## Parallel Agent Spawning (PRD Execution)
 
 Spawn multiple Claude Code agents to work on tasks in parallel using tmux sessions.

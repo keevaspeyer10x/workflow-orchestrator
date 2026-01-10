@@ -11,6 +11,15 @@ All notable changes to the workflow-orchestrator.
   - Includes YAGNI check and evidence evaluation (production data, user requests, bottlenecks)
   - Prevents roadmap bloat from low-value items without implementation evidence
   - Applied to both workflow.yaml and src/default_workflow.yaml
+- **WF-030: Session Isolation** - Documented multi-workflow limitation in roadmap (planned feature)
+- **WF-031: Version Check** - Documented auto-update mechanism in CLAUDE.md (deferred - auto-updates already work via session hook)
+
+### Changed
+- **CLAUDE.md**: Added comprehensive "Automatic Updates" section explaining auto-update behavior
+  - What gets auto-updated (orchestrator code) vs what doesn't (workflow.yaml)
+  - How to get new workflow features in existing projects
+  - Recent workflow improvements (WF-029 tradeoff analysis)
+  - Verification commands for checking versions
 
 ### Added
 - **PRD-007: Agent Workflow Enforcement System (Days 14-20)**: Complete orchestration server for multi-agent workflows
