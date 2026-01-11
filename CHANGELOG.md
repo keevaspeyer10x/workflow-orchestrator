@@ -10,6 +10,11 @@ All notable changes to the workflow-orchestrator.
   - **ReviewThresholdError exception**: Raised when insufficient reviews complete (used by `on_insufficient_reviews: block`)
   - **16 new unit tests**: `tests/test_review_fallbacks.py` covering fallback fields, threshold logic, and settings validation
 
+### Fixed
+- **Critique module attribute error**: Fixed `'ReviewResult' object has no attribute 'content'` error in `critique.py`
+  - Changed `result.content` to `result.raw_output` (correct attribute name)
+  - Error appeared on every phase advance since critique runs between phases
+
 ### Notes
 - Phases 3 (Visual Regression) and 5 (Gate Skipping) were already implemented in previous PR
 - Full fallback chain execution (try primary → fallback1 → fallback2) deferred to follow-up task

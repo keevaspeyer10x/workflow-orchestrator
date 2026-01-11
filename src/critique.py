@@ -486,8 +486,8 @@ Git Changes:
                 context_override=prompt,
             )
 
-            if result and result.content:
-                return result.content
+            if result and result.raw_output:
+                return result.raw_output
             return None
 
         except Exception as e:
