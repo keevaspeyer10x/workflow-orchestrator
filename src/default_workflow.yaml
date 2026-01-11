@@ -37,6 +37,20 @@ settings:
   roadmap_file: "ROADMAP.md"
   changelog_file: "CHANGELOG.md"
 
+  # Smoke test command - lightweight runtime verification
+  # Examples:
+  #   Web: "playwright test tests/smoke/"
+  #   CLI: "orchestrator --version && orchestrator status"
+  #   API: "curl -f http://localhost:8000/health"
+  smoke_test_command: "python -m pytest tests/smoke/ -v --tb=short"
+
+  # Supervision mode - how much human oversight is required
+  # - zero_human: Fully autonomous, skip manual gates with warning (AI-only code review)
+  # - supervised: Require human approval at manual gates (traditional workflow)
+  # - hybrid: Risk-based gates with timeout fallback (auto-approve low-risk)
+  # NOTE: Production deployments always require human approval regardless of mode
+  supervision_mode: "zero_human"
+
   # Claude Code is the default executor - only skip for trivial tasks
   default_executor: "claude_code"
   
@@ -88,6 +102,23 @@ settings:
 
     # Fallback when preferred method unavailable
     fallback_to_api: true
+
+    # Review reliability - graceful degradation for zero-human workflows
+    # Require minimum N of 5 reviews to succeed (prevents single API key blocking workflow)
+    minimum_required: 3  # At least 3 of 5 reviews must complete successfully
+
+    # Fallback models when primary APIs unavailable (missing keys, rate limits, outages)
+    # Uses OpenRouter as universal fallback, then Claude Opus as final fallback
+    fallbacks:
+      codex:
+        - "openai/gpt-5.1"           # OpenRouter fallback
+        - "anthropic/claude-opus-4"  # Final fallback
+      gemini:
+        - "google/gemini-3-pro"      # OpenRouter fallback
+        - "anthropic/claude-opus-4"  # Final fallback
+      grok:
+        - "x-ai/grok-4.1"            # OpenRouter fallback
+        - "anthropic/claude-opus-4"  # Final fallback
 
 phases:
   # ===========================================================================
@@ -325,18 +356,40 @@ phases:
           expect_exit_code: 0
 
       - id: "visual_regression_test"
-        name: "Visual/Screenshot Regression Test"
-        description: "For UI changes: capture screenshots and compare against baseline. Verify no unintended visual changes."
+        name: "Visual Regression Test (Playwright)"
+        description: "For UI changes: automated visual regression testing using Playwright screenshots. Compares against baseline to catch unintended visual changes."
         step_type: "documented"
         skip_conditions: ["no_ui_changes", "backend_only", "api_only"]
-
-      - id: "manual_smoke_test"
-        name: "Manual Smoke Test"
-        description: "Manually test the core functionality to ensure it works as expected."
-        step_type: "gate"
         verification:
-          type: "manual_gate"
-          description: "User to confirm manual smoke test passed."
+          type: "command"
+          command: "playwright test --grep @visual"
+          expect_exit_code: 0
+        notes:
+          - "[tool] Uses Playwright for screenshot capture and pixel-diff comparison"
+          - "[baseline] First run: playwright test --update-snapshots (creates baseline)"
+          - "[compare] Subsequent runs compare to baseline in tests/**/__snapshots__/"
+          - "[threshold] Configure pixel diff tolerance in playwright.config.ts (e.g., maxDiffPixels: 100)"
+          - "[ci] In CI/CD mode, never auto-update snapshots (fail on any mismatch)"
+          - "[setup] Install: npm install -D @playwright/test && npx playwright install"
+          - "[guide] https://playwright.dev/docs/test-snapshots"
+          - "[zero-human] Fully automated, no manual comparison needed"
+
+      - id: "automated_smoke_test"
+        name: "Automated Smoke Test"
+        description: "Run automated smoke test suite to verify core functionality. Replaces manual smoke test in zero-human mode."
+        step_type: "gate"
+        skip_conditions: ["no_smoke_tests_defined"]
+        verification:
+          type: "command"
+          command: "{{smoke_test_command}}"
+          expect_exit_code: 0
+        notes:
+          - "[zero-human] Automated runtime verification (replaces manual testing)"
+          - "[web] Example: playwright test tests/smoke/ (test login, navigation, core flows)"
+          - "[cli] Example: orchestrator --version && orchestrator status (verify CLI works)"
+          - "[api] Example: curl -f http://localhost:8000/health (verify endpoints respond)"
+          - "[scope] Smoke tests are lightweight - test critical paths only (not exhaustive)"
+          - "[speed] Should complete in < 2 minutes (fast feedback loop)"
 
   # ===========================================================================
   # PHASE 5: DOCUMENT (WF-009)

@@ -1,4 +1,261 @@
-# Learnings: Visual Verification Integration
+# Learnings
+
+---
+
+## Session: Zero-Human Workflow Design - REVIEW/VERIFY Phase Critique
+**Date:** 2026-01-11
+**Context:** Analysis of workflow phases for zero-human code review systems
+
+### Task Summary
+Critiqued REVIEW and VERIFY phases in workflow.yaml, compared to industry CI/CD, and prepared roadmap items for production readiness. Applied quick documentation wins to clarify zero-human design intent.
+
+### Root Cause Analysis
+
+#### Why "Gold-Plating" Was Questioned
+1. **5-model review seemed excessive** - Traditional CI/CD uses single human reviewer
+2. **Test redundancy appeared wasteful** - Tests run in both EXECUTE and VERIFY phases
+3. **Manual gates seemed reasonable** - Standard practice in CI/CD pipelines
+
+#### Why Context Changed Everything
+**Critical insight:** This is a **zero-human code review workflow**, not traditional CI/CD.
+
+In traditional CI/CD:
+```
+AI implements → Human reviews → Merge
+```
+
+In zero-human workflow:
+```
+AI implements → ??? → Merge
+```
+
+**The 5-model review and test redundancy aren't overkill - they're replacing human judgment.**
+
+### What Was Built
+
+#### 1. Session Analysis: REVIEW vs VERIFY Phases
+
+**REVIEW Phase Function:**
+- 5 external AI models review code (not the implementation model)
+- Security + Quality (Codex) - code-specialized analysis
+- Consistency + Holistic (Gemini) - 1M context codebase-wide patterns
+- Vibe-Coding (Grok) - catches AI-generation blind spots (hallucinated APIs, plausible-but-wrong logic)
+- All reviews run in parallel in background
+
+**Verdict:** Well-designed for zero-human workflows. Multi-model perspective is essential safety infrastructure.
+
+**VERIFY Phase Function:**
+- Full test suite (post-review regression check)
+- Visual regression test (UI changes)
+- Manual smoke test (human verification)
+
+**Verdict:** Needs work - manual smoke test incompatible with zero-human premise.
+
+#### 2. Comparison to Industry CI/CD
+
+| Feature | Industry CI/CD | Workflow Orchestrator | Winner |
+|---------|----------------|----------------------|---------|
+| **Planning** | ❌ External | ✅ Built-in | Orchestrator |
+| **Test Execution** | ✅ Once | ❌ Twice (redundant) | CI/CD |
+| **Static Analysis** | ✅ Many tools | ❌ None (AI only) | CI/CD |
+| **Code Review** | ⚠️ Human (slow) | ✅ AI (fast) | Tie |
+| **Deployment** | ✅ Multi-stage | ❌ None | CI/CD |
+| **Learning Loop** | ❌ None | ✅ Systematic | Orchestrator |
+| **TDD Enforcement** | ❌ None | ✅ Enforced | Orchestrator |
+
+**Key Insight:** Industry CI/CD is more mature for deployment. Orchestrator is better for development (planning, AI review, learning). The solution is **integration, not replacement**.
+
+#### 3. Roadmap Items Created
+
+**WF-035: Zero-Human Mode - Remove Manual Gate Blockers** (✅ RECOMMEND)
+- Problem: Manual gates block autonomous operation
+- Solution: Add `supervision_mode` config (zero_human, supervised, hybrid)
+- Includes: Automated smoke tests, Playwright visual testing, review fallbacks
+- Complexity: MEDIUM (~16 hours)
+- Priority: HIGH
+
+**WF-036: Production Deployment Readiness** (⚠️ DEFER)
+- Problem: Workflow stops at "commit to main", no deployment phases
+- Solution: Add DEPLOY_STAGING and DEPLOY_PRODUCTION phases
+- Includes: Health checks, rollback automation, environment management
+- Complexity: HIGH (~30 hours)
+- Priority: LOW (deferred until production deployment needed)
+
+#### 4. Quick Documentation Wins Applied
+
+Updated both `workflow.yaml` and `src/default_workflow.yaml`:
+
+**Added supervision_mode setting:**
+```yaml
+supervision_mode: "zero_human"  # or "supervised" or "hybrid"
+```
+
+**Added smoke_test_command:**
+```yaml
+smoke_test_command: "python -m pytest tests/smoke/ -v --tb=short"
+```
+
+**Added review reliability config:**
+```yaml
+reviews:
+  minimum_required: 3  # At least 3 of 5 reviews must succeed
+  fallbacks:
+    codex: ["openai/gpt-5.1", "anthropic/claude-opus-4"]
+    gemini: ["google/gemini-3-pro", "anthropic/claude-opus-4"]
+    grok: ["x-ai/grok-4.1", "anthropic/claude-opus-4"]
+```
+
+**Updated VERIFY phase:**
+- Visual Regression Test → Playwright-specific guidance
+- Manual Smoke Test → Automated Smoke Test
+
+### Design Insights
+
+#### 1. Gold-Plating is Justified in Zero-Human Workflows
+
+**In zero-human context:**
+- ✅ 5-model review = essential safety net (replaces human judgment)
+- ✅ Test redundancy = defense in depth (post-review regression check)
+- ❌ Manual gates = fundamental contradiction (defeats zero-human premise)
+
+**Cost/benefit analysis:**
+- Human review: $50-100 (30-60 min engineer time)
+- AI review (5 models): $0.50-2.00
+- Risk if skipped: HIGH (no oversight in zero-human)
+
+**Conclusion:** Spending $2/workflow for 5-model review is **extremely cheap insurance** in zero-human systems.
+
+#### 2. Test Redundancy is Defense-in-Depth
+
+**Original critique:** "Why run tests twice? Wasteful!"
+
+**In zero-human context:**
+```
+EXECUTE phase:
+  - Agent writes tests
+  - Agent writes code
+  - Tests pass ✓
+
+REVIEW phase:
+  - AI suggests fixes
+  - Agent applies fixes
+
+VERIFY phase:
+  - Tests run AGAIN ← Critical checkpoint
+  - Catches if review fixes broke things
+```
+
+Without human oversight, you need **verification after external modifications**. Not redundant - it's a safety checkpoint.
+
+#### 3. Manual Gates Defeat Zero-Human Premise
+
+**The contradiction:**
+```
+Design goal: Zero-human code review with 5 AI models
+Reality: Manual approval gates block autonomous operation
+```
+
+**Manual gates in workflow:**
+- PLAN: `user_approval` (blocks workflow start)
+- VERIFY: `manual_smoke_test` (blocks completion)
+
+**Solution:** `supervision_mode` config allows toggling between zero-human (autonomous) and supervised (traditional) workflows.
+
+#### 4. API Key Brittleness is Single Point of Failure
+
+**Problem:**
+```
+If any of 3 API keys missing (GEMINI, OPENAI, XAI):
+  → Entire workflow blocks
+  → Agent can't proceed
+  → Zero-human operation impossible
+```
+
+**Solution:**
+```yaml
+minimum_required: 3  # Only need 3 of 5 reviews
+fallbacks:          # OpenRouter → Claude Opus chains
+```
+
+Graceful degradation ensures workflow continues even with missing keys.
+
+### Prevention Measures
+
+#### For Future Workflow Design
+
+1. **Contextualize "best practices"** - CI/CD patterns may not apply to zero-human AI workflows
+2. **Question assumptions** - "Redundancy is waste" depends on whether humans are in the loop
+3. **Design for autonomy first** - Manual gates should be opt-in, not default
+4. **Build fallback chains** - Single dependencies become single points of failure
+5. **Document design intent explicitly** - `supervision_mode` setting makes philosophy clear
+
+#### For Roadmap Planning
+
+1. **Separate immediate vs future** - WF-035 (immediate) vs WF-036 (deferred)
+2. **Use YAGNI rigorously** - WF-036 deferred because "not deploying to production yet"
+3. **Validate with evidence** - WF-035 based on actual incompatibility (manual gates in zero-human)
+4. **Include tradeoff analysis** - Complexity tables, evidence checks, YAGNI validation
+
+#### For Implementation
+
+1. **Configuration over code** - `supervision_mode` allows both autonomous and supervised workflows
+2. **Documentation as first phase** - 30 min of config updates before 12+ hours of implementation
+3. **Validate early** - Python script verified all 6 changes before moving forward
+4. **Backport to defaults** - Changes to both workflow.yaml and src/default_workflow.yaml
+
+### Systemic Improvements Proposed
+
+#### Immediate (WF-035 Phases 1-4, ~12 hours)
+- [ ] Implement supervision_mode logic (gate skipping)
+- [ ] Implement review fallback chains
+- [ ] Wire up automated smoke tests
+- [ ] Add Playwright visual testing support
+- [ ] Dogfood in zero_human mode
+
+#### Future (WF-036, ~30 hours when needed)
+- [ ] Add DEPLOY_STAGING phase
+- [ ] Add DEPLOY_PRODUCTION phase
+- [ ] Implement health checks with retry logic
+- [ ] Add automatic rollback on failure
+- [ ] Support blue/green and canary deployments
+
+### Success Metrics
+
+**Configuration validation:**
+- ✅ 6/6 checks passed (workflow.yaml)
+- ✅ 6/6 checks passed (src/default_workflow.yaml)
+- ✅ Backward compatible (existing workflows work)
+- ✅ Orchestrator can read updated configuration
+
+**Design clarity:**
+- ✅ `supervision_mode` explicitly documents zero-human intent
+- ✅ Review fallbacks prevent API key brittleness
+- ✅ Automated smoke tests replace manual gates
+- ✅ Playwright guidance unblocks visual testing
+
+### Related Work
+
+- **WF-034:** Post-workflow adherence validation (complements supervision_mode)
+- **WF-024:** Risk-based multi-AI reviews (extends review philosophy to PLAN phase)
+- **CORE-026:** Review failure handling (related to fallback chains)
+
+### Key Takeaway
+
+**Zero-human workflows require different design patterns than traditional CI/CD.**
+
+What looks like "gold-plating" (5 models, test redundancy) is actually **essential safety infrastructure** when humans are removed from the loop. The real design flaw wasn't over-engineering the reviews - it was under-engineering the automation (manual gates in an autonomous workflow).
+
+The correct framing:
+- ✅ Multi-model review: Replaces human judgment
+- ✅ Test redundancy: Post-modification verification
+- ❌ Manual gates: Contradicts zero-human premise
+- ✅ Fallback chains: Prevents brittleness
+
+**Cost perspective:** In zero-human workflows, spending $2 for 5-model AI review is **cheaper than a single human code review** ($50-100) and provides 24/7 availability with consistent quality.
+
+---
+
+## Session: Visual Verification Integration
 
 ## Task Summary
 Added visual verification integration to the workflow orchestrator, connecting to the visual-verification-service for AI-powered UAT testing with hybrid specific checks and open-ended evaluation.

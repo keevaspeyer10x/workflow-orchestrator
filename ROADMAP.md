@@ -3701,3 +3701,571 @@ orchestrator prd search "user notifications"
 
 ---
 
+#### WF-035: Zero-Human Mode - Remove Manual Gate Blockers
+**Status:** ✅ **RECOMMEND** - Critical for autonomous AI workflows
+**Complexity:** MEDIUM (config system + gate logic + test automation)
+**Priority:** HIGH - Blocks fully autonomous operation
+**Source:** Session analysis (2026-01-11) - Manual gates incompatible with zero-human review workflows
+
+**Problem Statement:**
+The workflow is designed for zero-human code review (5 AI models replace human judgment), but contains manual gates that block autonomous operation:
+
+1. **PLAN phase:** `user_approval` manual gate blocks workflow start
+2. **VERIFY phase:** `manual_smoke_test` requires human intervention
+3. **VERIFY phase:** Visual regression test underspecified (no tooling guidance)
+4. **REVIEW phase:** Single missing API key blocks entire workflow (brittle)
+5. **No supervision mode config:** Can't distinguish autonomous vs supervised workflows
+
+**Current Blocking Flow:**
+```
+PLAN → [MANUAL GATE: user_approval] → EXECUTE → REVIEW → [MANUAL GATE: manual_smoke_test] → LEARN
+        ↑ Blocks autonomous start                          ↑ Blocks autonomous completion
+```
+
+**Real-World Impact:**
+- Zero-human workflows cannot complete without human intervention
+- Agent must wait indefinitely at manual gates
+- Visual regression tests fail because agents don't know what tooling to use
+- Missing any of 3 API keys (GEMINI, OPENAI, XAI) blocks entire workflow
+- No way to configure "supervised" vs "autonomous" operation modes
+
+**Design Philosophy - Why Gold-Plating is Justified:**
+
+In traditional CI/CD: `AI implements → Human reviews → Merge`
+
+In zero-human workflow: `AI implements → ??? → Merge`
+
+**The 5-model review and test redundancy aren't overkill - they're replacing human judgment.** Multi-model reviews are essential safety infrastructure. Test redundancy (EXECUTE + VERIFY) is defense-in-depth (post-review regression checks).
+
+However, manual gates defeat the entire zero-human premise.
+
+**Proposed Solution:**
+
+**Phase 1: Supervision Mode Configuration**
+
+Add `supervision_mode` setting to workflow.yaml:
+
+```yaml
+settings:
+  # Supervision mode: how much human oversight is required
+  # - zero_human: Fully autonomous, skip manual gates with warning
+  # - supervised: Require human approval at manual gates (traditional)
+  # - hybrid: Risk-based gates with timeout fallback
+  supervision_mode: "zero_human"  # or "supervised" or "hybrid"
+
+  # Hybrid mode settings (only used if supervision_mode: hybrid)
+  hybrid_mode:
+    gate_timeout: 300  # 5 minutes - auto-skip after timeout
+    auto_approve_if:
+      - risk_level: "low"
+      - files_changed: "<= 5"
+      - no_breaking_changes: true
+    require_human_if:
+      - risk_level: "high"
+      - touches_auth: true
+      - database_migrations: true
+```
+
+**Phase 2: Automated Smoke Testing**
+
+Add smoke test command to settings (like `test_command`):
+
+```yaml
+settings:
+  # Smoke test command - lightweight runtime verification
+  # Examples:
+  #   Web: "playwright test tests/smoke/"
+  #   CLI: "myapp --version && myapp validate"
+  #   API: "curl http://localhost:8000/health"
+  smoke_test_command: "pytest tests/smoke/ -v --tb=short"
+```
+
+Update VERIFY phase:
+
+```yaml
+- id: "automated_smoke_test"
+  name: "Automated Smoke Test"
+  description: "Run automated smoke test suite to verify core functionality works"
+  verification:
+    type: "command"
+    command: "{{smoke_test_command}}"
+    expect_exit_code: 0
+  skip_conditions: ["no_smoke_tests_defined"]
+  notes:
+    - "[zero-human] Replaces manual smoke test with automation"
+    - "[web] Use Playwright: playwright test tests/smoke/"
+    - "[cli] Test core commands: myapp --version && myapp run --dry-run"
+    - "[api] Test health endpoints: curl localhost:8000/health"
+```
+
+**Phase 3: Visual Regression Test Tooling**
+
+Specify Playwright as standard tooling:
+
+```yaml
+- id: "visual_regression_test"
+  name: "Visual Regression Test (Playwright)"
+  description: "Automated visual regression testing using Playwright screenshots"
+  verification:
+    type: "command"
+    command: "playwright test --grep @visual"
+  skip_conditions: ["no_ui_changes", "backend_only", "api_only"]
+  notes:
+    - "[tool] Uses Playwright for screenshot capture and comparison"
+    - "[baseline] First run: playwright test --update-snapshots"
+    - "[compare] Subsequent runs compare to baseline in tests/screenshots/"
+    - "[ci] In CI mode, never update snapshots (fail on mismatch)"
+    - "[threshold] Configure pixel diff threshold in playwright.config.ts"
+    - "[setup] Guide: https://playwright.dev/docs/test-snapshots"
+```
+
+**Phase 4: Review Fallback & Graceful Degradation**
+
+Add minimum review threshold and fallback models:
+
+```yaml
+settings:
+  reviews:
+    enabled: true
+    minimum_required: 3  # At least 3 of 5 must succeed
+
+    # Fallback chain when primary models unavailable
+    fallbacks:
+      codex:
+        - "openai/gpt-5.1"           # OpenRouter fallback
+        - "anthropic/claude-opus-4"  # Secondary fallback
+      gemini:
+        - "google/gemini-3-pro"      # OpenRouter fallback
+        - "anthropic/claude-opus-4"  # Secondary fallback
+      grok:
+        - "x-ai/grok-4.1"            # OpenRouter fallback
+        - "anthropic/claude-opus-4"  # Secondary fallback
+
+    # Behavior when minimum not met
+    on_insufficient_reviews:
+      action: "warn"  # or "block"
+      message: "Only {count} of {minimum} reviews completed. Proceeding with warning."
+```
+
+**Phase 5: Gate Skipping Logic**
+
+Update manual gates to respect supervision mode:
+
+```yaml
+# PLAN phase
+- id: "user_approval"
+  name: "Get User Approval"
+  description: "User must approve the plan before execution (skipped in zero_human mode)"
+  verification:
+    type: "manual_gate"
+    skip_if_supervision_mode: ["zero_human"]
+    auto_approve_after: 300  # 5 min (hybrid mode only)
+  notes:
+    - "[zero-human] Auto-skipped with warning logged"
+    - "[supervised] Requires explicit approval"
+    - "[hybrid] Auto-approves after timeout for low-risk changes"
+```
+
+**Implementation Tasks:**
+
+**Phase 1: Configuration (2 hours)**
+- [ ] Add `supervision_mode` to workflow schema
+- [ ] Add validation for supervision_mode values
+- [ ] Update StateManager to read supervision_mode setting
+- [ ] Add `--supervision-mode` CLI flag for overrides
+
+**Phase 2: Gate Logic (3 hours)**
+- [ ] Update manual gate handler to check supervision_mode
+- [ ] Log warnings when gates are auto-skipped
+- [ ] Implement timeout logic for hybrid mode
+- [ ] Add risk-based auto-approval for hybrid mode
+
+**Phase 3: Smoke Test Framework (2 hours)**
+- [ ] Add `smoke_test_command` to settings schema
+- [ ] Update VERIFY phase: replace manual_smoke_test with automated_smoke_test
+- [ ] Add example smoke tests to tests/smoke/ directory
+- [ ] Document smoke test patterns (web/CLI/API) in notes
+
+**Phase 4: Visual Testing Docs (1 hour)**
+- [ ] Update visual_regression_test with Playwright guidance
+- [ ] Add detailed notes: baseline workflow, CI behavior, threshold config
+- [ ] Create docs/VISUAL_TESTING.md guide
+- [ ] Add example Playwright visual test to tests/
+
+**Phase 5: Review Fallbacks (4 hours)**
+- [ ] Add `minimum_required` and `fallbacks` to review config schema
+- [ ] Implement fallback chain logic in review engine
+- [ ] Add OpenRouter integration for fallback models
+- [ ] Track which models were used (primary vs fallback) in logs
+- [ ] Implement `on_insufficient_reviews` behavior (warn vs block)
+
+**Phase 6: Integration & Testing (4 hours)**
+- [ ] Update both workflow.yaml and src/default_workflow.yaml
+- [ ] Add tests for supervision_mode logic
+- [ ] Add tests for review fallback chains
+- [ ] Dogfood: Run full workflow in zero_human mode
+- [ ] Update CLAUDE.md with supervision_mode usage
+
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (Manual Gates) | With Zero-Human Mode |
+|--------|------------------------|---------------------|
+| Complexity | LOW (manual gates simple) | MEDIUM (config + logic + fallbacks) |
+| Autonomous Operation | ❌ Blocked by gates | ✅ Fully autonomous |
+| Supervision Flexibility | ❌ One-size-fits-all | ✅ Three modes (zero/supervised/hybrid) |
+| Review Reliability | ❌ Single point of failure (API keys) | ✅ Graceful degradation (fallbacks) |
+| Visual Test Guidance | ❌ Vague ("capture screenshots") | ✅ Specific (Playwright + workflow) |
+| Smoke Test Automation | ❌ Manual gate | ✅ Automated command |
+
+**Current Evidence:**
+- ✅ Multi-model review justified (replaces human judgment in zero-human workflows)
+- ✅ Test redundancy justified (post-review regression checks are defense-in-depth)
+- ✅ Manual gates block autonomous operation (fundamental incompatibility)
+- ✅ API key brittleness is single point of failure (any missing key blocks workflow)
+- ✅ Visual test underspecification prevents agent execution
+- ✅ Zero-human workflow is the stated design goal (not traditional CI/CD)
+
+**YAGNI Check:**
+- Solving a problem we **actually have** (manual gates block stated use case)
+- Would **NOT** be okay without this (zero-human workflows are core value prop)
+- Current solution **fails by design** (manual gates defeat zero-human premise)
+- Gold-plating (5 models, test redundancy) is **justified** in zero-human context
+
+**Recommendation:** ✅ **IMPLEMENT** - High priority, phased approach
+
+**Reasoning:**
+The workflow is explicitly designed for zero-human code review with 5 AI models replacing human judgment. The multi-model reviews and test redundancy are essential safety infrastructure, not overkill. However, manual gates create a fundamental contradiction: "zero-human workflow that requires humans." This must be fixed for the orchestrator to deliver on its core value proposition. The implementation is medium complexity (config system + gate logic + fallback chains) but high value (enables autonomous operation). Phased approach allows incremental delivery.
+
+**Success Criteria:**
+- [ ] Workflow completes end-to-end in `supervision_mode: zero_human` without human intervention
+- [ ] Missing API keys trigger fallback models (workflow continues, not blocked)
+- [ ] Smoke tests run automatically in VERIFY phase
+- [ ] Visual regression tests have clear Playwright guidance
+- [ ] At least 3 dogfooding sessions validate autonomous operation
+- [ ] All three supervision modes (zero_human, supervised, hybrid) tested
+
+**Non-Goals (Explicitly Out of Scope):**
+- Production deployment phases (covered in WF-036)
+- Multi-environment management (staging/prod)
+- Health checks and rollback automation
+- Observability and monitoring integration
+
+---
+
+#### WF-036: Production Deployment Readiness
+**Status:** ⚠️ **DEFER** - Future enhancement, not blocking current work
+**Complexity:** HIGH (multi-environment, deployment, rollback, health checks)
+**Priority:** LOW (deferred until production deployment needed)
+**Source:** Session analysis (2026-01-11) - Prepare for production code workflows
+
+**Problem Statement:**
+The workflow currently stops at "commit to main" with no deployment capabilities. For production code, this is insufficient:
+
+1. **No deployment phases** - Workflow ends after commit (no staging, no production deploy)
+2. **No environment management** - Cannot deploy to staging, QA, or production environments
+3. **No health checks** - Cannot verify deployment succeeded
+4. **No rollback automation** - If deploy fails, manual intervention required
+5. **No observability** - No monitoring, alerting, or deployment tracking
+
+**Comparison to Industry CI/CD:**
+
+| Feature | Orchestrator (Current) | Industry CI/CD | Gap |
+|---------|----------------------|----------------|-----|
+| **Build artifacts** | ❌ None | ✅ Docker images, packages | Need artifact versioning |
+| **Environment progression** | ❌ Just commit | ✅ Dev→Staging→Prod | Need multi-env support |
+| **Deployment** | ❌ None | ✅ K8s, VPS, cloud | Need deploy phase |
+| **Health checks** | ❌ None | ✅ Automated | Need verification |
+| **Rollback** | ❌ Manual | ✅ Auto on failure | Need rollback automation |
+| **Observability** | ❌ None | ✅ Metrics, logs, traces | Need monitoring hooks |
+| **Planning** | ✅ Built-in | ❌ External | Orchestrator advantage |
+| **AI Review** | ✅ 5 models | ❌ Human only | Orchestrator advantage |
+| **Learning Loop** | ✅ Systematic | ❌ Ad-hoc | Orchestrator advantage |
+
+**Key Insight:**
+Industry CI/CD is more mature for deployment, but orchestrator is better for development (planning, AI review, learning). **The solution is integration, not replacement.**
+
+**Proposed Solution:**
+
+**Phase 1: Deployment Phase Structure**
+
+Add two new phases after VERIFY:
+
+```yaml
+# Phase 5: DEPLOY_STAGING
+- id: "DEPLOY_STAGING"
+  name: "Deploy to Staging Environment"
+  description: "Deploy to staging for integration testing and smoke tests"
+  items:
+    - id: "build_artifacts"
+      name: "Build Deployment Artifacts"
+      description: "Build Docker images, packages, or binaries for deployment"
+      verification:
+        type: "command"
+        command: "{{build_command}}"
+        expect_exit_code: 0
+
+    - id: "deploy_staging"
+      name: "Deploy to Staging"
+      description: "Deploy to staging environment using configured deployment method"
+      verification:
+        type: "command"
+        command: "{{deploy_staging_command}}"
+        expect_exit_code: 0
+      notes:
+        - "[k8s] kubectl apply -f k8s/staging/"
+        - "[docker] docker-compose -f docker-compose.staging.yml up -d"
+        - "[vps] rsync + systemctl restart"
+
+    - id: "staging_health_check"
+      name: "Staging Health Check"
+      description: "Verify staging deployment is healthy"
+      verification:
+        type: "command"
+        command: "{{health_check_command}}"
+        expect_exit_code: 0
+        retry: 3
+        retry_delay: 10
+      notes:
+        - "[web] curl https://staging.example.com/health"
+        - "[api] curl https://api-staging.example.com/v1/health"
+
+    - id: "staging_smoke_tests"
+      name: "Staging Smoke Tests"
+      description: "Run smoke tests against staging environment"
+      verification:
+        type: "command"
+        command: "ENVIRONMENT=staging {{smoke_test_command}}"
+        expect_exit_code: 0
+
+# Phase 6: DEPLOY_PRODUCTION
+- id: "DEPLOY_PRODUCTION"
+  name: "Deploy to Production"
+  description: "Deploy to production with health checks and rollback capability"
+  items:
+    - id: "production_approval"
+      name: "Production Deployment Approval"
+      description: "Human approval required before production deployment"
+      verification:
+        type: "manual_gate"
+        skip_if_supervision_mode: []  # Never skip for production
+      notes:
+        - "[critical] Always requires human approval, even in zero_human mode"
+        - "[review] Review staging test results before approving"
+
+    - id: "deploy_production"
+      name: "Deploy to Production"
+      description: "Deploy using blue/green or canary strategy"
+      verification:
+        type: "command"
+        command: "{{deploy_production_command}}"
+        expect_exit_code: 0
+      notes:
+        - "[strategy] Blue/green: zero-downtime switchover"
+        - "[strategy] Canary: gradual rollout (5% → 50% → 100%)"
+        - "[k8s] kubectl apply -f k8s/production/"
+
+    - id: "production_health_check"
+      name: "Production Health Check"
+      description: "Verify production deployment is healthy"
+      verification:
+        type: "command"
+        command: "{{health_check_command}}"
+        expect_exit_code: 0
+        retry: 5
+        retry_delay: 30
+        on_failure: "trigger_rollback"
+      notes:
+        - "[critical] Failure triggers automatic rollback"
+        - "[metrics] Check response time, error rate, p95 latency"
+
+    - id: "production_smoke_tests"
+      name: "Production Smoke Tests"
+      description: "Run smoke tests against production"
+      verification:
+        type: "command"
+        command: "ENVIRONMENT=production {{smoke_test_command}}"
+        expect_exit_code: 0
+        on_failure: "trigger_rollback"
+
+    - id: "monitor_deployment"
+      name: "Monitor Deployment"
+      description: "Watch metrics for 5 minutes, rollback on anomalies"
+      verification:
+        type: "command"
+        command: "{{monitor_command}}"
+        timeout: 300
+        on_failure: "trigger_rollback"
+      notes:
+        - "[metrics] Watch error rate, latency, throughput"
+        - "[alerts] Set up alerts for anomalies"
+        - "[duration] Monitor for 5 min post-deploy"
+```
+
+**Phase 2: Environment Configuration**
+
+```yaml
+settings:
+  # Environment-specific configuration
+  environments:
+    staging:
+      url: "https://staging.example.com"
+      deploy_command: "kubectl apply -f k8s/staging/"
+      health_check_url: "https://staging.example.com/health"
+
+    production:
+      url: "https://example.com"
+      deploy_command: "kubectl apply -f k8s/production/"
+      health_check_url: "https://example.com/health"
+      deployment_strategy: "blue_green"  # or "canary"
+      rollback_on_failure: true
+
+  # Deployment settings
+  deployment:
+    artifact_type: "docker"  # or "binary", "package"
+    build_command: "docker build -t myapp:{{version}} ."
+    health_check_command: "curl -f {{env.health_check_url}}"
+    monitor_command: "scripts/monitor_deployment.sh"
+    rollback_command: "kubectl rollout undo deployment/myapp"
+```
+
+**Phase 3: Rollback Automation**
+
+Add rollback capability:
+
+```bash
+# Automatic rollback on health check failure
+orchestrator verify-deployment --environment production
+  ↓
+  [Health check fails]
+  ↓
+  [Trigger rollback]
+  ↓
+  [Verify rollback succeeded]
+  ↓
+  [Alert user]
+
+# Manual rollback command
+orchestrator rollback --environment production --to-version v1.2.3
+```
+
+**Phase 4: Integration with Existing CI/CD**
+
+**Hybrid Approach (Recommended):**
+
+```yaml
+# Use orchestrator for development, CI/CD for deployment
+PLAN (orchestrator) →
+EXECUTE (orchestrator) →
+REVIEW (orchestrator AI) →
+VERIFY (orchestrator) →
+COMMIT →
+[GitHub Actions triggers] →
+BUILD (GitHub Actions) →
+DEPLOY_STAGING (GitHub Actions) →
+DEPLOY_PRODUCTION (GitHub Actions) →
+LEARN (orchestrator)
+```
+
+**Full Orchestrator Approach:**
+```yaml
+# Orchestrator handles everything
+PLAN → EXECUTE → REVIEW → VERIFY →
+DEPLOY_STAGING → DEPLOY_PRODUCTION → LEARN
+```
+
+**When to Use Which:**
+- **Hybrid:** You have existing CI/CD (GitHub Actions, GitLab CI)
+- **Full:** Green field project or orchestrator-native deployment preferred
+
+**Implementation Tasks:**
+
+**Phase 1: Deployment Phases (8 hours)**
+- [ ] Add DEPLOY_STAGING phase to workflow schema
+- [ ] Add DEPLOY_PRODUCTION phase to workflow schema
+- [ ] Add environment configuration to settings
+- [ ] Update StateManager to support deployment phases
+
+**Phase 2: Health Checks & Retry Logic (4 hours)**
+- [ ] Implement retry logic for verification commands
+- [ ] Add `on_failure` handlers (trigger_rollback)
+- [ ] Implement health check verification with retries
+- [ ] Add timeout support for long-running verifications
+
+**Phase 3: Rollback Automation (6 hours)**
+- [ ] Implement `orchestrator rollback` command
+- [ ] Add rollback_command to settings
+- [ ] Implement automatic rollback on health check failure
+- [ ] Add rollback verification (ensure rollback succeeded)
+- [ ] Add alerting/notification on rollback
+
+**Phase 4: Artifact Management (4 hours)**
+- [ ] Add artifact versioning (semantic versioning)
+- [ ] Track deployed versions per environment
+- [ ] Add `orchestrator deployments list` command
+- [ ] Store deployment history in state
+
+**Phase 5: Monitoring Integration (4 hours)**
+- [ ] Add monitor_command support
+- [ ] Implement post-deploy monitoring window
+- [ ] Add metrics threshold checking
+- [ ] Integrate with monitoring systems (Prometheus, Datadog)
+
+**Phase 6: Documentation & Examples (4 hours)**
+- [ ] Create docs/DEPLOYMENT.md guide
+- [ ] Add example deployment configs (K8s, Docker, VPS)
+- [ ] Add example health check scripts
+- [ ] Add example rollback scripts
+- [ ] Document hybrid vs full orchestrator approaches
+
+**Complexity vs Benefit Tradeoff:**
+
+| Factor | Current (No Deployment) | With Deployment Phases |
+|--------|------------------------|----------------------|
+| Complexity | LOW (stops at commit) | HIGH (multi-env, health checks, rollback) |
+| Production Readiness | ❌ Not suitable | ✅ Production-ready |
+| Deployment Safety | ⚠️ Manual, error-prone | ✅ Automated, verified |
+| Rollback Capability | ❌ Manual git revert | ✅ Automated rollback |
+| Environment Management | ❌ None | ✅ Staging → Production |
+| Implementation Effort | N/A | 30+ hours |
+
+**Current Evidence:**
+- ❌ User stated "not deploying to production yet"
+- ❌ No production deployment requirements identified
+- ❌ Current workflow (commit to main) works for current use case
+- ✅ Industry CI/CD has mature deployment patterns (can learn from)
+- ⚠️ Good to design now, implement later
+
+**YAGNI Check:**
+- **NOT** solving a problem we currently have
+- **Would be completely fine** without this for 6-12+ months
+- Current solution (commit to main) **works fine** for current use case
+- Premature implementation would be over-engineering
+
+**Recommendation:** ⚠️ **DEFER** - Design documented, implement when needed
+
+**Reasoning:**
+User explicitly stated "not deploying to production yet" and asked to put this on roadmap "for later." The design is valuable to document now (so we know what production-ready looks like), but implementation should wait until there's an actual production deployment need. This is 30+ hours of engineering work that would deliver zero value today. The orchestrator's current strengths (planning, AI review, learning) don't depend on deployment phases. When production deployment is needed, this design provides a clear implementation path.
+
+**Trigger Conditions for Implementation:**
+- User has production environment requiring deployment
+- Current "commit to main" workflow becomes insufficient
+- User requests deployment phase implementation
+- At least 6 months of successful non-production usage
+
+**Success Criteria (When Implemented):**
+- [ ] Deploy to staging, run tests, deploy to production in single workflow
+- [ ] Automatic rollback on health check failure
+- [ ] Environment-specific configuration (staging vs production)
+- [ ] Deployment history tracking
+- [ ] Integration with existing CI/CD (hybrid mode)
+- [ ] Blue/green or canary deployment support
+
+**Non-Goals (Even When Implemented):**
+- Multi-region deployment
+- Auto-scaling configuration
+- Infrastructure-as-code generation
+- Cost optimization
+- Performance monitoring (beyond health checks)
+
+---
+
