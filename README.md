@@ -121,6 +121,69 @@ This single command:
 | `prd attach <task>` | Attach to agent's tmux window |
 | `prd done <task>` | Mark task complete, terminate session |
 | `prd cleanup` | Clean up all agent sessions |
+| `feedback capture --auto` | Capture workflow feedback automatically |
+| `feedback capture --interactive` | Capture feedback with prompts |
+| `feedback review` | Analyze feedback patterns (last 7 days) |
+| `feedback review --all` | Review all feedback |
+| `feedback review --suggest` | Generate roadmap items from patterns |
+
+## Workflow Feedback
+
+Collect and analyze feedback from workflow executions to improve your processes.
+
+### Quick Start
+
+```bash
+# Capture feedback automatically (at end of LEARN phase)
+orchestrator feedback capture --auto
+
+# Or capture interactively with prompts
+orchestrator feedback capture --interactive
+
+# Review feedback patterns
+orchestrator feedback review
+
+# Review all feedback and get roadmap suggestions
+orchestrator feedback review --all --suggest
+```
+
+### How It Works
+
+**Phase 3a (Current):** Single-file feedback system
+- Captures combined tool + process feedback
+- Stores in `.workflow_feedback.jsonl` (local, private)
+- Auto-detects: parallel agents, reviews, errors, skipped items, learnings
+- Analyzes patterns and suggests improvements
+
+**Feedback Entry Format:**
+```json
+{
+  "timestamp": "2026-01-11T10:30:00Z",
+  "workflow_id": "wf_xxx",
+  "repo": "github.com/user/my-repo",
+  "task": "Add authentication",
+  "duration_seconds": 1234,
+  "parallel_agents_used": true,
+  "reviews_performed": true,
+  "errors_count": 2,
+  "errors_summary": ["Test failure", "Lint error"],
+  "items_skipped_count": 1,
+  "items_skipped_reasons": ["visual_tests: No UI changes"],
+  "learnings": "TDD worked well",
+  "mode": "auto"
+}
+```
+
+**Pattern Detection:**
+- Repeated errors → Suggest fixes
+- Frequently skipped items → Consider removing
+- Low parallel agent usage → Improve guidance
+- Missing reviews → Add enforcement
+
+**Opt-out:**
+```bash
+export ORCHESTRATOR_SKIP_FEEDBACK=1
+```
 
 ## Parallel Agent Spawning
 

@@ -3860,6 +3860,398 @@ def cmd_prd_task_done(args):
         print("-" * 60)
 
 
+def cmd_feedback_capture(args):
+    """Capture workflow feedback (WF-034 Phase 3a)."""
+    # Check opt-out
+    if os.environ.get('ORCHESTRATOR_SKIP_FEEDBACK') == '1':
+        print("Feedback capture disabled (ORCHESTRATOR_SKIP_FEEDBACK=1)")
+        return
+
+    working_dir = Path(args.dir or '.')
+    state_file = working_dir / '.workflow_state.json'
+    log_file = working_dir / '.workflow_log.jsonl'
+    feedback_file = working_dir / '.workflow_feedback.jsonl'
+
+    # Get mode
+    is_interactive = getattr(args, 'interactive', False)
+    mode = 'interactive' if is_interactive else 'auto'
+
+    feedback = {
+        'timestamp': datetime.utcnow().isoformat() + 'Z',
+        'mode': mode,
+    }
+
+    # Load workflow state if available
+    if state_file.exists():
+        try:
+            with open(state_file) as f:
+                state = json.load(f)
+                feedback['workflow_id'] = state.get('id', 'unknown')
+                feedback['task'] = state.get('task', '')
+
+                # Get repo from git remote
+                try:
+                    import subprocess
+                    result = subprocess.run(['git', 'remote', 'get-url', 'origin'],
+                                          capture_output=True, text=True, cwd=working_dir)
+                    if result.returncode == 0:
+                        feedback['repo'] = result.stdout.strip()
+                    else:
+                        feedback['repo'] = 'unknown'
+                except:
+                    feedback['repo'] = 'unknown'
+
+        except Exception as e:
+            print(f"Warning: Could not load workflow state: {e}")
+            feedback['workflow_id'] = 'unknown'
+    else:
+        print("Warning: No active workflow found (.workflow_state.json missing)")
+        feedback['workflow_id'] = 'unknown'
+
+    if is_interactive:
+        # Interactive mode - prompt questions
+        print("\n=== Workflow Feedback (Interactive Mode) ===\n")
+
+        # Combined questions (tool + process)
+        print("1. Did you use parallel agents for this workflow?")
+        parallel = input("   (yes/no/not-applicable): ").strip().lower()
+        feedback['parallel_agents_used'] = parallel == 'yes'
+
+        print("\n2. Were external AI reviews performed?")
+        reviews = input("   (yes/no/skipped): ").strip().lower()
+        feedback['reviews_performed'] = reviews == 'yes'
+
+        print("\n3. What went well in this workflow?")
+        feedback['what_went_well'] = input("   ").strip()
+
+        print("\n4. What challenges did you face?")
+        feedback['challenges'] = input("   ").strip()
+
+        print("\n5. What did you learn?")
+        feedback['learnings'] = input("   ").strip()
+
+        print("\n6. Any improvements or suggestions?")
+        feedback['improvements'] = input("   ").strip()
+
+    else:
+        # Auto mode - infer from logs
+        feedback['parallel_agents_used'] = False
+        feedback['reviews_performed'] = False
+        feedback['errors_count'] = 0
+        feedback['errors_summary'] = []
+        feedback['items_skipped_count'] = 0
+        feedback['items_skipped_reasons'] = []
+        feedback['learnings'] = ''
+        feedback['duration_seconds'] = 0
+        feedback['phases'] = {}
+
+        if log_file.exists():
+            try:
+                phase_timings = {}
+                first_timestamp = None
+                last_timestamp = None
+                learnings_notes = []
+
+                with open(log_file) as f:
+                    for line in f:
+                        try:
+                            event = json.loads(line)
+                            event_type = event.get('type')
+
+                            # Track timestamps
+                            ts = event.get('timestamp')
+                            if ts:
+                                if first_timestamp is None:
+                                    first_timestamp = ts
+                                last_timestamp = ts
+
+                            # Check for errors
+                            if event_type == 'error':
+                                feedback['errors_count'] += 1
+                                error_msg = event.get('error', 'Unknown error')
+                                feedback['errors_summary'].append(error_msg)
+
+                            # Check for skipped items
+                            if event_type == 'item_skipped':
+                                feedback['items_skipped_count'] += 1
+                                item_id = event.get('item_id', 'unknown')
+                                reason = event.get('reason', 'No reason provided')
+                                feedback['items_skipped_reasons'].append(f"{item_id}: {reason}")
+
+                            # Check for parallel agents
+                            if 'parallel' in str(event).lower():
+                                feedback['parallel_agents_used'] = True
+
+                            # Check for reviews
+                            if event_type == 'review_completed' or 'review' in event.get('item_id', ''):
+                                feedback['reviews_performed'] = True
+
+                            # Extract learnings from document_learnings item
+                            if event.get('item_id') == 'document_learnings' and event_type == 'item_completed':
+                                notes = event.get('notes', '')
+                                if notes:
+                                    learnings_notes.append(notes)
+
+                            # Track phase timings
+                            if event_type == 'phase_started':
+                                phase = event.get('phase')
+                                if phase:
+                                    phase_timings[phase] = {'start': ts}
+                            elif event_type == 'phase_completed':
+                                phase = event.get('phase')
+                                if phase and phase in phase_timings:
+                                    phase_timings[phase]['end'] = ts
+
+                        except json.JSONDecodeError:
+                            # Skip malformed lines
+                            continue
+
+                # Calculate duration
+                if first_timestamp and last_timestamp:
+                    try:
+                        start = datetime.fromisoformat(first_timestamp.replace('Z', '+00:00'))
+                        end = datetime.fromisoformat(last_timestamp.replace('Z', '+00:00'))
+                        feedback['duration_seconds'] = int((end - start).total_seconds())
+                    except:
+                        pass
+
+                # Calculate phase durations
+                for phase, times in phase_timings.items():
+                    if 'start' in times and 'end' in times:
+                        try:
+                            start = datetime.fromisoformat(times['start'].replace('Z', '+00:00'))
+                            end = datetime.fromisoformat(times['end'].replace('Z', '+00:00'))
+                            feedback['phases'][phase] = int((end - start).total_seconds())
+                        except:
+                            pass
+
+                # Combine learnings
+                if learnings_notes:
+                    feedback['learnings'] = ' '.join(learnings_notes)
+
+            except Exception as e:
+                print(f"Warning: Could not parse workflow log: {e}")
+
+    # Save to feedback file
+    try:
+        with open(feedback_file, 'a') as f:
+            f.write(json.dumps(feedback) + '\n')
+        print(f"\n✓ Feedback saved to {feedback_file}")
+    except Exception as e:
+        print(f"\n✗ Error saving feedback: {e}")
+        sys.exit(1)
+
+
+def cmd_feedback_review(args):
+    """Review workflow feedback patterns (WF-034 Phase 3a)."""
+    working_dir = Path(args.dir or '.')
+    feedback_file = working_dir / '.workflow_feedback.jsonl'
+
+    if not feedback_file.exists():
+        print("No feedback data found. Run workflows to collect feedback.")
+        print(f"Expected file: {feedback_file}")
+        return
+
+    # Load feedback entries
+    entries = []
+    try:
+        with open(feedback_file) as f:
+            for line in f:
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    except Exception as e:
+        print(f"Error reading feedback file: {e}")
+        sys.exit(1)
+
+    if not entries:
+        print("No feedback entries found")
+        return
+
+    # Filter by date range
+    cutoff_date = None
+    if not args.all:
+        cutoff_date = datetime.utcnow() - timedelta(days=args.days)
+
+    filtered_entries = []
+    for entry in entries:
+        if cutoff_date:
+            try:
+                ts = datetime.fromisoformat(entry['timestamp'].replace('Z', '+00:00'))
+                if ts >= cutoff_date:
+                    filtered_entries.append(entry)
+            except:
+                filtered_entries.append(entry)  # Include if can't parse timestamp
+        else:
+            filtered_entries.append(entry)
+
+    if not filtered_entries:
+        print(f"No feedback entries found in the last {args.days} days")
+        return
+
+    # Display summary
+    print("=" * 60)
+    if args.all:
+        print(f"Feedback Review (all time, {len(filtered_entries)} workflows)")
+    else:
+        print(f"Feedback Review (last {args.days} days, {len(filtered_entries)} workflows)")
+    print("=" * 60)
+    print()
+
+    # Calculate statistics
+    parallel_count = sum(1 for e in filtered_entries if e.get('parallel_agents_used', False))
+    reviews_count = sum(1 for e in filtered_entries if e.get('reviews_performed', False))
+    total_errors = sum(e.get('errors_count', 0) for e in filtered_entries)
+    total_skipped = sum(e.get('items_skipped_count', 0) for e in filtered_entries)
+
+    # Pattern detection
+    error_patterns = {}
+    skip_patterns = {}
+    challenges = []
+    learnings = []
+
+    for entry in filtered_entries:
+        # Group errors
+        for error in entry.get('errors_summary', []):
+            error_patterns[error] = error_patterns.get(error, 0) + 1
+
+        # Group skipped items
+        for skip in entry.get('items_skipped_reasons', []):
+            skip_patterns[skip] = skip_patterns.get(skip, 0) + 1
+
+        # Collect challenges and learnings
+        if entry.get('challenges'):
+            challenges.append(entry['challenges'])
+        if entry.get('learnings'):
+            learnings.append(entry['learnings'])
+
+    # Display patterns
+    print("PATTERNS DETECTED:")
+    print()
+
+    # Parallel agent usage
+    parallel_pct = int(100 * parallel_count / len(filtered_entries))
+    if parallel_pct < 30:
+        print(f"⚠ Parallel agents rarely used ({parallel_count} of {len(filtered_entries)}, {parallel_pct}%)")
+        print("   → Suggestion: Improve Phase 0 guidance in workflow.yaml")
+        print()
+    else:
+        print(f"✓ Parallel agents used: {parallel_count} of {len(filtered_entries)} ({parallel_pct}%)")
+        print()
+
+    # Reviews
+    reviews_pct = int(100 * reviews_count / len(filtered_entries))
+    if reviews_pct < 50:
+        print(f"⚠ Reviews rarely performed ({reviews_count} of {len(filtered_entries)}, {reviews_pct}%)")
+        print("   → Suggestion: Add review reminders or enforcement")
+        print()
+    else:
+        print(f"✓ Reviews performed consistently ({reviews_count} of {len(filtered_entries)}, {reviews_pct}%)")
+        print()
+
+    # Common errors
+    if error_patterns:
+        common_errors = sorted(error_patterns.items(), key=lambda x: x[1], reverse=True)[:5]
+        if common_errors[0][1] >= 2:
+            print("⚠ Common errors detected:")
+            for error, count in common_errors:
+                if count >= 2:
+                    print(f"   • \"{error[:60]}{'...' if len(error) > 60 else ''}\" ({count} occurrences)")
+            print("   → Suggestion: Add roadmap items to address these errors")
+            print()
+
+    # Frequently skipped items
+    if skip_patterns:
+        common_skips = sorted(skip_patterns.items(), key=lambda x: x[1], reverse=True)[:5]
+        skip_threshold = int(0.8 * len(filtered_entries))
+        if common_skips[0][1] >= skip_threshold:
+            print("⚠ Frequently skipped items:")
+            for skip, count in common_skips:
+                if count >= skip_threshold:
+                    pct = int(100 * count / len(filtered_entries))
+                    print(f"   • {skip[:60]}{'...' if len(skip) > 60 else ''} ({pct}%)")
+            print("   → Suggestion: Consider making these items optional or removing them")
+            print()
+
+    # Summary stats
+    print("SUMMARY:")
+    print(f"  • Total workflows: {len(filtered_entries)}")
+    print(f"  • Total errors encountered: {total_errors}")
+    print(f"  • Total items skipped: {total_skipped}")
+    print(f"  • Avg duration: {int(sum(e.get('duration_seconds', 0) for e in filtered_entries) / len(filtered_entries) / 60)} min")
+    print()
+
+    # Common challenges
+    if challenges:
+        print("COMMON CHALLENGES:")
+        for i, challenge in enumerate(challenges[:5], 1):
+            print(f"  {i}. {challenge}")
+        print()
+
+    # Learnings
+    if learnings:
+        print("LEARNINGS:")
+        for i, learning in enumerate(learnings[:5], 1):
+            print(f"  {i}. {learning}")
+        print()
+
+    # Suggest mode
+    if args.suggest:
+        suggestions = []
+
+        # Generate suggestions from patterns
+        if parallel_pct < 30:
+            suggestions.append({
+                'title': 'Improve Phase 0 parallel execution guidance',
+                'description': f'Only {parallel_pct}% of workflows use parallel agents. Enhance prompts and examples.',
+                'complexity': 'LOW'
+            })
+
+        if reviews_pct < 50:
+            suggestions.append({
+                'title': 'Add review enforcement or reminders',
+                'description': f'Only {reviews_pct}% of workflows perform reviews. Consider making reviews mandatory.',
+                'complexity': 'MEDIUM'
+            })
+
+        # Suggest fixes for common errors
+        for error, count in sorted(error_patterns.items(), key=lambda x: x[1], reverse=True)[:3]:
+            if count >= 2:
+                suggestions.append({
+                    'title': f'Fix common error: {error[:50]}',
+                    'description': f'This error occurred in {count} workflows. Investigate and fix root cause.',
+                    'complexity': 'MEDIUM'
+                })
+
+        if suggestions:
+            print("=" * 60)
+            print(f"ROADMAP SUGGESTIONS ({len(suggestions)} items)")
+            print("=" * 60)
+            print()
+            for i, sugg in enumerate(suggestions, 1):
+                print(f"{i}. {sugg['title']}")
+                print(f"   {sugg['description']}")
+                print(f"   Complexity: {sugg['complexity']}")
+                print()
+
+            response = input(f"Add {len(suggestions)} suggestions to ROADMAP.md? (y/n): ").strip().lower()
+            if response == 'y':
+                roadmap_file = working_dir / 'ROADMAP.md'
+                try:
+                    with open(roadmap_file, 'a') as f:
+                        f.write(f"\n## Feedback-Generated Suggestions ({datetime.utcnow().strftime('%Y-%m-%d')})\n\n")
+                        for sugg in suggestions:
+                            f.write(f"### {sugg['title']}\n")
+                            f.write(f"**Complexity:** {sugg['complexity']}\n")
+                            f.write(f"{sugg['description']}\n\n")
+                    print(f"\n✓ Added {len(suggestions)} suggestions to ROADMAP.md")
+                except Exception as e:
+                    print(f"\n✗ Error updating ROADMAP.md: {e}")
+        else:
+            print("No suggestions generated - patterns look good!")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="AI Workflow Orchestrator - Enforce multi-phase workflows with active verification",
@@ -4280,6 +4672,28 @@ Examples:
     prd_cleanup.set_defaults(func=cmd_prd_cleanup)
 
     prd_parser.set_defaults(func=lambda args: prd_parser.print_help() if not args.prd_command else None)
+
+    # Feedback command (WF-034 Phase 3a)
+    feedback_parser = subparsers.add_parser('feedback', help='Capture workflow feedback')
+    feedback_subparsers = feedback_parser.add_subparsers(dest='feedback_command', help='Feedback subcommands')
+
+    # feedback capture (default subcommand)
+    feedback_capture = feedback_subparsers.add_parser('capture', help='Capture workflow feedback (default)')
+    feedback_capture.add_argument('--auto', action='store_true', help='Auto mode: infer from logs (default)')
+    feedback_capture.add_argument('--interactive', action='store_true', help='Interactive mode: prompt questions')
+    feedback_capture.add_argument('-d', '--dir', help='Working directory')
+    feedback_capture.set_defaults(func=cmd_feedback_capture)
+
+    # feedback review
+    feedback_review = feedback_subparsers.add_parser('review', help='Review feedback patterns')
+    feedback_review.add_argument('--days', type=int, default=7, help='Days to review (default: 7)')
+    feedback_review.add_argument('--all', action='store_true', help='Review all feedback')
+    feedback_review.add_argument('--suggest', action='store_true', help='Suggest roadmap items from patterns')
+    feedback_review.add_argument('-d', '--dir', help='Working directory')
+    feedback_review.set_defaults(func=cmd_feedback_review)
+
+    # Default to capture if no subcommand
+    feedback_parser.set_defaults(func=lambda args: cmd_feedback_capture(args) if not args.feedback_command else None)
 
     args = parser.parse_args()
     
