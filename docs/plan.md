@@ -1,215 +1,347 @@
-# PRD-007 Implementation Plan
+# Implementation Plan: orchestrator feedback Command
 
 ## Overview
+Implement WF-034 Phase 3a - simplified feedback system (ship fast, iterate later).
 
-Implement a contract-based workflow enforcement system for parallel agents using:
-- `agent_workflow.yaml` (declarative contract)
-- Orchestrator REST API (validation engine)
-- Agent SDK (mandatory client library)
-- Cryptographic phase tokens (unforgeable proof)
+**Phase 3a (NOW):** Single-file feedback capture + basic review
+**Phase 3b (LATER):** Split tool/process feedback + sync functionality
 
-## Implementation Approach
+This implements the core telemetry loop quickly, then iterates based on real usage.
 
-Follow the 20-day sequential guide in `docs/prd/PRD-007-implementation-guide.md`, building from core infrastructure to full integration.
+## Phase 3a Scope (Current Implementation)
 
-## Phase 1: Core Infrastructure (Week 1)
+**What We're Building:**
+- ✅ `orchestrator feedback --auto` - Capture combined feedback (tool + process in one entry)
+- ✅ `orchestrator feedback --interactive` - Prompt questions
+- ✅ `orchestrator feedback review` - Show patterns and suggest roadmap items
+- ✅ Single file: `.workflow_feedback.jsonl`
+- ✅ Basic pattern detection (repeated errors, skipped items, learnings)
 
-### Day 1: Foundation
-- Create directory structure (`src/orchestrator/`, `src/agent_sdk/`, `.orchestrator/schemas/`)
-- Set up FastAPI server skeleton
-- Create WorkflowEnforcement class skeleton
-- Add pytest fixtures
+**What We're Deferring (Phase 3b):**
+- ⏸️ Separate tool vs process feedback files
+- ⏸️ Anonymization for tool feedback
+- ⏸️ `orchestrator feedback sync` - Upload to central repo
+- ⏸️ Comprehensive test coverage (manual testing for now)
 
-### Day 2: YAML Loading & Validation
-- Implement `load_agent_workflow()` - parse agent_workflow.yaml
-- Add schema validation for workflow structure
-- Helper methods: `_get_phase()`, `_get_gate()`, `_find_transition()`
-- Tests for YAML loading (valid, invalid, missing)
+## Two Types of Feedback (Phase 3b - Future)
 
-### Day 3: Phase Token System
-- Install PyJWT: `pip install pyjwt`
-- Implement `generate_phase_token(task_id, phase)`
-- Implement `_verify_phase_token(token, task_id, phase)`
-- Environment variable: `ORCHESTRATOR_JWT_SECRET`
-- Tests for token generation/verification
+### Tool Feedback (About Orchestrator Itself)
+**Purpose:** Help orchestrator maintainers improve the tool
+**Questions:**
+- Did Phase 0 parallel execution check help?
+- Were workflow instructions clear?
+- Did reviews work correctly?
+- Which items are always skipped? (maybe remove them)
+- Did orchestrator commands fail/error?
 
-### Day 4: Artifact Validation
-- Create JSON schemas in `.orchestrator/schemas/`
-  - plan.schema.json, scope.schema.json, tests.schema.json
-  - test_result.schema.json, implementation.schema.json
-  - review.schema.json, completion.schema.json
-- Implement `_validate_artifacts(artifacts, required)` using jsonschema
-- Tests for artifact validation
+**Storage:** `.workflow_tool_feedback.jsonl` (anonymized, optionally shared)
+**Target audience:** Orchestrator maintainers (you)
 
-### Day 5: Gate Validation
-- Implement gate checkers:
-  - `_check_plan_has_acceptance_criteria()`
-  - `_check_tests_are_failing()`
-  - `_check_all_tests_pass()`
-  - `_check_no_blocking_issues()`
-- Implement `_validate_gate(gate, artifacts)`
-- Tests for each gate checker
+### Process Feedback (About User's Project/Workflow)
+**Purpose:** Help users improve their own workflow
+**Questions:**
+- What went well in YOUR project?
+- What challenges in YOUR codebase?
+- Project-specific learnings
+- Custom items you added to workflow
 
-## Phase 2: API + Tool Enforcement (Week 2)
+**Storage:** `.workflow_process_feedback.jsonl` (stays local, private)
+**Target audience:** Repo users (their own use)
 
-### Day 6: FastAPI Endpoints - Task Management
-- Implement `POST /api/v1/tasks/claim`
-- Implement `GET /api/v1/state/snapshot`
-- Add authentication middleware (verify phase tokens)
-- API tests using httpx.AsyncClient
+## Objectives
+1. Add `orchestrator feedback` CLI command with two modes: `--tool` and `--process`
+2. Support automatic mode (infer from logs) and interactive mode (prompt user)
+3. Save tool feedback to `.workflow_tool_feedback.jsonl` (anonymized, shareable)
+4. Save process feedback to `.workflow_process_feedback.jsonl` (local, private)
+5. Add `orchestrator feedback review` to analyze both types
+6. Add `orchestrator feedback sync` to upload anonymized tool feedback to central repo
+7. Respect `ORCHESTRATOR_SKIP_FEEDBACK=1` opt-out
 
-### Day 7: FastAPI Endpoints - Phase Transitions
-- Implement `POST /api/v1/tasks/transition`
-- Connect to WorkflowEnforcement.validate_phase_transition()
-- Handle transition triggers (spawn review agents)
-- Tests for successful/blocked transitions
+## Telemetry Pattern (Standard Observability)
+Following standard patterns from Sentry, DataDog, etc:
+- **Collection**: Each workflow emits feedback event
+- **Storage**: `.workflow_feedback.jsonl` (append-only log, like metrics DB)
+- **Analysis**: Query recent feedback, identify patterns
+- **Action**: Auto-suggest roadmap items based on learnings/errors
 
-### Day 8: Tool Enforcement
-- Implement `POST /api/v1/tools/execute`
-- Implement `get_allowed_tools(phase)` and `is_tool_forbidden(phase, tool)`
-- Tool constraint checking (write_files only to test dirs in TDD)
-- Tests for allowed/forbidden tool calls
+**Design Decision: Local JSONL vs External Service (Sentry)**
+- **Choice**: Local JSONL files
+- **Rationale**:
+  - No external dependencies, works offline
+  - Privacy-safe (data never leaves machine)
+  - Low volume (1 event/workflow, not thousands/sec)
+  - Manual review workflow (not real-time monitoring)
+  - Easy aggregation (`cat */.workflow_feedback.jsonl | jq`)
+  - Similar to GitHub Copilot/VS Code telemetry approach
+- **External services like Sentry** are overkill for this use case (low volume, manual review, privacy concerns)
 
-### Day 9: Tool Audit Logging
-- Create `.orchestrator/tool_audit.jsonl`
-- Log every tool call: `{timestamp, agent_id, phase, tool, args, result}`
-- Add log rotation (max 100MB)
-- Tests for audit log
+## Implementation Steps
 
-### Day 10: Agent SDK - Basic Client
-- Create `AgentClient` class in `src/agent_sdk/client.py`
-- Implement `__init__(agent_id, orchestrator_url)`
-- Implement `claim_task()` and `get_state_snapshot()`
-- SDK tests (mock HTTP responses)
+### 1. Add CLI Command Parsers (src/cli.py)
+**feedback capture:**
+- `orchestrator feedback --tool` - Capture tool feedback (about orchestrator)
+- `orchestrator feedback --process` - Capture process feedback (about user's project)
+- Default: captures BOTH in auto mode
+- Flags: `--auto` (default from workflow), `--interactive`
 
-## Phase 3: Agent Integration + State (Week 3)
+**feedback review:**
+- `orchestrator feedback review --tool` - Review tool feedback patterns
+- `orchestrator feedback review --process` - Review process feedback patterns
+- Default: shows both
 
-### Day 11: Agent SDK - Phase Transitions
-- Implement `request_transition(target_phase, artifacts)`
-- Updates `self.phase_token` on success
-- Tests for transition success/failure paths
+**feedback sync:**
+- `orchestrator feedback sync` - Upload anonymized tool feedback to central repo
+- Only uploads tool feedback (never process feedback - privacy!)
+- Opt-in via `orchestrator config set feedback_sync true`
 
-### Day 12: Agent SDK - Tool Execution
-- Implement `use_tool(tool_name, **kwargs)`
-- Convenience methods: `read_file()`, `write_file()`
-- Tests for tool calls (allowed, forbidden)
+### 2. Implement cmd_feedback() Function
+**Auto Mode (captures BOTH tool and process feedback):**
+- Check `ORCHESTRATOR_SKIP_FEEDBACK` env var - exit if set
+- Read `.workflow_state.json` for current workflow ID and items
+- Read `.workflow_log.jsonl` for workflow events
 
-### Day 13: Inject SDK into Agent Prompts
-- Update `spawn_agent()` to inject SDK usage instructions
-- Generate workflow contract text from agent_workflow.yaml
-- Include initial phase token in prompt
-- Manual verification with real agent spawn
+**Tool Feedback (about orchestrator itself):**
+- Phase 0 guidance used? (parallel_execution_check completed)
+- Reviews worked? (review_completed with external models, no errors)
+- Orchestrator commands failed? (error events with orchestrator in stack trace)
+- Items always skipped? (track skip patterns across workflows)
+- Workflow phase timings (is PLAN too long? REVIEW too short?)
+- Tool version (for compatibility tracking)
 
-### Day 14: Event Bus for Coordination
-- Create SQLite database: `.orchestrator/events.db`
-- Schema: `{id, timestamp, event_type, task_id, data}`
-- Implement `publish_event()` and `subscribe_to_events()` (polling)
-- Tests for publish/subscribe
+**Process Feedback (about user's project):**
+- Parallel agents used? (user chose to use them)
+- Project-specific errors? (errors NOT from orchestrator)
+- Learnings documented? (extract from `document_learnings` notes)
+- What went well / challenges? (from interactive mode or learnings)
+- Custom workflow items added? (compare to default_workflow.yaml)
 
-### Day 15: State Snapshots
-- Implement state snapshot generation (read workflow state, PRD state)
-- Filter by task dependencies
-- Add caching (refresh every 5 seconds)
-- Tests for snapshot content
+- Save to TWO files: `.workflow_tool_feedback.jsonl` + `.workflow_process_feedback.jsonl`
 
-## Phase 4: Testing + Documentation (Week 4)
+**Interactive Mode:**
+- Prompt TWO sets of questions (tool + process)
 
-### Day 16: End-to-End Test
-- Full workflow test: spawn agent, claim task, PLAN → TDD → IMPL → REVIEW → COMPLETE
-- Verify gates enforced at each step
-- Verify state updated correctly
+**Tool Questions (about orchestrator):**
+  1. Were Phase 0 parallel execution prompts helpful? (yes/no/didn't-see)
+  2. Did third-party reviews work correctly? (yes/no/skipped)
+  3. Which workflow items were confusing or unclear? (list or none)
+  4. Did any orchestrator commands fail? (yes/no)
+  5. Suggestions for improving the tool? (optional)
 
-### Day 17: Error Handling
-- Error handling for all API endpoints
-- Proper HTTP status codes (400, 401, 403, 500)
-- Clear error messages
-- Tests for error cases
+**Process Questions (about YOUR project):**
+  1. Did you use multi-agents? (yes/no/not-applicable)
+  2. What went well in this workflow? (1-2 sentences)
+  3. What challenges did you face? (1-2 sentences)
+  4. What did you learn? (1-2 sentences)
+  5. Project-specific improvements? (optional)
 
-### Day 18: Configuration
-- Add `.orchestrator/config.yaml`
-- Load config on startup
-- Allow environment variable overrides
+### 3. Feedback Entry Formats
 
-### Day 19: Documentation
-- Write "Agent Developer Guide" (SDK usage, workflow phases, tool permissions)
-- Write "Workflow YAML Reference" (all fields, schemas, examples)
-- Write "API Reference" (endpoints, request/response, error codes)
+**Tool Feedback (.workflow_tool_feedback.jsonl) - ANONYMIZED:**
+```json
+{
+  "timestamp": "2026-01-11T10:30:00Z",
+  "workflow_id_hash": "abc123...",
+  "orchestrator_version": "2.6.0",
+  "repo_type": "python",
+  "duration_seconds": 1234,
+  "phases": {
+    "PLAN": 300,
+    "EXECUTE": 600,
+    "REVIEW": 200,
+    "VERIFY": 100,
+    "LEARN": 34
+  },
+  "phase0_guidance_used": true,
+  "reviews_worked": true,
+  "orchestrator_errors": ["orchestrator prd spawn: command not found"],
+  "items_skipped": ["visual_tests", "update_knowledge_base"],
+  "items_skipped_pct": 0.15,
+  "confusing_items": [],
+  "tool_suggestions": "Phase 0 was helpful",
+  "mode": "auto"
+}
+```
 
-### Day 20: Integration + Polish
-- Run full test suite
-- Fix integration issues
-- Add logging throughout
-- Performance profiling (<100ms tool checks)
-- Update ROADMAP.md (mark PRD-007 complete)
+**Process Feedback (.workflow_process_feedback.jsonl) - PRIVATE:**
+```json
+{
+  "timestamp": "2026-01-11T10:30:00Z",
+  "workflow_id": "wf_xxx",
+  "repo": "github.com/user/my-api",
+  "task": "Add user authentication",
+  "parallel_agents_used": true,
+  "project_errors": ["Connection timeout to test DB", "Terraform state locked"],
+  "learnings": "Incremental migrations work better. Feature flags reduced risk.",
+  "what_went_well": "TDD approach caught edge cases early",
+  "challenges": "Docker build cache issues slowed iteration",
+  "improvements": "Add DB health check to PLAN phase",
+  "custom_workflow_items": ["terraform_plan", "db_migration_check"],
+  "mode": "auto"
+}
+```
 
-## Acceptance Criteria
+**Key Differences:**
+- Tool feedback: NO repo name, NO task description, workflow_id HASHED (anonymized)
+- Process feedback: Full context, stays local, never uploaded
 
-- [ ] `agent_workflow.yaml` loaded and validated on startup
-- [ ] Orchestrator API running at http://localhost:8000
-- [ ] Agent SDK pip-installable
-- [ ] 100% of phase transitions validated
-- [ ] 0 tool calls bypass permission checks
-- [ ] All 5 phases enforced (PLAN, TDD, IMPL, REVIEW, COMPLETE)
-- [ ] Phase tokens cryptographically secure
-- [ ] Tests pass (unit + integration)
-- [ ] Documentation complete
+### 4. Implement cmd_feedback_review() Function
+**Purpose:** Analyze collected feedback and suggest improvements
+
+**Usage:**
+```bash
+orchestrator feedback review              # Show recent feedback (last 7 days)
+orchestrator feedback review --days 30    # Last 30 days
+orchestrator feedback review --all        # All feedback
+orchestrator feedback review --suggest    # Auto-suggest roadmap items
+```
+
+**Analysis Logic:**
+- Read all feedback entries from `.workflow_feedback.jsonl`
+- Filter by date range (default: last 7 days)
+- Identify patterns:
+  - **Repeated errors**: Same error in 2+ workflows → suggest fix
+  - **Common challenges**: Similar challenge text → investigate
+  - **Skipped items**: Item skipped in 80%+ of workflows → consider removing or making optional
+  - **Missing reviews**: Reviews skipped in 50%+ → add reminder/enforcement
+  - **Missing parallel agents**: Could have used parallel but didn't → better guidance needed
+
+**Output Format:**
+```
+Feedback Review (last 7 days, 5 workflows)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PATTERNS DETECTED:
+⚠ Parallel agents rarely used (1 of 5 workflows, 20%)
+   → Suggestion: Improve Phase 0 guidance in workflow.yaml
+
+⚠ Common error: "ModuleNotFoundError: pytest_asyncio" (3 occurrences)
+   → Suggestion: Add to roadmap: "Add dependency check to PLAN phase"
+
+✓ Reviews performed consistently (4 of 5 workflows, 80%)
+
+COMMON CHALLENGES:
+  • "Mock setup tricky" (mentioned in 2 workflows)
+  • "Test timeout issues" (mentioned in 2 workflows)
+
+LEARNINGS SUMMARY:
+  • TDD approach effective (mentioned positively in 4 workflows)
+  • Phase timings: avg PLAN=15min, EXECUTE=45min, REVIEW=10min
+
+--suggest flag: Add 2 items to ROADMAP.md? (y/n)
+```
+
+**Suggest Mode (`--suggest`):**
+- Generates roadmap item drafts based on patterns
+- Prompts user to approve adding to ROADMAP.md
+- Uses standard WF-XXX format
+
+### 5. Implement cmd_feedback_sync() Function
+**Purpose:** Upload anonymized tool feedback to central orchestrator repo
+
+**Usage:**
+```bash
+# One-time opt-in
+orchestrator config set feedback_sync true
+
+# Manual sync
+orchestrator feedback sync
+
+# Check sync status
+orchestrator feedback sync --status
+```
+
+**Implementation:**
+- Read `.workflow_tool_feedback.jsonl`
+- Filter: only entries not yet synced (track sync timestamps)
+- Verify anonymization (no repo names, task descriptions, code)
+- POST to central endpoint: `https://feedback.workflow-orchestrator.dev/submit`
+- OR fallback: Create GitHub Gist in orchestrator repo
+- Mark entries as synced (add `synced_at` timestamp)
+
+**Central Storage (for you, orchestrator maintainer):**
+- Simple HTTP endpoint or GitHub Gists
+- Aggregates tool feedback from all users
+- You run: `orchestrator feedback review --tool --all-users` (special command)
+- Shows patterns across ALL orchestrator installations:
+  - "Phase 0 guidance helpful: 85% of users"
+  - "Common orchestrator error: 'prd spawn failed' (42 users)"
+  - "visual_tests skipped by 90% of users → consider removing"
+
+**Privacy Safeguards:**
+- Only tool feedback synced (NEVER process feedback)
+- **Default: opt-in enabled** (since currently single user - orchestrator developer)
+- Future: Change to opt-out when tool has more users
+- All data anonymized before upload
+- Users can inspect what will be uploaded: `orchestrator feedback sync --dry-run`
+- Users can disable: `orchestrator config set feedback_sync false`
+
+### 6. Helper Functions
+
+**Capture (cmd_feedback):**
+- `get_workflow_state()` - read current workflow and items
+- `analyze_workflow_logs()` - infer from logs
+- `extract_tool_feedback()` - parse orchestrator-specific data (phase timings, items skipped, errors)
+- `extract_process_feedback()` - parse project-specific data (learnings, challenges, custom items)
+- `anonymize_tool_feedback()` - hash workflow_id, remove repo/task, detect repo_type only
+- `get_repo_type()` - detect python/javascript/go/rust (for tool feedback)
+- `save_tool_feedback()` - append to .workflow_tool_feedback.jsonl
+- `save_process_feedback()` - append to .workflow_process_feedback.jsonl
+
+**Review (cmd_feedback_review):**
+- `load_feedback()` - read tool and/or process feedback
+- `filter_by_date()` - filter entries by date range
+- `detect_tool_patterns()` - items always skipped, orchestrator errors, phase timing issues
+- `detect_process_patterns()` - repeated project errors, common challenges
+- `calculate_stats()` - usage percentages
+- `generate_suggestions()` - create roadmap item drafts
+- `add_to_roadmap()` - append suggestions with user approval
+
+**Sync (cmd_feedback_sync):**
+- `load_unsynced_tool_feedback()` - read tool feedback not yet uploaded
+- `verify_anonymization()` - double-check no PII/code in payload
+- `post_to_central()` - HTTP POST or GitHub Gist
+- `mark_as_synced()` - update entries with synced_at timestamp
+
+### 6. Error Handling
+- Graceful if .workflow_state.json missing (no active workflow)
+- Warn if ORCHESTRATOR_SKIP_FEEDBACK set
+- Continue workflow even if feedback fails
+
+## Files to Modify
+- `src/cli.py` - add command parsers and cmd_feedback(), cmd_feedback_review()
+- No new files needed (commands in cli.py)
 
 ## Testing Strategy
 
-### Unit Tests
-- `tests/orchestrator/test_enforcement.py` - Gate validation, artifact checking
-- `tests/orchestrator/test_api.py` - API endpoint behavior
-- `tests/orchestrator/test_phase_tokens.py` - Token generation/verification
-- `tests/agent_sdk/test_client.py` - SDK methods
+**Capture Command:**
+- Manual test: `orchestrator feedback --auto`
+- Manual test: `orchestrator feedback --interactive`
+- Verify JSON format in .workflow_feedback.jsonl
+- Test opt-out: `ORCHESTRATOR_SKIP_FEEDBACK=1 orchestrator feedback`
+- Verify errors/skips/learnings extraction
 
-### Integration Tests
-- `tests/integration/test_agent_workflow.py` - Full workflow end-to-end
+**Review Command:**
+- Manual test: `orchestrator feedback review` (last 7 days)
+- Manual test: `orchestrator feedback review --days 30`
+- Manual test: `orchestrator feedback review --all`
+- Manual test: `orchestrator feedback review --suggest` (roadmap suggestions)
+- Verify pattern detection (repeated errors, common challenges)
+- Verify stats calculation (parallel agents %, reviews %)
 
-### Manual Testing
-- Start orchestrator, spawn agent with SDK
-- Verify tool blocking in wrong phases
-- Verify successful transitions through all phases
-- Verify reviews auto-spawn
-- Verify state correctly updated
+## Success Criteria
 
-## Dependencies
+**Capture:**
+✓ Command runs without errors
+✓ Auto mode infers from logs correctly (parallel agents, reviews, errors, skips, learnings)
+✓ Interactive mode prompts and saves responses
+✓ Feedback saved to .workflow_feedback.jsonl
+✓ Opt-out via env var works
+✓ Integrates with workflow LEARN phase item
 
-To be installed as needed:
-- fastapi - REST API framework
-- uvicorn - ASGI server for FastAPI
-- pyjwt - JWT token generation/verification
-- jsonschema - Artifact schema validation
-- httpx - Agent SDK HTTP client
-- pyyaml - YAML loading (already installed)
-
-## Rollout Strategy
-
-### Phase 1: Soft Launch (Advisory Mode)
-- Set `enforcement.mode: permissive` in agent_workflow.yaml
-- Agents get warnings, not blocked
-- Monitor: gate block rate, tool violation rate
-
-### Phase 2: Staged Rollout
-- Enable strict enforcement for 1 test task
-- Enable for 5 tasks
-- Enable for all tasks
-
-### Phase 3: Full Enforcement
-- Set `enforcement.mode: strict`
-- All agents MUST use SDK
-- Tool violations = immediate rejection
-
-## Key Design Decisions
-
-1. **YAML for Contract** - Declarative, versioned, readable
-2. **JWT for Tokens** - Cryptographic proof, standard, widely supported
-3. **REST API** - Simple, language-agnostic, testable
-4. **SQLite for Events** - No external dependencies, easy to deploy
-5. **SDK Mandatory** - Only way to interact, prevents bypass
-
-## Out of Scope
-
-- Visual dashboard (PRD-008)
-- A/B testing workflows (PRD-009)
-- ML-based gate optimization (PRD-010)
-- Distributed orchestrator (PRD-011)
+**Review:**
+✓ Reads and parses .workflow_feedback.jsonl correctly
+✓ Filters by date range (default 7 days)
+✓ Detects patterns (repeated errors, common challenges)
+✓ Calculates usage stats (parallel agents %, reviews %)
+✓ Generates roadmap suggestions from patterns
+✓ Can add suggestions to ROADMAP.md with approval
