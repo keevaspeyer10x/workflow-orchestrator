@@ -3818,43 +3818,45 @@ Update manual gates to respect supervision mode:
 
 **Implementation Tasks:**
 
-**Phase 1: Configuration (2 hours)**
-- [ ] Add `supervision_mode` to workflow schema
-- [ ] Add validation for supervision_mode values
-- [ ] Update StateManager to read supervision_mode setting
-- [ ] Add `--supervision-mode` CLI flag for overrides
+**Phase 1: Configuration (2 hours)** - COMPLETE (v2.8.0)
+- [x] Add `supervision_mode` to workflow schema
+- [x] Add validation for supervision_mode values
+- [x] Update StateManager to read supervision_mode setting (WorkflowEngine.settings property)
+- [ ] **REMAINING: Add `--supervision-mode` CLI flag for overrides**
 
-**Phase 2: Gate Logic (3 hours)**
-- [ ] Update manual gate handler to check supervision_mode
-- [ ] Log warnings when gates are auto-skipped
-- [ ] Implement timeout logic for hybrid mode
-- [ ] Add risk-based auto-approval for hybrid mode
+**Phase 2: Gate Logic (3 hours)** - MOSTLY COMPLETE (v2.8.0)
+- [x] Update manual gate handler to check supervision_mode
+- [x] Log warnings when gates are auto-skipped
+- [ ] **REMAINING: Implement timeout logic for hybrid mode** (currently conservative - blocks like supervised)
+- [ ] **REMAINING: Add risk-based auto-approval for hybrid mode**
 
-**Phase 3: Smoke Test Framework (2 hours)**
-- [ ] Add `smoke_test_command` to settings schema
-- [ ] Update VERIFY phase: replace manual_smoke_test with automated_smoke_test
-- [ ] Add example smoke tests to tests/smoke/ directory
-- [ ] Document smoke test patterns (web/CLI/API) in notes
+**Phase 3: Smoke Test Framework (2 hours)** - PARTIALLY COMPLETE
+- [x] Add `smoke_test_command` to settings schema (v2.8.0)
+- [ ] **REMAINING: Update VERIFY phase: replace manual_smoke_test with automated_smoke_test**
+- [ ] **REMAINING: Add example smoke tests to tests/smoke/ directory**
+- [ ] **REMAINING: Document smoke test patterns (web/CLI/API) in notes**
 
-**Phase 4: Visual Testing Docs (1 hour)**
-- [ ] Update visual_regression_test with Playwright guidance
-- [ ] Add detailed notes: baseline workflow, CI behavior, threshold config
-- [ ] Create docs/VISUAL_TESTING.md guide
-- [ ] Add example Playwright visual test to tests/
+**Phase 4: Visual Testing Docs (1 hour)** - MOSTLY COMPLETE
+- [x] Update visual_regression_test with Playwright guidance (workflow.yaml)
+- [x] Add detailed notes: baseline workflow, CI behavior, threshold config (workflow.yaml)
+- [ ] **REMAINING: Create docs/VISUAL_TESTING.md guide**
+- [ ] **REMAINING: Add example Playwright visual test to tests/**
 
-**Phase 5: Review Fallbacks (4 hours)**
-- [ ] Add `minimum_required` and `fallbacks` to review config schema
-- [ ] Implement fallback chain logic in review engine
-- [ ] Add OpenRouter integration for fallback models
-- [ ] Track which models were used (primary vs fallback) in logs
-- [ ] Implement `on_insufficient_reviews` behavior (warn vs block)
+**Phase 5: Review Fallbacks (4 hours)** - PARTIALLY COMPLETE (v2.8.0-v2.8.1)
+- [x] Add `minimum_required` and `fallbacks` to review config schema (v2.8.0)
+- [x] Track which models were used (primary vs fallback) in logs (v2.8.1 - ReviewResult.was_fallback)
+- [x] Add ReviewThresholdError exception for block mode (v2.8.1)
+- [ ] **REMAINING: Implement fallback chain logic in api_executor.py** (try primary → fallback1 → fallback2)
+- [ ] **REMAINING: Add minimum_required threshold check in ReviewRouter.execute_all_reviews()**
+- [ ] **REMAINING: Wire on_insufficient_reviews behavior (warn logs warning, block raises ReviewThresholdError)**
 
-**Phase 6: Integration & Testing (4 hours)**
-- [ ] Update both workflow.yaml and src/default_workflow.yaml
-- [ ] Add tests for supervision_mode logic
-- [ ] Add tests for review fallback chains
-- [ ] Dogfood: Run full workflow in zero_human mode
-- [ ] Update CLAUDE.md with supervision_mode usage
+**Phase 6: Integration & Testing (4 hours)** - PARTIALLY COMPLETE
+- [x] Update both workflow.yaml and src/default_workflow.yaml (v2.8.0)
+- [x] Add tests for supervision_mode logic (v2.8.0 - 34 tests)
+- [x] Add tests for review fallback schema/fields (v2.8.1 - 16 tests)
+- [ ] **REMAINING: Add tests for fallback chain execution logic**
+- [x] Dogfood: Run full workflow in zero_human mode (ongoing)
+- [x] Update CLAUDE.md with supervision_mode usage (v2.8.0)
 
 **Complexity vs Benefit Tradeoff:**
 
