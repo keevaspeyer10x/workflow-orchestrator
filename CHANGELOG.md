@@ -15,6 +15,12 @@ All notable changes to the workflow-orchestrator.
   - Changed `result.content` to `result.raw_output` (correct attribute name)
   - Error appeared on every phase advance since critique runs between phases
 
+### Changed
+- **LEARN phase**: Added `session_error_review` step as first item in LEARN phase
+  - Prompts agent to search session transcript for errors, warnings, and failures
+  - Helps catch bugs like the critique.py error before workflow completion
+  - Includes search patterns and example of how errors map to bugs
+
 ### Notes
 - Phases 3 (Visual Regression) and 5 (Gate Skipping) were already implemented in previous PR
 - Full fallback chain execution (try primary → fallback1 → fallback2) deferred to follow-up task

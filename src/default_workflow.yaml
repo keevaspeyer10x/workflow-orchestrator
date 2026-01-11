@@ -439,6 +439,17 @@ phases:
       - "[caution] Never apply learnings to workflow/roadmap without user approval first."
       - "[tip] Propose specific actions, not vague improvements. User should know exactly what will change."
     items:
+      - id: "session_error_review"
+        name: "Review Session for Errors"
+        description: "Search the session transcript for errors, warnings, and failures that occurred during the workflow. Look for: 1) API/command failures, 2) Test failures that were worked around, 3) Deprecation warnings, 4) Unexpected exceptions. These may indicate bugs to fix or optimizations to make."
+        step_type: "required"
+        notes:
+          - "[search] Look for patterns: 'error:', 'failed:', 'warning:', 'exception', 'attribute error', 'TypeError', 'KeyError'"
+          - "[action] For each error found: determine if it's a bug to fix, expected behavior, or already handled"
+          - "[fix] If fixable bugs are found, add them to the task list before completing the workflow"
+          - "[example] 'ReviewResult has no attribute content' → bug in critique.py accessing wrong attribute"
+          - "[tip] Recurring errors across phase transitions often indicate systemic issues"
+
       - id: "root_cause_analysis"
         name: "Root Cause Analysis"
         description: "MANDATORY: Perform and document root cause analysis. Why did this issue occur? What was the underlying cause, not just the symptom? Document in LEARNINGS.md."
