@@ -5,7 +5,8 @@ This module defines the structure for workflow YAML files and runtime state.
 """
 
 from pydantic import BaseModel, Field, field_validator, model_validator
-from typing import Optional, Literal
+from typing import Optional
+from typing_extensions import Literal
 from datetime import datetime, timezone
 from enum import Enum
 
@@ -163,6 +164,50 @@ class PhaseDef(BaseModel):
         if not v.isupper():
             raise ValueError('phase id must be uppercase')
         return v.upper()
+
+
+class SupervisionMode(str, Enum):
+    """Supervision mode - determines how much human oversight is required."""
+    SUPERVISED = "supervised"  # Traditional: require human approval at gates (default)
+    ZERO_HUMAN = "zero_human"  # Autonomous: auto-skip manual gates with warning
+    HYBRID = "hybrid"  # Risk-based: auto-approve low-risk, timeout for medium, block high-risk
+
+
+class ReviewSettings(BaseModel):
+    """Configuration for code review system."""
+    enabled: bool = True
+    minimum_required: int = Field(default=3, ge=1, le=5)  # At least 3 of 5 models
+    fallbacks: dict[str, list[str]] = Field(default_factory=lambda: {
+        "codex": ["openai/gpt-5.1", "anthropic/claude-opus-4"],
+        "gemini": ["google/gemini-3-pro", "anthropic/claude-opus-4"],
+        "grok": ["x-ai/grok-4.1", "anthropic/claude-opus-4"]
+    })
+    on_insufficient_reviews: Literal["warn", "block"] = "warn"
+
+    @field_validator('on_insufficient_reviews')
+    @classmethod
+    def validate_insufficient_reviews_action(cls, v):
+        """Validate on_insufficient_reviews is warn or block."""
+        if v not in ["warn", "block"]:
+            raise ValueError("on_insufficient_reviews must be 'warn' or 'block'")
+        return v
+
+
+class WorkflowSettings(BaseModel):
+    """Typed workflow settings (replaces dict for type safety)."""
+    supervision_mode: SupervisionMode = SupervisionMode.SUPERVISED
+    smoke_test_command: Optional[str] = None
+    test_command: Optional[str] = None
+    build_command: Optional[str] = None
+    reviews: ReviewSettings = Field(default_factory=ReviewSettings)
+
+    @field_validator('supervision_mode', mode='before')
+    @classmethod
+    def coerce_supervision_mode(cls, v):
+        """Coerce string to SupervisionMode enum."""
+        if isinstance(v, str):
+            return SupervisionMode(v)
+        return v
 
 
 class WorkflowDef(BaseModel):

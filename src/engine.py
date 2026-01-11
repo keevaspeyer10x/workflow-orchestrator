@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 from .schema import (
     WorkflowDef, WorkflowState, PhaseState, ItemState,
     WorkflowEvent, EventType, ItemStatus, PhaseStatus, WorkflowStatus,
-    VerificationType, ChecklistItemDef, StepType
+    VerificationType, ChecklistItemDef, StepType, SupervisionMode, WorkflowSettings
 )
 from .enforcement import (
     HardGateExecutor,
@@ -45,7 +45,7 @@ class WorkflowEngine:
     The core workflow engine that manages state transitions and verification.
     """
     
-    def __init__(self, working_dir: str = "."):
+    def __init__(self, working_dir: str = ".", settings: Optional[WorkflowSettings] = None):
         self.working_dir = Path(working_dir).resolve()
         self.state_file = self.working_dir / ".workflow_state.json"
         self.log_file = self.working_dir / ".workflow_log.jsonl"
@@ -54,7 +54,63 @@ class WorkflowEngine:
         # Step enforcement
         self.gate_executor = HardGateExecutor()
         self.max_gate_retries = 3
-    
+        # Typed settings (loaded from workflow or passed directly)
+        self._settings = settings
+
+    # ========================================================================
+    # Settings & Supervision Mode (WF-035)
+    # ========================================================================
+
+    @property
+    def settings(self) -> WorkflowSettings:
+        """Get typed workflow settings."""
+        if self._settings:
+            return self._settings
+        if self.workflow_def and self.workflow_def.settings:
+            return WorkflowSettings(**self.workflow_def.settings)
+        return WorkflowSettings()  # Defaults
+
+    def should_skip_gate(self, item: ChecklistItemDef) -> bool:
+        """
+        Check if a manual gate should be auto-skipped based on supervision mode.
+
+        Returns True if gate should be skipped, False if it should block.
+
+        Supervision modes:
+        - supervised (default): Block at manual gates, require human approval
+        - zero_human: Auto-skip manual gates with warning logged
+        - hybrid: Future - risk-based gates with timeout (currently blocks like supervised)
+        """
+        # Only applies to manual gates
+        if item.verification.type != VerificationType.MANUAL_GATE:
+            return False
+
+        supervision_mode = self.settings.supervision_mode
+
+        if supervision_mode == SupervisionMode.ZERO_HUMAN:
+            logger.warning(
+                f"[ZERO-HUMAN MODE] Skipping manual gate: {item.id} ({item.name}). "
+                f"Autonomous operation enabled - no human approval required."
+            )
+            return True
+
+        elif supervision_mode == SupervisionMode.HYBRID:
+            # Future: implement risk-based + timeout logic
+            # For now, conservative: block like supervised mode
+            logger.info(f"[HYBRID MODE] Gate {item.id} requires approval (hybrid logic not yet implemented)")
+            return False
+
+        # supervised mode (default): block at gates
+        return False
+
+    @classmethod
+    def from_workflow(cls, workflow: WorkflowDef, working_dir: str = ".") -> "WorkflowEngine":
+        """Create engine from workflow definition with typed settings."""
+        settings = WorkflowSettings(**workflow.settings) if workflow.settings else WorkflowSettings()
+        engine = cls(working_dir=working_dir, settings=settings)
+        engine.workflow_def = workflow
+        return engine
+
     # ========================================================================
     # Template Substitution
     # ========================================================================
@@ -594,9 +650,28 @@ class WorkflowEngine:
         # (Skip for gate steps since we already ran the gate)
         if step_type != StepType.GATE:
             if not skip_verification and item_def.verification.type != VerificationType.NONE:
-                # Handle manual gates specially
+                # Handle manual gates specially - check supervision mode (WF-035)
                 if item_def.verification.type == VerificationType.MANUAL_GATE:
-                    return False, f"Item '{item_id}' requires manual approval. Use 'orchestrator approve-item {item_id}' to approve."
+                    if self.should_skip_gate(item_def):
+                        # Auto-skip in zero_human mode
+                        item_state.status = ItemStatus.SKIPPED
+                        item_state.skipped_at = datetime.now(timezone.utc)
+                        item_state.skip_reason = "Auto-skipped (zero_human mode)"
+                        
+                        self.save_state()
+                        
+                        self.log_event(WorkflowEvent(
+                            event_type=EventType.ITEM_SKIPPED,
+                            workflow_id=self.state.workflow_id,
+                            phase_id=self.state.current_phase_id,
+                            item_id=item_id,
+                            message=f"Manual gate auto-skipped (zero_human mode): {item_id}",
+                            details={"supervision_mode": "zero_human", "gate_name": item_def.name}
+                        ))
+                        return True, "Item auto-skipped (zero_human mode)"
+                    else:
+                        # Block in supervised/hybrid mode
+                        return False, f"Item '{item_id}' requires manual approval. Use 'orchestrator approve-item {item_id}' to approve."
 
                 success, message, result = self._run_verification(item_def)
                 item_state.verification_result = result

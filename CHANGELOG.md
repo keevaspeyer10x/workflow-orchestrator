@@ -2,6 +2,25 @@
 
 All notable changes to the workflow-orchestrator.
 
+## [2.8.0] - 2026-01-11
+
+### Added
+- **WF-035: Zero-Human Mode - Supervision Mode Configuration** (Phases 1-2 of 6)
+  - **SupervisionMode enum**: `supervised` (default), `zero_human`, `hybrid` in `src/schema.py`
+  - **WorkflowSettings model**: Typed settings with `supervision_mode`, `smoke_test_command`, `test_command`, `build_command`
+  - **ReviewSettings model**: Configurable review fallbacks with `minimum_required`, `fallbacks`, `on_insufficient_reviews`
+  - **Gate skipping logic**: `should_skip_gate()` in `src/engine.py` auto-skips manual gates in `zero_human` mode
+  - **Warning logging**: Skipped gates logged with `[ZERO-HUMAN MODE]` prefix for audit trail
+  - **34 new unit tests**: Comprehensive coverage for supervision mode and gate skipping
+  - **100% backward compatible**: Default `supervised` mode maintains existing behavior
+
+### Changed
+- WorkflowEngine now accepts optional `settings` parameter for typed configuration
+- Manual gates respect `supervision_mode` setting when determining whether to block
+
+### Deferred (Follow-up PR)
+- WF-035 Phases 3-6: Smoke testing framework, visual regression docs, review fallbacks, integration tests
+
 ## [2.7.0] - 2026-01-11
 
 ### Added
