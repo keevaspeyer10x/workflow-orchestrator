@@ -2,6 +2,19 @@
 
 All notable changes to the workflow-orchestrator.
 
+## [2.8.1] - 2026-01-12
+
+### Added
+- **WF-035 Phases 3-5: Review Fallback Foundation** (Continues WF-035 zero-human mode)
+  - **ReviewResult fallback tracking**: `was_fallback` and `fallback_reason` fields track when fallback models are used
+  - **ReviewThresholdError exception**: Raised when insufficient reviews complete (used by `on_insufficient_reviews: block`)
+  - **16 new unit tests**: `tests/test_review_fallbacks.py` covering fallback fields, threshold logic, and settings validation
+
+### Notes
+- Phases 3 (Visual Regression) and 5 (Gate Skipping) were already implemented in previous PR
+- Full fallback chain execution (try primary → fallback1 → fallback2) deferred to follow-up task
+- Schema and tracking foundation now in place for graceful degradation
+
 ## [2.8.0] - 2026-01-11
 
 ### Added

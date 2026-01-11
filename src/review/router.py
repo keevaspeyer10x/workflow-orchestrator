@@ -25,6 +25,29 @@ from ..secrets import get_secret
 logger = logging.getLogger(__name__)
 
 
+# =============================================================================
+# WF-035 Phase 4: Review Threshold Error
+# =============================================================================
+
+class ReviewThresholdError(Exception):
+    """
+    Raised when insufficient reviews complete successfully.
+
+    Used when on_insufficient_reviews is set to "block" and the number of
+    successful reviews is below the minimum_required threshold.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        successful: int = 0,
+        required: int = 3
+    ):
+        super().__init__(message)
+        self.successful = successful
+        self.required = required
+
+
 # API keys to auto-load from secrets if not in environment
 API_KEYS_TO_LOAD = [
     "OPENROUTER_API_KEY",
