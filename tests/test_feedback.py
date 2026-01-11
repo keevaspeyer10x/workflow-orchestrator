@@ -37,7 +37,7 @@ def test_anonymize_tool_feedback_basic():
     # Verify workflow_id replaced with hash
     assert 'workflow_id' not in result
     assert 'workflow_id_hash' in result
-    assert len(result['workflow_id_hash']) == 64  # SHA256 length
+    assert len(result['workflow_id_hash']) == 16  # Truncated SHA256 ([:16])
 
     # Verify PII removed
     assert 'task' not in result
@@ -297,15 +297,19 @@ def test_extract_process_feedback_from_entry():
 # Test Suite: SHA256 Hashing
 
 def test_sha256_hash_format():
-    """Verify SHA256 produces correct format."""
+    """Verify SHA256 produces correct format with salt."""
+    import os
+
     workflow_id = 'wf_test123'
-    expected_hash = hashlib.sha256(workflow_id.encode()).hexdigest()
+    # Get the salt (default if not set)
+    salt = os.environ.get("WORKFLOW_SALT", "workflow-orchestrator-default-salt-v1")
+    expected_hash = hashlib.sha256((salt + workflow_id).encode()).hexdigest()[:16]
 
     feedback = {'workflow_id': workflow_id}
     result = anonymize_tool_feedback(feedback)
 
     assert result['workflow_id_hash'] == expected_hash
-    assert len(result['workflow_id_hash']) == 64
+    assert len(result['workflow_id_hash']) == 16  # Truncated
 
 
 # Test Suite: Edge Cases
@@ -330,6 +334,91 @@ def test_detect_repo_type_multiple_markers():
         result = detect_repo_type(tmppath)
         # Should return first match (python has higher priority)
         assert result in ['python', 'javascript']
+
+
+# Test Suite: Security - Nested PII Protection
+
+def test_anonymize_nested_pii_in_phases():
+    """TC-SEC-1: Phases dict must not leak PII in keys."""
+    feedback = {
+        'timestamp': '2026-01-11T10:00:00Z',
+        'workflow_id': 'wf_test',
+        'phases': {
+            'PLAN': 300,
+            'user_john_review': 120,  # PII in key!
+            'EXECUTE': 600,
+            'fix_authentication_bug': 200,  # User content in key!
+            'VERIFY': 100
+        }
+    }
+
+    result = anonymize_tool_feedback(feedback.copy())
+
+    # Should only keep standard phase names
+    assert 'phases' in result
+    assert result['phases'] == {'PLAN': 300, 'EXECUTE': 600, 'VERIFY': 100}
+    assert 'user_john_review' not in result['phases']
+    assert 'fix_authentication_bug' not in result['phases']
+
+
+def test_anonymize_phases_case_insensitive():
+    """TC-SEC-2: Phase names should be case-insensitive."""
+    feedback = {
+        'workflow_id': 'wf_test',
+        'phases': {'plan': 100, 'execute': 200, 'REVIEW': 150}
+    }
+
+    result = anonymize_tool_feedback(feedback)
+
+    # All should be kept (case-insensitive matching)
+    assert len(result['phases']) == 3
+
+
+def test_anonymize_phases_non_numeric_values():
+    """TC-SEC-3: Phases with non-numeric values should be filtered."""
+    feedback = {
+        'workflow_id': 'wf_test',
+        'phases': {
+            'PLAN': 300,
+            'EXECUTE': 'long time',  # String value - potential PII
+            'REVIEW': 200
+        }
+    }
+
+    result = anonymize_tool_feedback(feedback)
+
+    # Only numeric values kept
+    assert result['phases'] == {'PLAN': 300, 'REVIEW': 200}
+    assert 'EXECUTE' not in result['phases']
+
+
+def test_anonymize_empty_phases():
+    """TC-SEC-4: Empty phases dict should be removed."""
+    feedback = {
+        'workflow_id': 'wf_test',
+        'phases': {}
+    }
+
+    result = anonymize_tool_feedback(feedback)
+
+    # Empty phases should be removed entirely
+    assert 'phases' not in result
+
+
+def test_anonymize_all_invalid_phases():
+    """TC-SEC-5: If all phases are invalid, remove phases field."""
+    feedback = {
+        'workflow_id': 'wf_test',
+        'phases': {
+            'user_custom_step': 100,
+            'another_custom': 200
+        }
+    }
+
+    result = anonymize_tool_feedback(feedback)
+
+    # All invalid, so phases field should be removed
+    assert 'phases' not in result
 
 
 if __name__ == '__main__':

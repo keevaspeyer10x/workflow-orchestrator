@@ -513,7 +513,285 @@ orchestrator secrets test OPENROUTER_API_KEY
 
 For Claude Code Web: Store secrets as files in a private GitHub repo (file names = secret names).
 
+## Feedback System (Two-Tier - Phase 3b)
+
+The orchestrator captures workflow feedback to enable continuous improvement and pattern detection.
+
+### Two Types of Feedback
+
+**Phase 3b** introduces a two-tier feedback system that separates tool metrics from project-specific context:
+
+1. **Tool Feedback** (`.workflow_tool_feedback.jsonl`) - About orchestrator itself
+   - **Anonymized** - workflow_id hashed (salted SHA256), no repo/task names
+   - **Shareable** - Safe to upload to maintainer for analysis
+   - Contains: Phase timings, error counts, items skipped, review status
+   - Example: `{"timestamp": "...", "workflow_id_hash": "abc123...", "phases": {...}, "repo_type": "python"}`
+
+2. **Process Feedback** (`.workflow_process_feedback.jsonl`) - About your project
+   - **Private**, stays local
+   - Contains: Task description, repo URL, learnings, challenges, project errors
+   - Never uploaded or shared
+
+### Security: Salt Management
+
+The orchestrator uses a salt when hashing workflow_id to prevent rainbow table attacks.
+
+**Default Salt**: `workflow-orchestrator-default-salt-v1`
+- Secure for single-user installations
+- Provides protection against rainbow table attacks
+- Same salt used across all workflows for correlation
+
+**Custom Salt** (optional, for teams):
+```bash
+# Set custom salt (recommended for multi-user deployments)
+export WORKFLOW_SALT="your-random-secret-salt-here"
+
+# Generate a random salt
+openssl rand -base64 32
+```
+
+**Important Security Notes**:
+- Salt should be **secret** and **not committed** to version control
+- Salt should be **consistent per installation** (not per-workflow)
+- Salt enables correlation: same workflow_id always produces same hash
+- Changing salt breaks correlation (historical analysis becomes harder)
+- For teams: Store salt in secure secrets management (SOPS, 1Password, etc)
+
+### Commands
+
+```bash
+# Capture feedback (automatic in LEARN phase)
+orchestrator feedback
+
+# Review patterns
+orchestrator feedback review                 # Both tool and process
+orchestrator feedback review --tool          # Tool patterns only
+orchestrator feedback review --process       # Process patterns only
+
+# Upload anonymized tool feedback (optional)
+orchestrator feedback sync --dry-run         # Preview what would be uploaded
+orchestrator feedback sync                    # Upload to GitHub Gist
+orchestrator feedback sync --status           # Show sync statistics
+
+# Configure sync
+orchestrator config set feedback_sync false   # Disable sync (default: enabled for developer)
+```
+
+### What Gets Uploaded (Tool Feedback Only)
+
+**Anonymized data** (safe to share):
+- Phase timings (how long each phase took)
+- Error counts (not error details)
+- Items skipped count (not reasons)
+- Reviews performed (yes/no)
+- Parallel agents used (yes/no)
+- Repo type (python/javascript/go/rust)
+- Orchestrator version
+
+**Never uploaded** (stays local):
+- Task descriptions
+- Repo names/URLs
+- Error messages (may contain code/filenames)
+- Learnings and challenges (project-specific)
+- Any code snippets or project context
+
+### Commands
+
+```bash
+# Capture feedback (automatic in LEARN phase)
+orchestrator feedback
+
+# Review patterns
+orchestrator feedback review                  # Review both tool and process feedback
+orchestrator feedback review --tool           # Review tool patterns only
+orchestrator feedback review --process        # Review process patterns only
+orchestrator feedback review --suggest        # Generate roadmap suggestions
+
+# Sync anonymized tool feedback (opt-in by default for developer)
+orchestrator feedback sync --dry-run          # Preview what would be uploaded
+orchestrator feedback sync                     # Upload to GitHub Gist
+orchestrator feedback sync --status            # Show sync statistics
+orchestrator feedback sync --force             # Re-sync all entries
+
+# Disable sync
+orchestrator config set feedback_sync false
+```
+
+### Feedback Files
+
+The orchestrator collects feedback in two files:
+
+1. **`.workflow_tool_feedback.jsonl`** - Anonymized, shareable
+   - About orchestrator itself (phase timings, error counts, reviews performed)
+   - Workflow ID hashed with SHA256
+   - No task descriptions, repo names, or code
+   - Includes: repo_type (python/js/go/rust), phase timings, error counts, review stats
+
+2. **`.workflow_process_feedback.jsonl`** - Private, local-only
+   - Full project context (task, repo, learnings)
+   - Error details and skipped item reasons
+   - Project-specific challenges and improvements
+   - Never uploaded, stays local
+
+### Sync to GitHub Gist
+
+You can optionally sync anonymized tool feedback to help improve the orchestrator:
+
+```bash
+# Preview what would be uploaded (no PII!)
+orchestrator feedback sync --dry-run
+
+# Upload anonymized tool feedback
+orchestrator feedback sync
+
+# Check sync status
+orchestrator feedback sync --status
+
+# Opt out of sync
+orchestrator config set feedback_sync false
+```
+
+**Privacy guarantee:**
+- Only `.workflow_tool_feedback.jsonl` is synced (anonymized)
+- Process feedback (`.workflow_process_feedback.jsonl`) NEVER leaves your machine
+- Tool feedback has NO task descriptions, repo names, or code
+- workflow_id is hashed (SHA256)
+- You can review before uploading: `orchestrator feedback sync --dry-run`
+
 ## Important Notes
+
+- The orchestrator creates `.workflow_state.json` to track progress
+- Workflow logs are stored in `.workflow_log.jsonl`
+- Checkpoints are stored in `.workflow_checkpoints/`
+- **Feedback files** (Phase 3b):
+  - `.workflow_tool_feedback.jsonl` - Anonymized orchestrator metrics (shareable)
+  - `.workflow_process_feedback.jsonl` - Project-specific learnings (private)
+  - `.workflow_feedback.jsonl.migrated` - Backup of Phase 3a feedback (if migrated)
+- These files should be gitignored for most projects
+
+## Feedback System (Two-Tier)
+
+The orchestrator collects two types of feedback to improve both the tool and your workflows:
+
+### Two-Tier System
+
+1. **Tool Feedback** (`.workflow_tool_feedback.jsonl`) - About orchestrator itself
+   - **Anonymized** - workflow_id hashed, no repo/task names
+   - **Shareable** - Safe to upload via sync command
+   - **Purpose**: Help improve orchestrator features across all users
+
+2. **Process Feedback** (`.workflow_process_feedback.jsonl`) - About your project
+   - **Private**, stays local
+   - Contains learnings, challenges, project-specific data
+   - Never uploaded or shared
+
+### Feedback Commands
+
+```bash
+# Capture feedback (automatic in LEARN phase)
+orchestrator feedback
+
+# Interactive mode (prompts questions)
+orchestrator feedback capture --interactive
+
+# Review patterns
+orchestrator feedback review                 # Show both tool and process patterns
+orchestrator feedback review --tool          # Review tool patterns only
+orchestrator feedback review --process       # Review process patterns only
+orchestrator feedback review --days 30       # Review last 30 days
+orchestrator feedback review --suggest       # Generate ROADMAP suggestions
+
+# Sync anonymized tool feedback to maintainer (opt-in by default)
+orchestrator feedback sync                     # Upload new entries
+orchestrator feedback sync --dry-run           # Preview what would be uploaded
+orchestrator feedback sync --status            # Show sync statistics
+orchestrator feedback sync --force             # Re-sync all entries
+
+# Opt-out of feedback sync
+orchestrator config set feedback_sync false
+```
+
+### Feedback Files
+
+The orchestrator collects two types of feedback:
+
+1. **Tool Feedback** (`.workflow_tool_feedback.jsonl`)
+   - About orchestrator itself (performance, reliability, feature usage)
+   - Automatically anonymized (workflow_id hashed, no repo/task names)
+   - Safe to share with maintainers
+   - Example contents: phase timings, items skipped (count only), reviews performed (yes/no)
+
+2. **Process Feedback** (`.workflow_process_feedback.jsonl`) - About your project
+   - Private, stays local (never uploaded)
+   - Contains full context: task, repo, learnings, challenges
+   - Used for your own pattern analysis
+
+### Feedback Commands
+
+```bash
+# Capture feedback (runs automatically in LEARN phase)
+orchestrator feedback
+
+# Review patterns
+orchestrator feedback review                 # Show both tool and process patterns
+orchestrator feedback review --tool          # Show only tool patterns
+orchestrator feedback review --process       # Show only process patterns
+orchestrator feedback review --days 30       # Review last 30 days
+orchestrator feedback review --suggest       # Generate roadmap suggestions
+
+# Sync anonymized tool feedback to GitHub Gist (opt-in by default)
+orchestrator feedback sync                   # Upload new entries
+orchestrator feedback sync --dry-run         # Preview what would be uploaded
+orchestrator feedback sync --status          # Show sync statistics
+orchestrator feedback sync --force           # Re-sync all entries
+
+# Opt out of sync
+orchestrator config set feedback_sync false
+```
+
+### What Gets Captured
+
+**Tool Feedback** (`.workflow_tool_feedback.jsonl`) - About orchestrator itself:
+- Anonymized (workflow_id hashed, no repo/task names)
+- Phase timings and duration
+- Items skipped (count only)
+- Reviews performed (yes/no)
+- Parallel agents used (yes/no)
+- Orchestrator errors (count only)
+- Repo type (python/javascript/go/rust)
+
+**Process Feedback** (`.workflow_process_feedback.jsonl`) - About your project:
+- Task description
+- Repo information
+- Learnings and challenges
+- What went well/poorly
+- Project-specific errors and issues
+
+### Privacy
+
+- Tool feedback is **anonymized** before sync - no PII, code, or project details
+- Process feedback **never leaves your machine** - stays local
+- Use `orchestrator feedback sync --dry-run` to preview what would be uploaded
+- All sync is opt-in (default: enabled for developer, can disable)
+
+## Important Notes
+
+- The orchestrator creates `.workflow_state.json` to track progress
+- Workflow logs are stored in `.workflow_log.jsonl`
+- Checkpoints are stored in `.workflow_checkpoints/`
+- **Phase 3b**: Feedback is stored in two files:
+  - `.workflow_tool_feedback.jsonl` - Anonymized, shareable
+  - `.workflow_process_feedback.jsonl` - Private, local-only
+  - `.workflow_feedback.jsonl.migrated` - Backup of Phase 3a format (if migrated)
+- These files should be gitignored for most projects
+
+## Getting Help
+
+- Run `orchestrator --help` for command help
+- Read `docs/SETUP_GUIDE.md` for setup instructions
+- Check `ROADMAP.md` for planned features
+- Review `LEARNINGS.md` for lessons learned
+
 
 - The orchestrator creates `.workflow_state.json` to track progress
 - Workflow logs are stored in `.workflow_log.jsonl`

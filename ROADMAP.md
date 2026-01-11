@@ -1756,56 +1756,6 @@ The orchestrator is designed to enforce workflows, but doesn't enforce its own r
 
 ---
 
-#### WF-034-P3b: Two-Tier Feedback System (Tool vs Process)
-**Status:** Planned (Phase 3b - after Phase 3a ships)
-**Complexity:** MEDIUM
-**Priority:** MEDIUM - Depends on Phase 3a validation
-**Source:** WF-034 full design - deferred for faster shipping
-
-**Problem Statement:**
-Phase 3a implements single-file feedback capture. Phase 3b splits into:
-1. **Tool feedback** - About orchestrator itself (for maintainers)
-2. **Process feedback** - About user's project (stays local)
-
-This enables aggregating orchestrator improvement insights across all users while keeping project-specific data private.
-
-**Phase 3a (Shipped First):**
-- ✅ Single `.workflow_feedback.jsonl` file
-- ✅ Combined tool + process feedback
-- ✅ `orchestrator feedback` capture command
-- ✅ `orchestrator feedback review` analysis command
-
-**Phase 3b Additions:**
-- Split into `.workflow_tool_feedback.jsonl` (anonymized, shareable) + `.workflow_process_feedback.jsonl` (private, local)
-- Anonymize tool feedback (hash workflow_id, remove repo/task names, keep repo_type only)
-- Add `orchestrator feedback sync` to upload anonymized tool feedback to central repo
-- Add `orchestrator feedback review --tool --all-users` for maintainer to see aggregate patterns
-- Default: opt-in enabled for sync (single user initially, change to opt-out later)
-
-**Success Criteria:**
-- [ ] Tool feedback properly anonymized (no PII/code)
-- [ ] Process feedback stays local, never uploaded
-- [ ] Sync command uploads to central repo (HTTP endpoint or GitHub Gist)
-- [ ] Maintainer can see aggregate patterns across all users
-- [ ] `orchestrator feedback sync --dry-run` shows what would be uploaded
-- [ ] Users can disable: `orchestrator config set feedback_sync false`
-
-**Complexity vs Benefit Tradeoff:**
-
-| Factor | Phase 3a (Single File) | Phase 3b (Two-Tier) |
-|--------|------------------------|---------------------|
-| Complexity | LOW - one file, simple | MEDIUM - split, anonymize, sync |
-| Privacy | Manual (user reviews before sharing) | Automatic (tool data anonymized) |
-| Insights | Local only | Aggregate across all users |
-| Time to Ship | Fast (days) | Slower (weeks) |
-
-**Recommendation:** ✅ **IMPLEMENT** - After Phase 3a validates the approach
-
-**Reasoning:**
-Ship Phase 3a fast to validate the feedback capture pattern works. If users actually use `orchestrator feedback review` and find it valuable, then invest in Phase 3b's two-tier system and central aggregation. If not, avoid the complexity.
-
----
-
 #### CORE-027: Multi-Model API Reliability
 **Status:** Planned
 **Complexity:** Medium

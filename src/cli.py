@@ -10,7 +10,7 @@ import os
 import sys
 import json
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from src.engine import WorkflowEngine
@@ -3860,24 +3860,351 @@ def cmd_prd_task_done(args):
         print("-" * 60)
 
 
+# ============================================================
+# Phase 3b: Two-Tier Feedback Helper Functions
+# ============================================================
+
+def detect_repo_type(working_dir):
+    """Detect repository language type from project files."""
+    working_dir = Path(working_dir)
+
+    # Check for language markers in priority order
+    if (working_dir / 'setup.py').exists() or (working_dir / 'pyproject.toml').exists():
+        return 'python'
+    elif (working_dir / 'package.json').exists():
+        return 'javascript'
+    elif (working_dir / 'go.mod').exists():
+        return 'go'
+    elif (working_dir / 'Cargo.toml').exists():
+        return 'rust'
+
+    return 'unknown'
+
+
+def anonymize_tool_feedback(feedback):
+    """
+    Remove PII from tool feedback for safe sharing (ALLOWLIST approach).
+
+    Uses allowlist (not denylist) to ensure future fields don't leak PII.
+    Adds salt to hash to prevent rainbow table attacks.
+    Uses deepcopy to avoid nested structure issues.
+
+    Safe fields (allowlist):
+    - timestamp, mode, orchestrator_version, repo_type
+    - duration_seconds, phases (dict of phase timings)
+    - parallel_agents_used, reviews_performed (booleans)
+    - errors_count, items_skipped_count (integers only, no details)
+    """
+    import hashlib
+    import os
+    from copy import deepcopy
+
+    # Type check
+    if not isinstance(feedback, dict):
+        return {}
+
+    # Deep copy to avoid modifying original or shared nested structures
+    tool = deepcopy(feedback)
+
+    # Salted hash for workflow_id (prevents rainbow table attacks)
+    salt = os.environ.get("WORKFLOW_SALT", "workflow-orchestrator-default-salt-v1")
+    if 'workflow_id' in tool:
+        workflow_id_str = str(tool['workflow_id'])  # Handle non-string IDs
+        hashed = hashlib.sha256((salt + workflow_id_str).encode()).hexdigest()[:16]
+        tool['workflow_id_hash'] = hashed
+        del tool['workflow_id']
+
+    # ALLOWLIST approach - only keep explicitly safe fields
+    safe_fields = {
+        'timestamp',
+        'workflow_id_hash',
+        'mode',
+        'orchestrator_version',
+        'repo_type',
+        'duration_seconds',
+        'phases',  # Dict of phase timings (integers)
+        'parallel_agents_used',
+        'reviews_performed',
+        'errors_count',  # Count only, no error details
+        'items_skipped_count',  # Count only, no skip reasons
+    }
+
+    # Keep only safe fields
+    tool = {k: v for k, v in tool.items() if k in safe_fields}
+
+    # SECURITY: Validate nested structures don't leak PII
+    # Phases dict keys must be phase names only (PLAN, EXECUTE, etc), not user content
+    if 'phases' in tool and isinstance(tool['phases'], dict):
+        # Allowed phase names (from standard workflow)
+        allowed_phases = {'PLAN', 'EXECUTE', 'REVIEW', 'VERIFY', 'LEARN', 'TDD', 'IMPL'}
+        # Filter to only allowed phase names
+        tool['phases'] = {k: v for k, v in tool['phases'].items()
+                         if k.upper() in allowed_phases and isinstance(v, (int, float))}
+        # If no valid phases remain, remove the field
+        if not tool['phases']:
+            del tool['phases']
+
+    return tool
+
+
+def extract_tool_feedback_from_entry(entry):
+    """
+    Extract tool-relevant metrics from a feedback entry.
+
+    Tool feedback focuses on orchestrator performance:
+    - Phase timings
+    - Error counts (not details)
+    - Items skipped (count only)
+    - Reviews performed (yes/no)
+    - Parallel agents used (yes/no)
+    """
+    tool_fields = [
+        'timestamp',
+        'workflow_id',
+        'mode',
+        'orchestrator_version',
+        'repo_type',
+        'duration_seconds',
+        'phases',
+        'parallel_agents_used',
+        'reviews_performed',
+        'errors_count',
+        'items_skipped_count',
+    ]
+
+    tool = {}
+    for field in tool_fields:
+        if field in entry:
+            tool[field] = entry[field]
+
+    return tool
+
+
+def extract_process_feedback_from_entry(entry):
+    """
+    Extract process-relevant context from a feedback entry.
+
+    Process feedback focuses on project-specific learnings:
+    - Task description
+    - Repo information
+    - Learnings and challenges
+    - What went well/poorly
+    - Improvements needed
+    """
+    process_fields = [
+        'timestamp',
+        'workflow_id',
+        'task',
+        'repo',
+        'mode',
+        'parallel_agents_used',
+        'errors_summary',
+        'items_skipped_reasons',
+        'learnings',
+        'challenges',
+        'what_went_well',
+        'improvements',
+    ]
+
+    process = {}
+    for field in process_fields:
+        if field in entry:
+            process[field] = entry[field]
+
+    return process
+
+
+def migrate_legacy_feedback(working_dir):
+    """
+    Migrate Phase 3a single-file feedback to Phase 3b two-tier system (ATOMIC).
+
+    Uses temp-file + atomic-rename pattern to prevent data loss on crash.
+    Implements all recommendations from multi-model review (5/5 AI models).
+
+    Splits .workflow_feedback.jsonl into:
+    - .workflow_tool_feedback.jsonl (anonymized, shareable)
+    - .workflow_process_feedback.jsonl (private, local-only)
+
+    Returns:
+        bool: True if migration occurred, False if already migrated or no legacy file
+    """
+    import os
+
+    working_dir = Path(working_dir)
+    legacy_file = working_dir / '.workflow_feedback.jsonl'
+    tool_file = working_dir / '.workflow_tool_feedback.jsonl'
+    process_file = working_dir / '.workflow_process_feedback.jsonl'
+    marker_file = working_dir / '.workflow_migration_in_progress'
+
+    # Check for incomplete migration from previous crash
+    if marker_file.exists():
+        print("  ⚠ Detected incomplete migration from previous crash, cleaning up...")
+        # Clean up partial files
+        if tool_file.exists():
+            try:
+                tool_file.unlink()
+            except:
+                pass
+        if process_file.exists():
+            try:
+                process_file.unlink()
+            except:
+                pass
+        marker_file.unlink()
+        # Continue with fresh migration
+
+    # Skip if already migrated (check for partial states too - OR not AND)
+    if tool_file.exists() or process_file.exists():
+        return False
+
+    # Skip if no legacy file
+    if not legacy_file.exists():
+        return False
+
+    print("⚙ Migrating feedback to two-tier system...")
+
+    # Create temp files in same directory (for atomic rename)
+    tool_temp = working_dir / f'.workflow_tool_feedback.jsonl.tmp.{os.getpid()}'
+    process_temp = working_dir / f'.workflow_process_feedback.jsonl.tmp.{os.getpid()}'
+
+    # Clean up any stale temp files from previous crashes
+    for stale in working_dir.glob('.workflow_*_feedback.jsonl.tmp.*'):
+        try:
+            stale.unlink()
+        except:
+            pass
+
+    migrated = 0
+    failed = 0
+
+    try:
+        # Detect repo type for tool feedback
+        repo_type = detect_repo_type(working_dir)
+
+        # Stream line-by-line (avoid loading entire file into memory)
+        with open(legacy_file, 'r') as legacy_f, \
+             open(tool_temp, 'w') as tool_f, \
+             open(process_temp, 'w') as process_f:
+
+            for line_num, line in enumerate(legacy_f, 1):
+                try:
+                    entry = json.loads(line)
+
+                    # Extract and anonymize tool feedback
+                    tool_data = extract_tool_feedback_from_entry(entry)
+                    tool_data['repo_type'] = repo_type
+
+                    # Add orchestrator version if not present
+                    if 'orchestrator_version' not in tool_data:
+                        try:
+                            from . import __version__
+                            tool_data['orchestrator_version'] = __version__
+                        except:
+                            tool_data['orchestrator_version'] = 'unknown'
+
+                    anonymized_tool = anonymize_tool_feedback(tool_data)
+
+                    # Extract process feedback (keep full context)
+                    process_data = extract_process_feedback_from_entry(entry)
+
+                    # Write to temp files (write mode, not append)
+                    tool_f.write(json.dumps(anonymized_tool) + '\n')
+                    process_f.write(json.dumps(process_data) + '\n')
+                    migrated += 1
+
+                except json.JSONDecodeError as e:
+                    print(f"  Warning: Skipping malformed entry on line {line_num}: {e}")
+                    failed += 1
+                except Exception as e:
+                    print(f"  Error processing line {line_num}: {e}")
+                    failed += 1
+
+            # Flush and fsync for durability (protects against power failure)
+            tool_f.flush()
+            os.fsync(tool_f.fileno())
+            process_f.flush()
+            os.fsync(process_f.fileno())
+
+        # Atomic two-file migration using transaction marker
+        # SECURITY: If first rename succeeds but second fails, marker prevents inconsistent state
+        marker_file = working_dir / '.workflow_migration_in_progress'
+        try:
+            # Create marker before any renames
+            marker_file.touch()
+
+            # Atomic renames (os.replace is atomic on both POSIX and Windows)
+            os.replace(tool_temp, tool_file)
+            os.replace(process_temp, process_file)
+
+            # Remove marker after both succeed
+            marker_file.unlink()
+        except Exception as e:
+            # Rollback: if marker exists, migration was incomplete
+            if marker_file.exists():
+                # Clean up partial migration
+                if tool_file.exists():
+                    try:
+                        tool_file.unlink()
+                    except:
+                        pass
+                if process_file.exists():
+                    try:
+                        process_file.unlink()
+                    except:
+                        pass
+                marker_file.unlink()
+            raise  # Re-raise to trigger outer exception handler
+
+        # Backup legacy file AFTER successful migration
+        legacy_backup = working_dir / '.workflow_feedback.jsonl.migrated'
+        try:
+            legacy_file.rename(legacy_backup)
+        except Exception as e:
+            print(f"  Warning: Could not rename legacy file: {e}")
+
+        # Print summary
+        if failed > 0:
+            print(f"✓ Migrated {migrated} entries ({failed} failed) to two-tier system")
+        else:
+            print(f"✓ Migrated {migrated} entries to two-tier system")
+
+        return True
+
+    except Exception as e:
+        # Cleanup temp files on any failure
+        print(f"✗ Migration failed: {e}")
+        for temp_file in [tool_temp, process_temp]:
+            if temp_file.exists():
+                try:
+                    temp_file.unlink()
+                except:
+                    pass
+        return False
+
+
 def cmd_feedback_capture(args):
-    """Capture workflow feedback (WF-034 Phase 3a)."""
+    """Capture workflow feedback (WF-034 Phase 3b - Two-tier system)."""
     # Check opt-out
     if os.environ.get('ORCHESTRATOR_SKIP_FEEDBACK') == '1':
         print("Feedback capture disabled (ORCHESTRATOR_SKIP_FEEDBACK=1)")
         return
 
     working_dir = Path(args.dir or '.')
+
+    # Phase 3b: Run migration if needed
+    migrate_legacy_feedback(working_dir)
+
     state_file = working_dir / '.workflow_state.json'
     log_file = working_dir / '.workflow_log.jsonl'
-    feedback_file = working_dir / '.workflow_feedback.jsonl'
+    tool_feedback_file = working_dir / '.workflow_tool_feedback.jsonl'
+    process_feedback_file = working_dir / '.workflow_process_feedback.jsonl'
 
     # Get mode
     is_interactive = getattr(args, 'interactive', False)
     mode = 'interactive' if is_interactive else 'auto'
 
     feedback = {
-        'timestamp': datetime.utcnow().isoformat() + 'Z',
+        'timestamp': datetime.now(timezone.utc).isoformat(),
         'mode': mode,
     }
 
@@ -3989,7 +4316,7 @@ def cmd_feedback_capture(args):
 
                             # Extract learnings from document_learnings item
                             if event.get('item_id') == 'document_learnings' and event_type == 'item_completed':
-                                notes = event.get('notes', '')
+                                notes = event.get('details', {}).get('notes', '')
                                 if notes:
                                     learnings_notes.append(notes)
 
@@ -4033,38 +4360,101 @@ def cmd_feedback_capture(args):
             except Exception as e:
                 print(f"Warning: Could not parse workflow log: {e}")
 
-    # Save to feedback file
+    # Phase 3b: Split and save to two-tier system
     try:
-        with open(feedback_file, 'a') as f:
-            f.write(json.dumps(feedback) + '\n')
-        print(f"\n✓ Feedback saved to {feedback_file}")
+        # Detect repo type
+        repo_type = detect_repo_type(working_dir)
+
+        # Extract tool feedback and anonymize
+        tool_data = extract_tool_feedback_from_entry(feedback)
+        tool_data['repo_type'] = repo_type
+
+        # Add orchestrator version
+        try:
+            from . import __version__
+            tool_data['orchestrator_version'] = __version__
+        except:
+            tool_data['orchestrator_version'] = 'unknown'
+
+        anonymized_tool = anonymize_tool_feedback(tool_data)
+
+        # Extract process feedback (keep full context)
+        process_data = extract_process_feedback_from_entry(feedback)
+
+        # Save to both files
+        with open(tool_feedback_file, 'a') as f:
+            f.write(json.dumps(anonymized_tool) + '\n')
+
+        with open(process_feedback_file, 'a') as f:
+            f.write(json.dumps(process_data) + '\n')
+
+        print(f"\n✓ Feedback saved:")
+        print(f"  • Tool feedback:    {tool_feedback_file.name} (anonymized, shareable)")
+        print(f"  • Process feedback: {process_feedback_file.name} (private, local)")
+
     except Exception as e:
         print(f"\n✗ Error saving feedback: {e}")
         sys.exit(1)
 
 
 def cmd_feedback_review(args):
-    """Review workflow feedback patterns (WF-034 Phase 3a)."""
+    """Review workflow feedback patterns (WF-034 Phase 3b - Two-tier system)."""
     working_dir = Path(args.dir or '.')
-    feedback_file = working_dir / '.workflow_feedback.jsonl'
 
-    if not feedback_file.exists():
-        print("No feedback data found. Run workflows to collect feedback.")
-        print(f"Expected file: {feedback_file}")
-        return
+    # Phase 3b: Run migration if needed
+    migrate_legacy_feedback(working_dir)
 
-    # Load feedback entries
+    # Determine which files to load based on flags
+    show_tool = getattr(args, 'tool', False)
+    show_process = getattr(args, 'process', False)
+
+    # Default: show both if no flags specified
+    if not show_tool and not show_process:
+        show_tool = True
+        show_process = True
+
+    tool_feedback_file = working_dir / '.workflow_tool_feedback.jsonl'
+    process_feedback_file = working_dir / '.workflow_process_feedback.jsonl'
+
+    # Load feedback entries from appropriate files
     entries = []
-    try:
-        with open(feedback_file) as f:
-            for line in f:
-                try:
-                    entries.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
-    except Exception as e:
-        print(f"Error reading feedback file: {e}")
-        sys.exit(1)
+    feedback_types = []
+
+    if show_tool and tool_feedback_file.exists():
+        try:
+            with open(tool_feedback_file) as f:
+                for line in f:
+                    try:
+                        entry = json.loads(line)
+                        entry['_feedback_type'] = 'tool'
+                        entries.append(entry)
+                    except json.JSONDecodeError:
+                        continue
+            feedback_types.append('tool')
+        except Exception as e:
+            print(f"Warning: Error reading tool feedback file: {e}")
+
+    if show_process and process_feedback_file.exists():
+        try:
+            with open(process_feedback_file) as f:
+                for line in f:
+                    try:
+                        entry = json.loads(line)
+                        entry['_feedback_type'] = 'process'
+                        entries.append(entry)
+                    except json.JSONDecodeError:
+                        continue
+            feedback_types.append('process')
+        except Exception as e:
+            print(f"Warning: Error reading process feedback file: {e}")
+
+    if not entries:
+        print("No feedback data found. Run workflows to collect feedback.")
+        if show_tool:
+            print(f"Expected file: {tool_feedback_file}")
+        if show_process:
+            print(f"Expected file: {process_feedback_file}")
+        return
 
     if not entries:
         print("No feedback entries found")
@@ -4073,7 +4463,7 @@ def cmd_feedback_review(args):
     # Filter by date range
     cutoff_date = None
     if not args.all:
-        cutoff_date = datetime.utcnow() - timedelta(days=args.days)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=args.days)
 
     filtered_entries = []
     for entry in entries:
@@ -4241,7 +4631,7 @@ def cmd_feedback_review(args):
                 roadmap_file = working_dir / 'ROADMAP.md'
                 try:
                     with open(roadmap_file, 'a') as f:
-                        f.write(f"\n## Feedback-Generated Suggestions ({datetime.utcnow().strftime('%Y-%m-%d')})\n\n")
+                        f.write(f"\n## Feedback-Generated Suggestions ({datetime.now(timezone.utc).strftime('%Y-%m-%d')})\n\n")
                         for sugg in suggestions:
                             f.write(f"### {sugg['title']}\n")
                             f.write(f"**Complexity:** {sugg['complexity']}\n")
@@ -4251,6 +4641,202 @@ def cmd_feedback_review(args):
                     print(f"\n✗ Error updating ROADMAP.md: {e}")
         else:
             print("No suggestions generated - patterns look good!")
+
+
+def cmd_feedback_sync(args):
+    """Upload anonymized tool feedback to GitHub Gist (WF-034 Phase 3b)."""
+    import requests
+    from datetime import datetime
+
+    working_dir = Path(args.dir or '.')
+    tool_feedback_file = working_dir / '.workflow_tool_feedback.jsonl'
+
+    # Check if tool feedback file exists
+    if not tool_feedback_file.exists():
+        print("✗ No tool feedback found")
+        print(f"Expected file: {tool_feedback_file}")
+        print("\nRun workflows and capture feedback first:")
+        print("  orchestrator feedback")
+        sys.exit(1)
+
+    # Check GitHub token
+    github_token = os.environ.get('GITHUB_TOKEN')
+    if not github_token and not args.status and not args.dry_run:
+        print("✗ GITHUB_TOKEN not set. Required for sync.")
+        print("\nSetup:")
+        print("1. Create token: https://github.com/settings/tokens")
+        print("   Scopes needed: 'gist' (create/update gists)")
+        print("2. Set token: export GITHUB_TOKEN=ghp_xxx")
+        print("3. Retry: orchestrator feedback sync")
+        print("\nOr use --dry-run to preview what would be uploaded:")
+        print("  orchestrator feedback sync --dry-run")
+        sys.exit(1)
+
+    # Load tool feedback entries
+    entries = []
+    try:
+        with open(tool_feedback_file) as f:
+            for line in f:
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    except Exception as e:
+        print(f"✗ Error reading tool feedback: {e}")
+        sys.exit(1)
+
+    if not entries:
+        print("No tool feedback entries found")
+        return
+
+    # Status mode
+    if args.status:
+        synced = sum(1 for e in entries if 'synced_at' in e)
+        unsynced = len(entries) - synced
+        print("Sync Status:")
+        print(f"  • Total entries:   {len(entries)}")
+        print(f"  • Synced:          {synced}")
+        print(f"  • Pending sync:    {unsynced}")
+        return
+
+    # Force mode: remove synced_at timestamps
+    if args.force:
+        print("Force mode: Re-syncing all entries...")
+        for entry in entries:
+            if 'synced_at' in entry:
+                del entry['synced_at']
+
+    # Filter unsynced entries
+    unsynced_entries = [e for e in entries if 'synced_at' not in e]
+
+    if not unsynced_entries:
+        print("✓ No new entries to sync (all up to date)")
+        print("\nUse --force to re-sync all entries:")
+        print("  orchestrator feedback sync --force")
+        return
+
+    # Dry run mode
+    if args.dry_run:
+        print(f"Dry Run - Would upload {len(unsynced_entries)} entries:")
+        print()
+        for i, entry in enumerate(unsynced_entries[:3], 1):
+            print(f"Entry {i}:")
+            print(json.dumps(entry, indent=2))
+            print()
+        if len(unsynced_entries) > 3:
+            print(f"... and {len(unsynced_entries) - 3} more entries")
+            print()
+        print("No data was uploaded (dry run mode).")
+        print("\nTo upload, run:")
+        print("  orchestrator feedback sync")
+        return
+
+    # Verify anonymization
+    print(f"Verifying anonymization of {len(unsynced_entries)} entries...")
+    for entry in unsynced_entries:
+        # Check for PII
+        entry_str = json.dumps(entry).lower()
+        if 'task' in entry or 'repo' in entry:
+            print("✗ PII detected in tool feedback!")
+            print("  Entry contains 'task' or 'repo' fields")
+            print("  This should not happen - feedback not anonymized properly")
+            sys.exit(1)
+
+    print("✓ Anonymization verified")
+
+    # Upload to GitHub Gist
+    print(f"\nUploading {len(unsynced_entries)} entries to GitHub Gist...")
+
+    try:
+        # Prepare gist content (all entries as JSON lines)
+        gist_content = '\n'.join(json.dumps(e) for e in unsynced_entries)
+
+        # Try to update existing gist first
+        gist_api = 'https://api.github.com/gists'
+        headers = {
+            'Authorization': f'token {github_token}',
+            'Accept': 'application/vnd.github.v3+json'
+        }
+
+        # Search for existing workflow-orchestrator feedback gist
+        print("Checking for existing gist...")
+        response = requests.get(gist_api, headers=headers)
+        response.raise_for_status()
+
+        existing_gist_id = None
+        for gist in response.json():
+            if gist.get('description') == 'workflow-orchestrator tool feedback':
+                existing_gist_id = gist['id']
+                print(f"Found existing gist: {gist['html_url']}")
+                break
+
+        if existing_gist_id:
+            # Update existing gist (append)
+            print("Appending to existing gist...")
+            gist_url = f"{gist_api}/{existing_gist_id}"
+            get_response = requests.get(gist_url, headers=headers)
+            get_response.raise_for_status()
+
+            existing_content = get_response.json()['files']['tool_feedback.jsonl']['content']
+            updated_content = existing_content + '\n' + gist_content
+
+            payload = {
+                'files': {
+                    'tool_feedback.jsonl': {
+                        'content': updated_content
+                    }
+                }
+            }
+
+            response = requests.patch(gist_url, headers=headers, json=payload)
+            response.raise_for_status()
+        else:
+            # Create new gist
+            print("Creating new gist...")
+            payload = {
+                'description': 'workflow-orchestrator tool feedback',
+                'public': False,
+                'files': {
+                    'tool_feedback.jsonl': {
+                        'content': gist_content
+                    }
+                }
+            }
+
+            response = requests.post(gist_api, headers=headers, json=payload)
+            response.raise_for_status()
+
+        gist_data = response.json()
+        print(f"✓ Uploaded successfully: {gist_data['html_url']}")
+
+        # Mark entries as synced
+        now = datetime.now(timezone.utc).isoformat()
+        for entry in entries:
+            if 'synced_at' not in entry:
+                entry['synced_at'] = now
+
+        # Write back to file with synced_at timestamps
+        with open(tool_feedback_file, 'w') as f:
+            for entry in entries:
+                f.write(json.dumps(entry) + '\n')
+
+        print(f"✓ Marked {len(unsynced_entries)} entries as synced")
+
+    except requests.HTTPError as e:
+        if e.response.status_code == 403:
+            print("\n✗ GitHub API rate limit exceeded")
+            if 'X-RateLimit-Reset' in e.response.headers:
+                reset_time = datetime.fromtimestamp(int(e.response.headers['X-RateLimit-Reset']))
+                print(f"  Rate limit resets at: {reset_time} UTC")
+            print("\nWait and try again later.")
+        else:
+            print(f"\n✗ GitHub API error: {e}")
+            print(f"  Status code: {e.response.status_code}")
+            print(f"  Response: {e.response.text}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n✗ Error uploading to GitHub: {e}")
+        sys.exit(1)
 
 
 def main():
@@ -4690,8 +5276,18 @@ Examples:
     feedback_review.add_argument('--days', type=int, default=7, help='Days to review (default: 7)')
     feedback_review.add_argument('--all', action='store_true', help='Review all feedback')
     feedback_review.add_argument('--suggest', action='store_true', help='Suggest roadmap items from patterns')
+    feedback_review.add_argument('--tool', action='store_true', help='Review tool feedback only (anonymized)')
+    feedback_review.add_argument('--process', action='store_true', help='Review process feedback only (private)')
     feedback_review.add_argument('-d', '--dir', help='Working directory')
     feedback_review.set_defaults(func=cmd_feedback_review)
+
+    # feedback sync (Phase 3b)
+    feedback_sync = feedback_subparsers.add_parser('sync', help='Upload anonymized tool feedback to GitHub Gist')
+    feedback_sync.add_argument('--dry-run', action='store_true', help='Show what would be uploaded without uploading')
+    feedback_sync.add_argument('--force', action='store_true', help='Re-sync all entries (remove synced_at timestamps)')
+    feedback_sync.add_argument('--status', action='store_true', help='Show sync statistics')
+    feedback_sync.add_argument('-d', '--dir', help='Working directory')
+    feedback_sync.set_defaults(func=lambda args: cmd_feedback_sync(args))
 
     # Default to capture if no subcommand
     feedback_parser.set_defaults(func=lambda args: cmd_feedback_capture(args) if not args.feedback_command else None)

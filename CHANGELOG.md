@@ -2,6 +2,29 @@
 
 All notable changes to the workflow-orchestrator.
 
+## [2.7.0] - 2026-01-11
+
+### Added
+- **WF-034 Phase 3b: Two-Tier Feedback System**: Split feedback into tool metrics (shareable) vs process context (private)
+  - **Two-file architecture**: `.workflow_tool_feedback.jsonl` (anonymized) + `.workflow_process_feedback.jsonl` (full context)
+  - **Anonymization with allowlist approach**: Only explicitly safe fields kept (prevents future PII leakage)
+  - **Salted SHA256 hashing**: workflow_id → 16-char hash (prevents rainbow table attacks)
+  - **Nested PII protection**: Phase dict keys validated (only PLAN, EXECUTE, etc. allowed)
+  - **Automatic migration**: Phase 3a single-file feedback migrated to two-tier on first run
+  - **Transaction-safe migration**: Atomic rename with rollback and crash recovery
+  - **Sync command**: `orchestrator feedback sync` uploads anonymized tool feedback to GitHub Gist
+  - **Review filters**: `orchestrator feedback review --tool` / `--process` for targeted analysis
+  - **22 unit tests** covering security, atomicity, and anonymization
+  - **Multi-model validation**: 5 AI models (Claude, GPT, Gemini, Grok, DeepSeek) reviewed for security
+
+### Security
+- **Salt management documentation**: Added comprehensive security guidance in CLAUDE.md
+  - Default salt for single-user installations
+  - Custom salt generation for teams (`openssl rand -base64 32`)
+  - Warnings about salt storage, rotation, and version control
+- **Allowlist-based PII filtering**: Future schema changes cannot leak PII by default
+- **Deep copy protection**: Nested data structures safely handled
+
 ## [2.6.0] - 2026-01-11
 
 ### Added

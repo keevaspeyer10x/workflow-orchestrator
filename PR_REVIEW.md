@@ -1,71 +1,77 @@
-# Code Review: PRD-005 (Commit 054a349)
+# Code Review: Orchestrator Feedback (WF-034 Phase 3a)
+
+## Summary
+The changes implement **WF-034 Phase 3a: Orchestrator Feedback**, introducing a mechanism to capture and review workflow metrics, errors, and qualitative feedback. This includes new CLI commands (`orchestrator feedback capture/review`), a local storage mechanism (`.workflow_feedback.jsonl`), and documentation updates.
+
+**Changes Reviewed:**
+- `src/cli.py`: +414 lines (Feedback commands implementation)
+- `README.md`: Usage instructions
+- `docs/plan.md` & `ROADMAP.md`: Planning and documentation updates
 
 ## 🛑 Critical Issues
 
-### 1. Auto-Approvals Are Not Persisted to Database
+### 1. Broken Learning Capture (Bug)
 **Severity:** High
-**Location:** `src/approval_gate.py` vs `src/cli.py`
+**Location:** `src/cli.py` in `cmd_feedback_capture` (line ~4027)
 
-The CLI command `orchestrator approval summary` fetches data from the SQLite database (`ApprovalQueue`), but the `ApprovalGate` only logs auto-approvals **in-memory** within the agent's process.
+The code attempts to extract learning notes from `document_learnings` events by accessing `notes` at the top level of the event object. However, `src/engine.py` logs item completion notes inside the `details` dictionary.
 
-**Current Flow:**
-1. Agent calls `gate.request_approval(...)`.
-2. `ApprovalGate` determines `_should_auto_approve` is True.
-3. It logs to `self._decision_log` (local list).
-4. It returns `WaitResult.AUTO_APPROVED`.
-5. **The request is never submitted to the DB.**
-
-**Result:**
-The `orchestrator approval summary` command will **never** show auto-approved operations from agents, rendering the "transparency" feature non-functional across processes.
-
-**Fix Recommendation:**
-Modify `ApprovalGate.request_approval` to submit the request to the queue and immediately mark it as `auto_approved`.
-
+**Current Code:**
 ```python
-# src/approval_gate.py
-
-if self._should_auto_approve(risk_level, phase):
-    rationale = self._generate_rationale(...)
-    
-    # FIX: Persist to DB so CLI can see it
-    request = ApprovalRequest.create(
-        self.agent_id, phase, operation, risk_level, context
-    )
-    request_id = self.queue.submit(request)
-    self.queue.mark_auto_approved(request_id, rationale)
-    
-    # ... existing logging ...
-    return WaitResult.AUTO_APPROVED
+if event.get('item_id') == 'document_learnings' and event_type == 'item_completed':
+    notes = event.get('notes', '')  # BUG: 'notes' is not a top-level field
+    if notes:
+        learnings_notes.append(notes)
 ```
+
+**Expected Structure (from `src/engine.py`):**
+```python
+self.log_event(WorkflowEvent(
+    ...,
+    details={"notes": notes, ...}
+))
+```
+
+**Fix:**
+Change the extraction logic to look in `details`:
+```python
+notes = event.get('details', {}).get('notes', '')
+```
+Without this fix, the "Learnings" section in the feedback review will always be empty for auto-captured workflows.
+
+### 2. Missing Unit Tests
+**Severity:** High
+**Location:** `tests/`
+
+The feature adds significant logic to `src/cli.py` (parsing logs, calculating statistics, heuristic suggestions), but **no new unit tests** were added. The diff shows changes to `tests/test_cases.md` (manual tests), but automated regression testing is missing.
+
+**Recommendation:**
+Add `tests/test_cli_feedback.py` to verify:
+- Log parsing logic (especially the bug above).
+- Statistics calculation (e.g., handling empty logs).
+- Interactive mode inputs.
 
 ## ⚠️ Concerns & Observations
 
-### 2. Test Coverage Gap
-**Severity:** Medium
-**Location:** `tests/test_approval_gate.py`
-
-The tests pass because they isolate components:
-- `TestApprovalGateDecisionLogging` checks the **in-memory** log.
-- `TestApprovalQueueDecisionSummary` checks the **database** summary (by manually seeding data).
-- There is no integration test verifying that an `ApprovalGate.request_approval` call actually results in a visible record in `ApprovalQueue.decision_summary`.
-
-### 3. Unused Code (Planned)
+### 3. Date Handling
 **Severity:** Low
-**Location:** `src/prd/tmux_adapter.py`
+**Location:** `src/cli.py`
 
-The function `generate_approval_gate_instructions` is implemented but not called.
-*Context:* This is acknowledged in `ROADMAP.md` as part of PRD-006, but currently it's dead code.
+The code uses `datetime.utcnow()` in several places, which is deprecated in newer Python versions and can lead to timezone confusion (naive vs aware).
+- **Issue:** `datetime.utcnow().isoformat() + 'Z'` is a manual way to construct ISO strings.
+- **Recommendation:** Use `datetime.now(timezone.utc)` for consistent, timezone-aware objects.
 
-### 4. `mark_auto_approved` Logic
+### 4. Hardcoded Heuristics
 **Severity:** Low
-**Location:** `src/approval_queue.py`
+**Location:** `src/cli.py` (`cmd_feedback_review`)
 
-The SQL query updates a record `WHERE status = 'pending'`. If you implement the fix above, ensure the record is in the 'pending' state when `mark_auto_approved` is called, or allow updating from the initial state.
+The pattern detection uses hardcoded thresholds (e.g., `< 30%` parallel usage, `< 50%` reviews).
+- **Observation:** This is acceptable for a "Phase 3a" prototype but might be too noisy for some teams.
+- **Suggestion:** Consider moving these thresholds to constants or configuration in the future.
 
-## 💡 Suggestions
-
-1.  **Refactor `submit()`:** Consider allowing `ApprovalQueue.submit(request, initial_status='pending')` to avoid two DB round-trips (insert pending -> update to auto_approved).
-2.  **CLI Watch formatting:** The `watch` command output is good, but consider adding a timestamp to the "NEW APPROVAL REQUEST" header.
+## 💡 Questions
+1.  **Log File Consistency:** The auto-capture relies entirely on `.workflow_log.jsonl`. If a user runs `orchestrator clean` or deletes logs, this data is lost. Is this ephemeral nature intentional for Phase 3a?
+2.  **Privacy:** The tool captures the git remote URL (`repo`). While stored locally in `.workflow_feedback.jsonl`, users should be aware if this file is ever intended to be shared or synced in Phase 3b.
 
 ## Conclusion
-The feature is **incomplete** due to the persistence issue. The transparency logging will not work as described in the PR/docs until auto-approvals are written to the SQLite database.
+The implementation is solid for a "Phase 3a" MVP, providing immediate value for self-reflection. However, the **learning capture bug** needs to be fixed before merging, as it renders a key part of the "auto-capture" feature non-functional. Unit tests are strongly recommended to prevent future regressions in the log parsing logic.
