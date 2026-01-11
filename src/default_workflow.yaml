@@ -467,8 +467,11 @@ phases:
         description: "AUTOMATIC: Capture structured feedback about workflow adherence and experience. This runs automatically and is opt-out (set ORCHESTRATOR_SKIP_FEEDBACK=1 to disable). Saves to .workflow_feedback.jsonl for aggregation across repos."
         step_type: "flexible"
         skip_conditions: ["feedback_disabled_by_env_var"]
+        verification:
+          type: "command"
+          command: "orchestrator feedback capture --auto"
         notes:
-          - "[auto] This runs AUTOMATICALLY using 'orchestrator feedback --auto' - no user prompt needed"
+          - "[auto] This runs AUTOMATICALLY using 'orchestrator feedback capture --auto' - no user prompt needed"
           - "[questions] Captures: parallel agents used? reviews performed? what went well? challenges? improvements?"
           - "[storage] Saves to .workflow_feedback.jsonl (gitignored, safe for aggregation)"
           - "[opt-out] To disable: export ORCHESTRATOR_SKIP_FEEDBACK=1"

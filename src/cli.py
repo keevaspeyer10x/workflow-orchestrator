@@ -3982,8 +3982,9 @@ def cmd_feedback_capture(args):
                             if 'parallel' in str(event).lower():
                                 feedback['parallel_agents_used'] = True
 
-                            # Check for reviews
-                            if event_type == 'review_completed' or 'review' in event.get('item_id', ''):
+                            # Check for reviews (handle None item_id)
+                            item_id = event.get('item_id') or ''
+                            if event_type == 'review_completed' or 'review' in item_id:
                                 feedback['reviews_performed'] = True
 
                             # Extract learnings from document_learnings item
