@@ -1,0 +1,1 @@
+Error: 400 - {"error":{"message":"anthropic/claude-opus is not a valid model ID","code":400},"user_id":"user_37ruAunD1xutVD5sZXOAyV22H5x"}
