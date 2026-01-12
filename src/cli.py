@@ -71,6 +71,11 @@ from src.resolution.llm_resolver import (
     LLMResolutionResult,
     ConfidenceLevel,
 )
+from src.adherence_validator import (
+    AdherenceValidator,
+    format_adherence_report,
+    find_session_log_for_workflow,
+)
 
 VERSION = "2.0.0"
 
@@ -2331,6 +2336,66 @@ def cmd_review_results(args):
             if result.get('summary'):
                 print(f"  Summary: {result['summary'][:100]}...")
         print()
+
+
+def cmd_validate_adherence(args):
+    """Validate workflow adherence (WF-034 Phase 2)."""
+    engine = get_engine(args)
+
+    # Determine workflow ID
+    if hasattr(args, 'workflow') and args.workflow:
+        workflow_id = args.workflow
+        task = "Unknown task"
+    elif engine.state:
+        workflow_id = engine.state.workflow_id
+        task = engine.state.workflow_def.task or "Unknown task"
+    else:
+        print("Error: No active workflow and no --workflow specified")
+        print("Usage: orchestrator validate-adherence [--workflow WORKFLOW_ID]")
+        sys.exit(1)
+
+    # Find session log
+    session_log_path = find_session_log_for_workflow(workflow_id)
+
+    # Create validator
+    validator = AdherenceValidator(
+        session_log_path=session_log_path,
+        workflow_log_path=Path(".workflow_log.jsonl")
+    )
+
+    # Validate
+    try:
+        report = validator.validate(workflow_id=workflow_id, task=task)
+    except Exception as e:
+        print(f"Error during validation: {e}")
+        sys.exit(1)
+
+    # Output
+    if hasattr(args, 'json') and args.json:
+        # JSON output
+        output = {
+            "workflow_id": report.workflow_id,
+            "task": report.task,
+            "timestamp": report.timestamp.isoformat(),
+            "score": report.score,
+            "checks": {
+                name: {
+                    "passed": check.passed,
+                    "confidence": check.confidence,
+                    "explanation": check.explanation,
+                    "evidence": check.evidence,
+                    "recommendations": check.recommendations
+                }
+                for name, check in report.checks.items()
+            },
+            "critical_issues": report.critical_issues,
+            "warnings": report.warnings,
+            "recommendations": report.recommendations
+        }
+        print(json.dumps(output, indent=2))
+    else:
+        # Formatted text output
+        print(format_adherence_report(report))
 
 
 HOOK_CONTENT = '''#!/bin/bash
@@ -5125,6 +5190,13 @@ Examples:
     setup_reviews_parser.add_argument('--skip-actions', action='store_true', help='Skip GitHub Actions workflow creation')
     setup_reviews_parser.add_argument('--force', '-f', action='store_true', help='Overwrite existing files')
     setup_reviews_parser.set_defaults(func=cmd_setup_reviews)
+
+    # Validate-adherence command (WF-034 Phase 2)
+    validate_adherence_parser = subparsers.add_parser('validate-adherence',
+        help='Validate workflow adherence (parallel execution, reviews, verification, etc.)')
+    validate_adherence_parser.add_argument('--workflow', '-w', help='Workflow ID (default: current workflow)')
+    validate_adherence_parser.add_argument('--json', action='store_true', help='Output as JSON')
+    validate_adherence_parser.set_defaults(func=cmd_validate_adherence)
 
     # Setup command (auto-updates)
     setup_parser = subparsers.add_parser('setup', help='Enable automatic updates for this repo')
