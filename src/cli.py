@@ -2745,6 +2745,7 @@ def cmd_secrets(args):
 def cmd_sessions(args):
     """Manage session transcripts (CORE-024)."""
     from src.transcript_logger import TranscriptLogger, get_transcript_logger
+    from src.session_logger import SessionAnalyzer, format_analysis_report
 
     working_dir = Path(args.dir or '.')
     action = args.action
@@ -2789,6 +2790,35 @@ def cmd_sessions(args):
             print(f"Removed {removed} session(s) older than {days} days")
         else:
             print(f"No sessions older than {days} days")
+
+
+    elif action == "analyze":
+        # Analyze session patterns and statistics
+        days = getattr(args, 'days', None) or 30
+        last_n = getattr(args, 'last', None)
+
+        # Use SessionAnalyzer for enhanced session logs (.orchestrator/sessions/)
+        # Fall back to basic stats from TranscriptLogger if no enhanced logs
+        sessions_dir = working_dir / ".orchestrator" / "sessions"
+
+        if sessions_dir.exists():
+            analyzer = SessionAnalyzer(sessions_dir)
+            report = analyzer.analyze(last_n_days=days, last_n_sessions=last_n)
+            print(format_analysis_report(report))
+        else:
+            # Fallback: show basic stats from TranscriptLogger
+            sessions = logger.list_sessions(limit=last_n)
+            print(f"
+Session Statistics (last {days} days)")
+            print("=" * 60)
+            print(f"Total Sessions: {len(sessions)}")
+            if sessions:
+                total_size = sum(s['size_bytes'] for s in sessions) / 1024
+                print(f"Total Size: {total_size:.1f} KB")
+            print("
+Note: Enhanced session logging not enabled.")
+            print("Enable by integrating SessionLogger in your workflow.")
+            print("=" * 60)
 
     else:
         print(f"Unknown action: {action}")
@@ -5147,10 +5177,12 @@ Examples:
 
     # Sessions command (CORE-024)
     sessions_parser = subparsers.add_parser('sessions', help='Manage session transcripts')
-    sessions_parser.add_argument('action', choices=['list', 'show', 'clean'], help='Sessions action')
+    sessions_parser.add_argument('action', choices=['list', 'show', 'clean', 'analyze'], help='Sessions action')
     sessions_parser.add_argument('session_id', nargs='?', help='Session ID (for show)')
     sessions_parser.add_argument('--limit', type=int, default=20, help='Max sessions to list (default: 20)')
     sessions_parser.add_argument('--older', type=int, default=30, help='Remove sessions older than N days (default: 30)')
+    sessions_parser.add_argument('--days', type=int, default=30, help='Analyze sessions from last N days (default: 30)')
+    sessions_parser.add_argument('--last', type=int, help='Analyze last N sessions')
     sessions_parser.add_argument('-d', '--dir', help='Working directory')
     sessions_parser.set_defaults(func=cmd_sessions)
 
