@@ -1,332 +1,573 @@
-# Phase 3b Implementation Plan: Two-Tier Feedback System
+# Implementation Plan: CORE-024 & WF-034
 
 ## Overview
-Split Phase 3a's single-file feedback system into a two-tier architecture with anonymization and sync capabilities.
 
-## Design Decisions (Approved)
-- **Migration**: Auto-split on first run (seamless upgrade)
-- **Sync Target**: GitHub Gist (simple, free, version-controlled)
-- **Hash Algorithm**: SHA256 (secure, irreversible)
-- **Sync Default**: Opt-in enabled (developer is solo user)
+Implementing two high-priority roadmap items:
+- **CORE-024**: Session Transcript Logging with Secret Scrubbing
+- **WF-034**: Post-Workflow Self-Assessment & Adherence Validation
 
-## Architecture
+**Execution Strategy:** Parallel (2 agents) + Sequential (Phase 2)
 
-### File Structure
+**Parallel Execution Decision:**
+- **Agent 1:** CORE-024 (full implementation) - 4-6 hours
+- **Agent 2:** WF-034 Phase 0+1+3+4 (excluding validation) - 3-4 hours
+- **Sequential:** WF-034 Phase 2 (validation) after CORE-024 complete - 2-3 hours
+- **Time Savings:** 30-40% reduction (4-5 hours saved vs sequential)
+
+**Rationale:**
+- CORE-024 and WF-034 Phase 0+1+3+4 are independent (separate code paths, no shared files)
+- Session log format specified in this plan (both agents work from same spec)
+- Only WF-034 Phase 2 depends on CORE-024 (needs session transcripts for validation)
+- Low coordination overhead, high time savings
+- Minimal conflict risk (Phase 0+1 touch workflow.yaml only, Phase 3+4 are new files)
+
+---
+
+## CORE-024: Session Transcript Logging
+
+### Goal
+Automatically log all orchestrator session transcripts with secret scrubbing to enable debugging and pattern analysis.
+
+### User Decisions
+- **Scope:** Full implementation (basic logging + analysis commands)
+- **Storage:** `.orchestrator/sessions/` directory
+- **Secret Scrubbing:** Hybrid approach (pattern-based + secrets manager integration)
+
+### Architecture
+
 ```
-.workflow_feedback.jsonl              # Phase 3a (legacy, migrated automatically)
-.workflow_tool_feedback.jsonl         # Phase 3b - anonymized, shareable
-.workflow_process_feedback.jsonl      # Phase 3b - private, local-only
+src/
+  session_logger.py          # New: Core logging & scrubbing logic
+  secrets.py                 # Existing: Extend for scrubbing integration
+  cli.py                     # Extend: Add session commands
+
+.orchestrator/
+  sessions/                  # New: Session transcript storage
+    2026-01-12_14-32-15_core-024-wf-034.log
+    2026-01-12_16-45-22_bugfix.log
 ```
 
-### Data Flow
-```
-Workflow Complete
-    ↓
-capture_feedback()
-    ↓
-├─→ extract_tool_data()    → anonymize() → .workflow_tool_feedback.jsonl
-└─→ extract_process_data()             → .workflow_process_feedback.jsonl
-    ↓
-review (--tool / --process / both)
-    ↓
-sync (tool feedback only)
-    ↓
-GitHub Gist (central aggregation)
-```
+### Components
 
-## Implementation Tasks
+#### 1. Session Logger (`src/session_logger.py`)
+**Responsibilities:**
+- Capture session transcripts (commands, outputs, errors)
+- Apply secret scrubbing before writing to disk
+- Provide session metadata (start time, end time, duration, workflow ID)
+- Support session naming from task description
 
-### Task 1: Add Migration Logic
-**File**: `src/cli.py`
-**Function**: `migrate_legacy_feedback(working_dir)`
-
-**Logic**:
-1. Check if `.workflow_feedback.jsonl` exists and new files don't
-2. Read legacy entries
-3. For each entry, split into:
-   - Tool feedback: Hash workflow_id, strip repo/task, detect repo_type
-   - Process feedback: Keep all original data
-4. Write to new files: `.workflow_tool_feedback.jsonl` + `.workflow_process_feedback.jsonl`
-5. Rename legacy file to `.workflow_feedback.jsonl.migrated` (backup)
-6. Print migration summary
-
-**Call site**: Beginning of `cmd_feedback_capture()` and `cmd_feedback_review()`
-
-### Task 2: Refactor `cmd_feedback_capture()`
-**File**: `src/cli.py:3863-4044`
-
-**Changes**:
-1. Run migration check at start
-2. Split feedback extraction into two functions:
-   - `extract_tool_feedback()` - Phase timings, items skipped, orchestrator errors, reviews status
-   - `extract_process_feedback()` - Task, repo, learnings, challenges, project errors
-3. Add `anonymize_tool_feedback()` helper:
-   - Hash workflow_id with SHA256
-   - Strip repo URL (but detect repo_type: python/javascript/go/rust)
-   - Remove task description
-   - Keep: timestamp, version, repo_type, phases, duration, tool metrics
-4. Save to two files instead of one
-
-**Signature**:
+**Key Classes:**
 ```python
-def extract_tool_feedback(state, log_events) -> dict
-def extract_process_feedback(state, log_events) -> dict
-def anonymize_tool_feedback(tool_data) -> dict
-def detect_repo_type(working_dir) -> str  # python/js/go/rust
+class SessionLogger:
+    """Manages session transcript logging with automatic secret scrubbing."""
+
+    def __init__(self, session_dir: Path, secrets_manager: SecretsManager)
+    def start_session(self, task_description: str) -> SessionContext
+    def log_event(self, event_type: str, data: dict)
+    def end_session(self, status: str)
+
+class SessionContext:
+    """Tracks current session state."""
+    session_id: str
+    task_description: str
+    start_time: datetime
+    log_file: Path
 ```
 
-### Task 3: Refactor `cmd_feedback_review()`
-**File**: `src/cli.py:4046-4254`
+**Secret Scrubbing Strategy:**
+1. **Pattern-based** (regex for common patterns):
+   - API keys: `[A-Za-z0-9_-]{32,}`
+   - Tokens: `Bearer [A-Za-z0-9._-]+`
+   - URLs with credentials: `https://user:pass@...`
+   - Common env var patterns: `API_KEY=...`, `TOKEN=...`, `SECRET=...`
 
-**Changes**:
-1. Run migration check at start
-2. Add `--tool` and `--process` flags (default: both)
-3. Update file loading logic:
-   - `--tool`: Load `.workflow_tool_feedback.jsonl`
-   - `--process`: Load `.workflow_process_feedback.jsonl`
-   - Default: Load both files
-4. Adjust pattern detection for tool vs process feedback:
-   - Tool patterns: Items skipped, orchestrator errors, phase timings, review success
-   - Process patterns: Project errors, learnings, challenges
-5. Update output format to show "Tool Feedback" vs "Process Feedback" sections
+2. **SecretsManager integration**:
+   - Query known secrets from secrets sources
+   - Scrub exact matches
+   - Redact format: `[REDACTED:SECRET_NAME]`
 
-### Task 4: Implement `cmd_feedback_sync()`
-**File**: `src/cli.py` (new function)
+3. **Safe by default**:
+   - Scrub before writing (never write secrets to disk)
+   - Log scrubbing stats (X secrets redacted)
 
-**Signature**:
+#### 2. Session Commands (extend `src/cli.py`)
+
+**New commands:**
+```bash
+# List all sessions
+orchestrator sessions list [--last N] [--workflow WORKFLOW_ID]
+
+# View a session transcript
+orchestrator sessions view <session_id>
+
+# Analyze session patterns (FULL IMPLEMENTATION)
+orchestrator sessions analyze [--last N] [--days DAYS]
+  - Workflow completion rate
+  - Most common failure points
+  - Average session duration
+  - Error frequency by type
+  - Phase completion statistics
+```
+
+**Session Analysis Output:**
+```
+Session Analysis (Last 30 days)
+================================
+Total Sessions: 45
+Workflow Completion Rate: 67% (30/45)
+
+Most Common Failure Point: REVIEW phase (18 failures)
+  - Context compaction: 12 sessions
+  - Review API errors: 4 sessions
+  - Manual abandonment: 2 sessions
+
+Average Session Duration: 45 minutes
+  - PLAN: 8 min
+  - EXECUTE: 22 min
+  - REVIEW: 10 min
+  - VERIFY: 3 min
+  - LEARN: 2 min
+
+Top Errors:
+  1. Review API timeout (15 occurrences)
+  2. Git conflict resolution failed (8 occurrences)
+  3. Test execution timeout (5 occurrences)
+```
+
+#### 3. Integration Points
+
+**Engine Integration (`src/engine.py`):**
+- Initialize SessionLogger on workflow start
+- Log workflow events (phase transitions, item completions, errors)
+- End session on workflow finish/abandon
+
+**CLI Integration:**
+- Capture all command invocations
+- Log command outputs
+- Track user interactions
+
+### Implementation Steps
+
+1. **Create SessionLogger** (`src/session_logger.py`)
+   - Implement SessionLogger class
+   - Implement secret scrubbing (pattern-based + SecretsManager)
+   - Add session metadata tracking
+   - Write comprehensive unit tests
+
+2. **Extend SecretsManager** (`src/secrets.py`)
+   - Add `get_all_secret_values()` method for scrubbing
+   - Add secret name resolution (value → name mapping)
+
+3. **Add Session Commands** (`src/cli.py`)
+   - `sessions list` - List all sessions with metadata
+   - `sessions view` - Display a session transcript
+   - `sessions analyze` - Analyze session patterns and statistics
+   - Add command parsers and help text
+
+4. **Integrate with WorkflowEngine** (`src/engine.py`)
+   - Initialize SessionLogger on workflow start
+   - Log workflow events (phase changes, completions, errors)
+   - End session on finish/abandon
+
+5. **Add Session Analysis** (`src/session_logger.py`)
+   ```python
+   class SessionAnalyzer:
+       """Analyzes session patterns and generates statistics."""
+
+       def analyze_sessions(sessions: List[SessionContext]) -> AnalysisReport
+       def completion_rate(sessions) -> float
+       def failure_points(sessions) -> Dict[str, int]
+       def duration_stats(sessions) -> DurationStats
+       def error_frequency(sessions) -> List[Tuple[str, int]]
+   ```
+
+6. **Update .gitignore**
+   - Add `.orchestrator/sessions/` to gitignore
+   - Update CLAUDE.md with session logging documentation
+
+### Testing Strategy
+
+**Unit Tests:**
+- Secret scrubbing accuracy (pattern-based and SecretsManager-based)
+- Session file creation and naming
+- Metadata tracking
+- Command parsing
+
+**Integration Tests:**
+- Full workflow run with session logging enabled
+- Session analysis on sample data
+- Multi-session tracking
+
+**Manual Tests:**
+- Verify no secrets in session logs
+- Check session analysis output accuracy
+- Validate session listing and viewing
+
+---
+
+## WF-034: Post-Workflow Self-Assessment
+
+### Goal
+Ensure AI agents follow orchestrator workflow recommendations through planning guidance, self-assessment checklists, and automated validation.
+
+### User Decisions
+- **Scope:** All 4 phases (full implementation)
+- **Automation:** Include automated adherence validation
+
+### Architecture
+
+```
+workflow.yaml               # Extend: Add Phase 0 + Phase 1 items
+src/
+  adherence_validator.py    # New: Phase 2 automated validation
+  feedback_capture.py       # New: Phase 3 feedback system
+cli.py                      # Extend: Add validation commands
+```
+
+### Phases
+
+#### Phase 0: Pre-Execution Planning Guidance
+**Implementation:** Extend `workflow.yaml` PLAN phase
+
+Add new required item:
+```yaml
+- id: "parallel_execution_check"
+  name: "Assess Parallel Execution Opportunity"
+  description: "Before starting implementation, determine if tasks can be parallelized"
+  required: true
+  notes:
+    - "[critical] Are there 2+ independent tasks? Consider parallel agents"
+    - "[howto] Launch parallel agents: Send ONE message with MULTIPLE Task tool calls"
+    - "[example] Task(description='Fix auth', ...) + Task(description='Fix API', ...) in SAME message"
+    - "[plan] Use Plan agent FIRST if implementation approach unclear"
+    - "[verify] Will you verify agent output by reading files, not trusting summaries?"
+    - "[decision] Document: Will use [sequential/parallel] execution because [reason]"
+```
+
+**Result:** Agents see explicit guidance BEFORE implementation, preventing sequential execution mistakes.
+
+#### Phase 1: Self-Assessment Checklist
+**Implementation:** Extend `workflow.yaml` LEARN phase
+
+Add new required item:
+```yaml
+- id: "workflow_adherence_check"
+  name: "Workflow Adherence Self-Assessment"
+  description: "Validate that orchestrator workflow was followed correctly"
+  required: true
+  notes:
+    - "[check] Did you use parallel agents when PRD/plan recommended it?"
+    - "[check] If parallel: Did you launch them in SINGLE message with MULTIPLE Task calls?"
+    - "[check] Did you use Plan agent before complex implementations?"
+    - "[check] Did you verify agent output by reading files (not trusting summaries)?"
+    - "[check] Did you run all 5 third-party model reviews (/review or /minds)?"
+    - "[check] Did you use 'orchestrator status' before each action?"
+    - "[check] Did you complete all required items (no skips without justification)?"
+    - "[check] Did you document learnings and propose roadmap items?"
+    - "[feedback] What went well? What challenges? What could improve?"
+```
+
+**Result:** Agents explicitly validate adherence at end of workflow.
+
+#### Phase 2: Automated Validation
+**Implementation:** New module `src/adherence_validator.py`
+
+**Command:**
+```bash
+orchestrator validate-adherence [--workflow WORKFLOW_ID]
+```
+
+**Validation Checks:**
+1. **Plan agent usage** - Detect Task calls with `subagent_type="Plan"` before implementation phases
+2. **Parallel execution** - Detect multiple Task calls in SINGLE message (good) vs sequential messages (bad)
+3. **Third-party reviews** - Check for review_completed events with external models (not DEFERRED)
+4. **Agent verification** - Count Read tool calls immediately after Task completions
+5. **Status checks** - Count `orchestrator status` calls frequency
+6. **Required items** - Validate no required items skipped without reason
+7. **Learnings detail** - Check length/detail of `document_learnings` notes
+
+**Key Classes:**
 ```python
-def cmd_feedback_sync(args):
-    """Upload anonymized tool feedback to GitHub Gist."""
+class AdherenceValidator:
+    """Validates workflow adherence using session transcripts."""
+
+    def __init__(self, session_logger: SessionLogger, workflow_log: Path)
+    def validate(self, workflow_id: str) -> AdherenceReport
+    def check_plan_agent_usage() -> bool
+    def check_parallel_execution() -> ParallelExecutionResult
+    def check_reviews() -> ReviewAdherenceResult
+    def check_agent_verification() -> VerificationResult
+    def check_status_frequency() -> StatusCheckResult
+    def check_required_items() -> RequiredItemsResult
+    def check_learnings_detail() -> LearningsResult
+
+class AdherenceReport:
+    """Report of adherence validation results."""
+    workflow_id: str
+    score: float  # 0.0-1.0
+    checks: Dict[str, CheckResult]
+    critical_issues: List[str]
+    warnings: List[str]
+    recommendations: List[str]
 ```
 
-**Logic**:
-1. Check opt-in status: `orchestrator config get feedback_sync` (default: true)
-2. Load `.workflow_tool_feedback.jsonl`
-3. Filter: Only entries without `synced_at` field
-4. Verify anonymization (double-check no repo/task/code)
-5. Create/update GitHub Gist:
-   - Gist name: `workflow-orchestrator-feedback-<username>`
-   - File: `tool_feedback.jsonl`
-   - Append new entries to existing content
-6. Mark entries as synced: Add `synced_at` timestamp to local file
-7. Print sync summary
+**Output Format:**
+```
+Workflow Adherence Validation
+==============================
+Workflow: wf_95ec1970
+Task: Implement PRD-007 parallel agents
 
-**Flags**:
-- `--dry-run`: Show what would be uploaded without uploading
-- `--force`: Re-sync all entries (remove synced_at timestamps)
-- `--status`: Show sync statistics
+✓ Plan agent: Used before implementation
+✗ Parallel execution: FAIL - Agents launched sequentially (3 separate messages)
+✗ Third-party reviews: MISSING - No external model reviews detected
+✓ Agent verification: Files read after agent completion (5 verifications)
+✓ Status checks: Frequent (23 status checks during workflow)
+✓ Required items: All completed (0 unjustified skips)
+⚠ Learnings: Brief (3 learnings documented, consider more detail)
 
-**GitHub API**:
-```python
-import os
-import requests
+ADHERENCE SCORE: 57% (4/7 criteria met)
+CRITICAL ISSUES: 2 (parallel execution, reviews)
 
-GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')  # User must set
-GIST_API = 'https://api.github.com/gists'
-
-# Create gist
-response = requests.post(GIST_API, headers={'Authorization': f'token {GITHUB_TOKEN}'},
-                        json={'files': {'tool_feedback.jsonl': {'content': data}},
-                              'description': 'workflow-orchestrator tool feedback',
-                              'public': False})
+Recommendations:
+1. Launch parallel agents in SINGLE message with MULTIPLE Task calls
+2. Run third-party model reviews for code quality validation
+3. Add more detailed learnings in LEARN phase
 ```
 
-### Task 5: Add CLI Argument Parsers
-**File**: `src/cli.py` (main() function)
+#### Phase 3: Feedback Capture Template
+**Implementation:** New module `src/feedback_capture.py`
 
-**New subcommands**:
-```python
-# Existing: orchestrator feedback (capture)
-feedback_parser = subparsers.add_parser('feedback', ...)
-feedback_parser.add_argument('--interactive', action='store_true')
-# No changes needed to capture command
-
-# Update: orchestrator feedback review
-review_parser.add_subparser('review', ...)
-review_parser.add_argument('--tool', action='store_true', help='Review tool feedback only')
-review_parser.add_argument('--process', action='store_true', help='Review process feedback only')
-review_parser.add_argument('--days', type=int, default=7)
-review_parser.add_argument('--all', action='store_true')
-review_parser.add_argument('--suggest', action='store_true')
-
-# New: orchestrator feedback sync
-sync_parser = subparsers.add_parser('sync', ...)
-sync_parser.add_argument('--dry-run', action='store_true')
-sync_parser.add_argument('--force', action='store_true')
-sync_parser.add_argument('--status', action='store_true')
+**Command:**
+```bash
+orchestrator feedback [--workflow WORKFLOW_ID] [--interactive]
 ```
 
-### Task 6: Helper Functions
+**Structured Feedback Questions:**
+1. Did you use multi-agents? (yes/no/not-recommended)
+2. What went well? (1-2 sentences)
+3. What challenges did you encounter? (1-2 sentences)
+4. What could be improved? (1-2 sentences)
+5. Did you run third-party model reviews? (yes/no/deferred)
+6. Additional notes
 
-**Anonymization**:
-```python
-def anonymize_tool_feedback(feedback: dict) -> dict:
-    """Remove PII from tool feedback."""
-    import hashlib
+**Output:** Append to `.workflow_feedback.jsonl` (structured for analysis)
 
-    # Hash workflow_id
-    if 'workflow_id' in feedback:
-        hashed = hashlib.sha256(feedback['workflow_id'].encode()).hexdigest()
-        feedback['workflow_id_hash'] = hashed
-        del feedback['workflow_id']
-
-    # Remove repo URL (keep type only)
-    if 'repo' in feedback:
-        del feedback['repo']
-
-    # Remove task description
-    if 'task' in feedback:
-        del feedback['task']
-
-    return feedback
+**Feedback Schema:**
+```json
+{
+  "workflow_id": "wf_95ec1970",
+  "task": "Implement PRD-007",
+  "timestamp": "2026-01-12T14:30:00Z",
+  "multi_agents_used": true,
+  "what_went_well": "Parallel execution reduced time by 60%",
+  "challenges": "Coordination overhead between agents",
+  "improvements": "Better task decomposition in PLAN phase",
+  "reviews_performed": true,
+  "notes": "First time using multi-agents successfully"
+}
 ```
 
-**Repo Type Detection**:
-```python
-def detect_repo_type(working_dir: Path) -> str:
-    """Detect repository language type."""
-    if (working_dir / 'setup.py').exists() or (working_dir / 'pyproject.toml').exists():
-        return 'python'
-    elif (working_dir / 'package.json').exists():
-        return 'javascript'
-    elif (working_dir / 'go.mod').exists():
-        return 'go'
-    elif (working_dir / 'Cargo.toml').exists():
-        return 'rust'
-    return 'unknown'
+**Integration with Analysis:**
+- Session analyzer can correlate feedback with adherence scores
+- Pattern detection: workflows with high adherence → better feedback
+- Roadmap suggestions from common improvement themes
+
+#### Phase 4: Workflow Enforcement for Orchestrator Itself
+**Implementation:** New workflow template `orchestrator-meta.yaml`
+
+**Concept:** Dogfooding - Orchestrator enforces its own usage
+
+**Structure:**
+```yaml
+name: "Orchestrator Meta-Workflow"
+description: "Enforce orchestrator best practices when using orchestrator"
+
+phases:
+  - id: "PLAN"
+    items:
+      - id: "check_parallel_opportunity"
+        name: "Assess if tasks can be parallelized"
+        required: true
+        validation:
+          enforce: true  # Block advancement if not completed
+
+  - id: "REVIEW"
+    items:
+      - id: "third_party_reviews"
+        name: "Run multi-model code reviews"
+        required: true
+        validation:
+          enforce: true
+
+  - id: "VERIFY"
+    items:
+      - id: "validate_adherence"
+        name: "Run adherence validation"
+        required: true
+        command: "orchestrator validate-adherence"
 ```
 
-**Migration**:
-```python
-def migrate_legacy_feedback(working_dir: Path) -> bool:
-    """Migrate Phase 3a feedback to Phase 3b two-tier system."""
-    legacy_file = working_dir / '.workflow_feedback.jsonl'
-    tool_file = working_dir / '.workflow_tool_feedback.jsonl'
-    process_file = working_dir / '.workflow_process_feedback.jsonl'
-
-    # Skip if already migrated
-    if not legacy_file.exists() or (tool_file.exists() and process_file.exists()):
-        return False
-
-    print("Migrating feedback to two-tier system...")
-
-    # Read legacy entries
-    with open(legacy_file) as f:
-        entries = [json.loads(line) for line in f]
-
-    # Split and save
-    for entry in entries:
-        tool_data = extract_tool_feedback_from_entry(entry)
-        process_data = extract_process_feedback_from_entry(entry)
-
-        with open(tool_file, 'a') as f:
-            f.write(json.dumps(anonymize_tool_feedback(tool_data)) + '\n')
-
-        with open(process_file, 'a') as f:
-            f.write(json.dumps(process_data) + '\n')
-
-    # Backup legacy file
-    legacy_file.rename(working_dir / '.workflow_feedback.jsonl.migrated')
-
-    print(f"✓ Migrated {len(entries)} entries to two-tier system")
-    return True
+**Usage:**
+```bash
+# Use meta-workflow for orchestrator development
+orchestrator start "Implement CORE-024" --workflow orchestrator-meta.yaml
 ```
 
-### Task 7: Update Documentation
-**File**: `CLAUDE.md`
+**Result:** When working on orchestrator itself, the tool enforces its own best practices.
 
-Add section:
-```markdown
-## Feedback System (Two-Tier)
+### Implementation Steps
 
-The orchestrator collects two types of feedback:
+1. **Phase 0: Update workflow.yaml**
+   - Add `parallel_execution_check` item to PLAN phase
+   - Update bundled `src/default_workflow.yaml`
+   - Document in CLAUDE.md
 
-1. **Tool Feedback** (`.workflow_tool_feedback.jsonl`) - About orchestrator itself
-   - Anonymized (workflow_id hashed, no repo/task names)
-   - Optionally synced to maintainer
-   - Helps improve orchestrator features
+2. **Phase 1: Update workflow.yaml**
+   - Add `workflow_adherence_check` item to LEARN phase
+   - Update bundled `src/default_workflow.yaml`
 
-2. **Process Feedback** (`.workflow_process_feedback.jsonl`) - About your project
-   - Private, stays local
-   - Contains learnings, challenges, project-specific data
+3. **Phase 2: Implement AdherenceValidator**
+   - Create `src/adherence_validator.py`
+   - Implement validation checks (7 criteria)
+   - Add `validate-adherence` command to CLI
+   - Integrate with session transcripts (depends on CORE-024)
+   - Write comprehensive tests
 
-Commands:
-- `orchestrator feedback` - Capture feedback (automatic in LEARN phase)
-- `orchestrator feedback review` - Analyze patterns
-- `orchestrator feedback review --tool` - Review tool patterns only
-- `orchestrator feedback review --process` - Review process patterns only
-- `orchestrator feedback sync` - Upload anonymized tool feedback
-- `orchestrator feedback sync --dry-run` - Preview what would be uploaded
-- `orchestrator config set feedback_sync false` - Disable sync
-```
+4. **Phase 3: Implement FeedbackCapture**
+   - Create `src/feedback_capture.py`
+   - Add `feedback` command to CLI
+   - Implement interactive prompts
+   - Define feedback schema
+   - Write to `.workflow_feedback.jsonl`
 
-## Testing Strategy
+5. **Phase 4: Create Meta-Workflow**
+   - Create `orchestrator-meta.yaml` template
+   - Add enforcement validation hooks
+   - Document usage in CLAUDE.md
+   - Test dogfooding scenario
 
-### Unit Tests (New)
-**File**: `tests/test_feedback.py` (create)
+6. **Integration**
+   - Link Phase 2 (validation) with LEARN phase
+   - Auto-run `validate-adherence` at workflow completion
+   - Include adherence score in workflow summary
 
-Tests:
-1. `test_anonymize_tool_feedback()` - Verify workflow_id hashed, repo/task removed
-2. `test_detect_repo_type()` - Verify language detection
-3. `test_migrate_legacy_feedback()` - Verify split and backup
-4. `test_extract_tool_feedback()` - Verify tool data extraction
-5. `test_extract_process_feedback()` - Verify process data extraction
-6. `test_verify_no_pii_in_tool_feedback()` - Security test
+### Testing Strategy
 
-### Manual Testing
-1. **Migration**: Run on repo with existing `.workflow_feedback.jsonl`
-2. **Capture**: Run `orchestrator feedback` and verify two files created
-3. **Review**: Test `--tool`, `--process`, and default (both)
-4. **Sync**: Test `--dry-run` shows correct data
-5. **Anonymization**: Manually inspect `.workflow_tool_feedback.jsonl` - no PII
+**Phase 0 & 1 Testing:**
+- Manual verification that new items appear in workflow
+- Test agent responses to planning guidance
 
-### Integration Testing
-1. Complete a full workflow → feedback capture → review → sync
-2. Verify legacy migration happens only once
-3. Verify process feedback never uploaded in sync
+**Phase 2 Testing:**
+- Unit tests for each validation check
+- Integration test with mock session transcripts
+- Test adherence score calculation
+- Test output formatting
 
-## File Changes Summary
+**Phase 3 Testing:**
+- Unit tests for feedback capture
+- Integration test for JSONL writing
+- Test interactive prompts
+- Validate feedback schema
 
-**Modified**:
-- `src/cli.py` - Refactor capture/review, add sync command
+**Phase 4 Testing:**
+- Full dogfooding test (use orchestrator-meta.yaml for a real task)
+- Validate enforcement blocks advancement
+- Test meta-workflow completion
 
-**Created**:
-- `docs/plans/phase3b_implementation_plan.md` - This file
-- `tests/test_feedback.py` - Unit tests
+---
 
-**Auto-generated** (by migration):
-- `.workflow_feedback.jsonl.migrated` - Backup of legacy file
+## Integration Between CORE-024 and WF-034
+
+**Dependencies:**
+- WF-034 Phase 2 (AdherenceValidator) reads session transcripts from CORE-024
+- Validation checks parse session logs for Tool use patterns
+- Feedback capture can reference session metadata
+
+**Shared Data:**
+- Session transcripts contain tool usage patterns
+- Workflow logs contain event sequences
+- Both feed into learning and improvement cycles
+
+**Implementation Order:**
+1. CORE-024 complete → Session transcripts available
+2. WF-034 Phase 0-1 → Immediate value (checklists)
+3. WF-034 Phase 2 → Uses CORE-024 transcripts for validation
+4. WF-034 Phase 3-4 → Full feedback and enforcement system
+
+---
 
 ## Success Criteria
 
-- [ ] Legacy feedback auto-migrates to two-tier system
-- [ ] Tool feedback properly anonymized (no repo/task, workflow_id hashed)
-- [ ] Process feedback contains full project context
-- [ ] `orchestrator feedback review --tool` shows tool patterns
-- [ ] `orchestrator feedback review --process` shows process patterns
-- [ ] `orchestrator feedback sync` uploads to GitHub Gist
-- [ ] `orchestrator feedback sync --dry-run` shows preview
-- [ ] Sync respects opt-in/opt-out config
-- [ ] All tests pass
-- [ ] Documentation updated
+### CORE-024 Success Criteria
+- [ ] Session transcripts logged to `.orchestrator/sessions/`
+- [ ] No secrets appear in session logs (verified by test suite)
+- [ ] `orchestrator sessions list` shows all sessions
+- [ ] `orchestrator sessions view <id>` displays transcript
+- [ ] `orchestrator sessions analyze` generates statistics
+- [ ] Session analysis accurately reports completion rates and failure points
+- [ ] Session logging adds <5% overhead to workflow execution time
 
-## Rollout Plan
+### WF-034 Success Criteria
+- [ ] Phase 0: `parallel_execution_check` item appears in PLAN phase
+- [ ] Phase 1: `workflow_adherence_check` item appears in LEARN phase
+- [ ] Phase 2: `orchestrator validate-adherence` command works
+- [ ] Phase 2: Validation correctly detects parallel execution patterns
+- [ ] Phase 2: Validation correctly detects missing reviews
+- [ ] Phase 3: `orchestrator feedback` captures structured feedback
+- [ ] Phase 4: `orchestrator-meta.yaml` enforces orchestrator best practices
+- [ ] Adherence validation adds <10% overhead to workflow completion time
 
-1. **Phase 3b.1**: Migration + Split (Tasks 1-2)
-2. **Phase 3b.2**: Review Updates (Task 3)
-3. **Phase 3b.3**: Sync Implementation (Task 4)
-4. **Phase 3b.4**: Testing + Documentation (Tasks 6-7)
+### Integration Success Criteria
+- [ ] AdherenceValidator can parse session transcripts from CORE-024
+- [ ] Validation checks accurately detect tool usage patterns
+- [ ] Feedback capture references session metadata
+- [ ] Full workflow: start → log → validate → feedback → improve
 
-## Risks & Mitigations
+---
 
-**Risk 1**: Migration fails on malformed legacy data
-- Mitigation: Wrap in try/except, skip malformed entries, log warnings
+## Timeline Estimate
 
-**Risk 2**: GitHub API rate limits on sync
-- Mitigation: Track sync timestamps, batch uploads, use conditional requests
+**CORE-024:** 4-6 hours
+- SessionLogger implementation: 2 hours
+- Secret scrubbing: 1 hour
+- CLI commands: 1 hour
+- Session analysis: 1 hour
+- Testing: 1 hour
 
-**Risk 3**: Accidental PII leakage in tool feedback
-- Mitigation: Double verification in sync command, --dry-run preview, unit tests
+**WF-034:** 6-8 hours
+- Phase 0+1 (workflow.yaml): 1 hour
+- Phase 2 (AdherenceValidator): 2-3 hours
+- Phase 3 (FeedbackCapture): 1-2 hours
+- Phase 4 (Meta-workflow): 1 hour
+- Testing: 2 hours
 
-**Risk 4**: User has GITHUB_TOKEN not set
-- Mitigation: Clear error message, fallback to manual upload instructions
+**Total:** 10-14 hours
+
+---
+
+## Files to Create/Modify
+
+### New Files
+- `src/session_logger.py` - Session logging and scrubbing
+- `src/adherence_validator.py` - Workflow adherence validation
+- `src/feedback_capture.py` - Structured feedback capture
+- `orchestrator-meta.yaml` - Meta-workflow for dogfooding
+- `tests/test_session_logger.py` - SessionLogger tests
+- `tests/test_adherence_validator.py` - AdherenceValidator tests
+- `tests/test_feedback_capture.py` - FeedbackCapture tests
+
+### Modified Files
+- `src/cli.py` - Add session and validation commands
+- `src/engine.py` - Integrate SessionLogger
+- `src/secrets.py` - Extend for scrubbing support
+- `workflow.yaml` - Add Phase 0+1 items (project-specific, if exists)
+- `src/default_workflow.yaml` - Add Phase 0+1 items (bundled template)
+- `.gitignore` - Add `.orchestrator/sessions/`
+- `CLAUDE.md` - Document new features
+
+---
+
+## Risk Mitigation
+
+See risk_analysis.md for detailed risk assessment and mitigation strategies.

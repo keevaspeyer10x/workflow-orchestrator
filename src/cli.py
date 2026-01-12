@@ -71,6 +71,11 @@ from src.resolution.llm_resolver import (
     LLMResolutionResult,
     ConfidenceLevel,
 )
+from src.adherence_validator import (
+    AdherenceValidator,
+    format_adherence_report,
+    find_session_log_for_workflow,
+)
 
 VERSION = "2.0.0"
 
@@ -2333,6 +2338,66 @@ def cmd_review_results(args):
         print()
 
 
+def cmd_validate_adherence(args):
+    """Validate workflow adherence (WF-034 Phase 2)."""
+    engine = get_engine(args)
+
+    # Determine workflow ID
+    if hasattr(args, 'workflow') and args.workflow:
+        workflow_id = args.workflow
+        task = "Unknown task"
+    elif engine.state:
+        workflow_id = engine.state.workflow_id
+        task = engine.state.workflow_def.task or "Unknown task"
+    else:
+        print("Error: No active workflow and no --workflow specified")
+        print("Usage: orchestrator validate-adherence [--workflow WORKFLOW_ID]")
+        sys.exit(1)
+
+    # Find session log
+    session_log_path = find_session_log_for_workflow(workflow_id)
+
+    # Create validator
+    validator = AdherenceValidator(
+        session_log_path=session_log_path,
+        workflow_log_path=Path(".workflow_log.jsonl")
+    )
+
+    # Validate
+    try:
+        report = validator.validate(workflow_id=workflow_id, task=task)
+    except Exception as e:
+        print(f"Error during validation: {e}")
+        sys.exit(1)
+
+    # Output
+    if hasattr(args, 'json') and args.json:
+        # JSON output
+        output = {
+            "workflow_id": report.workflow_id,
+            "task": report.task,
+            "timestamp": report.timestamp.isoformat(),
+            "score": report.score,
+            "checks": {
+                name: {
+                    "passed": check.passed,
+                    "confidence": check.confidence,
+                    "explanation": check.explanation,
+                    "evidence": check.evidence,
+                    "recommendations": check.recommendations
+                }
+                for name, check in report.checks.items()
+            },
+            "critical_issues": report.critical_issues,
+            "warnings": report.warnings,
+            "recommendations": report.recommendations
+        }
+        print(json.dumps(output, indent=2))
+    else:
+        # Formatted text output
+        print(format_adherence_report(report))
+
+
 HOOK_CONTENT = '''#!/bin/bash
 # Auto-install/update workflow orchestrator
 # Added by: orchestrator install-hook
@@ -2745,6 +2810,7 @@ def cmd_secrets(args):
 def cmd_sessions(args):
     """Manage session transcripts (CORE-024)."""
     from src.transcript_logger import TranscriptLogger, get_transcript_logger
+    from src.session_logger import SessionAnalyzer, format_analysis_report
 
     working_dir = Path(args.dir or '.')
     action = args.action
@@ -2789,6 +2855,33 @@ def cmd_sessions(args):
             print(f"Removed {removed} session(s) older than {days} days")
         else:
             print(f"No sessions older than {days} days")
+
+
+    elif action == "analyze":
+        # Analyze session patterns and statistics
+        days = getattr(args, 'days', None) or 30
+        last_n = getattr(args, 'last', None)
+
+        # Use SessionAnalyzer for enhanced session logs (.orchestrator/sessions/)
+        # Fall back to basic stats from TranscriptLogger if no enhanced logs
+        sessions_dir = working_dir / ".orchestrator" / "sessions"
+
+        if sessions_dir.exists():
+            analyzer = SessionAnalyzer(sessions_dir)
+            report = analyzer.analyze(last_n_days=days, last_n_sessions=last_n)
+            print(format_analysis_report(report))
+        else:
+            # Fallback: show basic stats from TranscriptLogger
+            sessions = logger.list_sessions(limit=last_n)
+            print(f"\nSession Statistics (last {days} days)")
+            print("=" * 60)
+            print(f"Total Sessions: {len(sessions)}")
+            if sessions:
+                total_size = sum(s['size_bytes'] for s in sessions) / 1024
+                print(f"Total Size: {total_size:.1f} KB")
+            print("\nNote: Enhanced session logging not enabled.")
+            print("Enable by integrating SessionLogger in your workflow.")
+            print("=" * 60)
 
     else:
         print(f"Unknown action: {action}")
@@ -5098,6 +5191,13 @@ Examples:
     setup_reviews_parser.add_argument('--force', '-f', action='store_true', help='Overwrite existing files')
     setup_reviews_parser.set_defaults(func=cmd_setup_reviews)
 
+    # Validate-adherence command (WF-034 Phase 2)
+    validate_adherence_parser = subparsers.add_parser('validate-adherence',
+        help='Validate workflow adherence (parallel execution, reviews, verification, etc.)')
+    validate_adherence_parser.add_argument('--workflow', '-w', help='Workflow ID (default: current workflow)')
+    validate_adherence_parser.add_argument('--json', action='store_true', help='Output as JSON')
+    validate_adherence_parser.set_defaults(func=cmd_validate_adherence)
+
     # Setup command (auto-updates)
     setup_parser = subparsers.add_parser('setup', help='Enable automatic updates for this repo')
     setup_parser.add_argument('--dir', '-d', help='Target directory (default: current)')
@@ -5147,10 +5247,12 @@ Examples:
 
     # Sessions command (CORE-024)
     sessions_parser = subparsers.add_parser('sessions', help='Manage session transcripts')
-    sessions_parser.add_argument('action', choices=['list', 'show', 'clean'], help='Sessions action')
+    sessions_parser.add_argument('action', choices=['list', 'show', 'clean', 'analyze'], help='Sessions action')
     sessions_parser.add_argument('session_id', nargs='?', help='Session ID (for show)')
     sessions_parser.add_argument('--limit', type=int, default=20, help='Max sessions to list (default: 20)')
     sessions_parser.add_argument('--older', type=int, default=30, help='Remove sessions older than N days (default: 30)')
+    sessions_parser.add_argument('--days', type=int, default=30, help='Analyze sessions from last N days (default: 30)')
+    sessions_parser.add_argument('--last', type=int, help='Analyze last N sessions')
     sessions_parser.add_argument('-d', '--dir', help='Working directory')
     sessions_parser.set_defaults(func=cmd_sessions)
 

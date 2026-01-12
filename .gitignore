@@ -60,6 +60,9 @@ htmlcov/
 .workflow_tool_feedback.jsonl
 .workflow_process_feedback.jsonl
 
+# Session logs (CORE-024)
+.orchestrator/sessions/
+
 # Model registry cache (local per-project)
 .model_registry.json
 

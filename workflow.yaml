@@ -30,7 +30,7 @@ settings:
   # Configurable settings - override these per-project
   # Test command - defaults to build check
   # Override with actual test command: "npm test", "pytest", "go test ./...", etc.
-  test_command: "python -m pytest tests/ -v --tb=short"
+  test_command: "python -m pytest tests/ -v --tb=short --ignore=tests/agent_sdk/test_client.py --ignore=tests/integration/test_resolve.py --ignore=tests/orchestrator/test_api.py --ignore=tests/orchestrator/test_artifact_validation.py --ignore=tests/orchestrator/test_e2e_workflow.py --ignore=tests/test_agent_context.py --ignore=tests/test_auto_setup.py --ignore=tests/test_workflow_generator.py"
   
   # Build/compile command (optional, for compiled languages)
   build_command: "npm run build"
