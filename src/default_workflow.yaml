@@ -526,6 +526,23 @@ phases:
           - "[tip] The commit message often contains good starting content for changelog entries"
           - "[caution] Don't skip this for user-facing changes - outdated docs frustrate users"
 
+      - id: "workflow_adherence_check"
+        name: "Workflow Adherence Self-Assessment"
+        description: "Validate that orchestrator workflow was followed correctly throughout the session. Review key workflow practices and reflect on adherence."
+        required: true
+        skippable: false
+        notes:
+          - "[check] Did you use parallel agents when PRD/plan recommended it? (e.g., 'orchestrator prd spawn --count N' or multiple Task tool calls)"
+          - "[check] If parallel: Did you launch them in SINGLE message with MULTIPLE Task calls? (Not sequential separate messages)"
+          - "[check] Did you use Plan agent (subagent_type='Plan') before complex implementations?"
+          - "[check] Did you verify agent output by reading files (not trusting summaries)?"
+          - "[check] Did you run all 5 third-party model reviews (/review or /minds command)?"
+          - "[check] Did you use 'orchestrator status' before each action to check current phase?"
+          - "[check] Did you complete all required items (no skips without justification)?"
+          - "[check] Did you document learnings and propose roadmap items with tradeoff analysis?"
+          - "[feedback] What went well during this workflow? What challenges did you encounter? What could be improved?"
+          - "[learning] From WF-034: Multiple sessions showed poor adherence - explicit checklist prevents repetition"
+
       - id: "capture_workflow_feedback"
         name: "Capture Workflow Feedback (Automatic)"
         description: "AUTOMATIC: Capture structured feedback about workflow adherence and experience. This runs automatically and is opt-out (set ORCHESTRATOR_SKIP_FEEDBACK=1 to disable). Saves to .workflow_feedback.jsonl for aggregation across repos."

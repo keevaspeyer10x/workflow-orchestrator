@@ -131,6 +131,14 @@ If the bundled workflow gets new improvements (like WF-029 tradeoff analysis), y
 3. **Keep as-is** - Old workflows continue working (backward compatible)
 
 **Recent workflow improvements:**
+- **WF-034 (v2.6.0)**: Post-Workflow Self-Assessment & Adherence Validation
+  - **Phase 0**: `parallel_execution_check` item in PLAN phase - explicit guidance on parallel agent usage
+  - **Phase 1**: `workflow_adherence_check` item in LEARN phase - self-assessment checklist
+  - **Phase 3**: Structured feedback capture via `orchestrator feedback` command
+  - **Phase 4**: Meta-workflow template (`orchestrator-meta.yaml`) for orchestrator dogfooding
+  - Prevents repetition of workflow adherence mistakes across sessions
+  - See default_workflow.yaml lines 196-210 (Phase 0) and 529-544 (Phase 1)
+
 - **WF-029 (v2.5.0)**: Mandatory tradeoff analysis in LEARN phase prevents roadmap bloat
   - Requires complexity vs benefit analysis for all roadmap items
   - Categorizes as ✅ RECOMMEND / ⚠️ DEFER / 🔍 EXPLORATORY
@@ -386,6 +394,23 @@ To customize the workflow for a project:
 ```bash
 orchestrator init  # Creates workflow.yaml you can edit
 ```
+
+## Orchestrator Meta-Workflow (WF-034 Phase 4)
+
+When working on the orchestrator project itself, use the meta-workflow to enforce our own best practices (dogfooding):
+
+```bash
+# Use meta-workflow for orchestrator development
+orchestrator start "Implement CORE-024" --workflow orchestrator-meta.yaml
+```
+
+The meta-workflow (`orchestrator-meta.yaml`) enforces:
+- **Parallel execution assessment** in PLAN phase (mandatory check)
+- **Third-party model reviews** in REVIEW phase (all 5 reviews required)
+- **Workflow adherence validation** in VERIFY phase
+- **Comprehensive testing** and documentation
+
+This ensures orchestrator development follows orchestrator's own guidance. See `orchestrator-meta.yaml` in the repository root for the full template.
 
 ## Provider System
 

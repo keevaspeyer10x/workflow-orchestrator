@@ -1,0 +1,260 @@
+name: "Orchestrator Meta-Workflow"
+version: "1.0"
+description: "Enforce orchestrator best practices when using orchestrator to work on orchestrator itself. Dogfooding workflow that ensures we follow our own guidance."
+
+# This meta-workflow is used when working on the orchestrator project itself
+# to ensure we follow our own best practices. It enforces:
+# - Parallel execution assessment
+# - Third-party model reviews
+# - Workflow adherence validation
+# - Comprehensive testing
+
+settings:
+  test_command: "python -m pytest tests/ -v"
+  lint_command: "python -m pylint src/ --disable=C0114,C0115,C0116"
+  docs_dir: "docs"
+  tests_dir: "tests"
+  roadmap_file: "ROADMAP.md"
+  supervision_mode: "supervised"  # Orchestrator development requires human oversight
+  default_executor: "claude_code"
+
+  # Reviews are mandatory for orchestrator changes
+  reviews:
+    enabled: true
+    on_by_default: true
+    method: auto
+    types:
+      security_review: codex
+      quality_review: codex
+      consistency_review: gemini
+      holistic_review: gemini
+      vibe_coding_review: grok
+    minimum_required: 3
+
+phases:
+  # ===========================================================================
+  # PHASE 1: PLAN
+  # ===========================================================================
+  - id: "PLAN"
+    name: "Planning & Scoping"
+    description: "Define the work, assess risks, and explicitly check for parallel execution opportunities."
+    items:
+      - id: "check_roadmap"
+        name: "Review Roadmap"
+        description: "Check ROADMAP.md for related items that should be addressed together."
+        required: true
+        skippable: false
+
+      - id: "check_parallel_opportunity"
+        name: "Assess if tasks can be parallelized"
+        description: "MANDATORY: Before starting, determine if this work can be split into parallel tasks. Document decision and reasoning."
+        required: true
+        skippable: false
+        notes:
+          - "[critical] Are there 2+ independent sub-tasks? If yes, use parallel agents"
+          - "[howto] Launch parallel agents: Send ONE message with MULTIPLE Task tool calls"
+          - "[example] Good: Task(description='Implement X', ...) + Task(description='Write tests for X', ...) in SAME message"
+          - "[example] Bad: Task for X in message 1, then Task for tests in message 2 (sequential waste)"
+          - "[enforce] CANNOT advance to EXECUTE without documenting parallel vs sequential decision"
+          - "[learning] From WF-034: Multiple orchestrator development sessions used sequential execution when parallel was faster"
+
+      - id: "clarifying_questions"
+        name: "Present Clarifying Questions"
+        description: "Present clarifying questions with recommendations, alternatives, and tradeoffs."
+        required: true
+        skippable: true
+        skip_conditions: ["requirements_crystal_clear"]
+
+      - id: "questions_answered"
+        name: "User Answers Questions"
+        description: "Wait for user to answer questions or confirm recommendations."
+        required: true
+        skippable: true
+        skip_conditions: ["clarifying_questions_skipped"]
+
+      - id: "initial_plan"
+        name: "Generate initial plan"
+        description: "Create detailed plan in docs/plan.md including parallel execution decision."
+        required: true
+        verification:
+          type: "file_exists"
+          path: "docs/plan.md"
+
+      - id: "risk_analysis"
+        name: "Risk & Impact Analysis"
+        description: "Document potential risks in docs/risk_analysis.md."
+        required: true
+        verification:
+          type: "file_exists"
+          path: "docs/risk_analysis.md"
+
+      - id: "define_test_cases"
+        name: "Define Test Cases"
+        description: "Outline test cases in tests/test_cases.md (TDD approach)."
+        required: true
+        verification:
+          type: "file_exists"
+          path: "tests/test_cases.md"
+
+      - id: "user_approval"
+        name: "Get User Approval"
+        description: "User must approve plan before execution."
+        required: true
+        verification:
+          type: "manual_gate"
+          description: "User must run 'orchestrator approve-item user_approval'"
+
+  # ===========================================================================
+  # PHASE 2: EXECUTE
+  # ===========================================================================
+  - id: "EXECUTE"
+    name: "Implementation"
+    description: "Write code and tests following TDD. Use Claude Code for non-trivial changes."
+    items:
+      - id: "write_tests"
+        name: "Write tests (RED phase)"
+        description: "Write tests BEFORE implementation. Tests should fail initially."
+        required: true
+        notes:
+          - "[tdd] RED phase: Write failing tests that specify desired behavior"
+          - "[verify] Run tests - they SHOULD fail. If they pass, test isn't testing new code"
+
+      - id: "implement_code"
+        name: "Implement feature code (GREEN phase)"
+        description: "Write minimal code to make tests pass."
+        required: true
+        notes:
+          - "[tdd] GREEN phase: Make tests pass with simplest implementation"
+
+      - id: "all_tests_pass"
+        name: "Ensure all tests pass"
+        description: "Run full test suite and ensure no regressions."
+        required: true
+        verification:
+          type: "command"
+          command: "python -m pytest tests/ -v"
+          expect_exit_code: 0
+
+  # ===========================================================================
+  # PHASE 3: REVIEW
+  # ===========================================================================
+  - id: "REVIEW"
+    name: "Multi-Model Code Review"
+    description: "MANDATORY: Run ALL third-party model reviews. Orchestrator changes require external validation."
+    items:
+      - id: "third_party_reviews"
+        name: "Run multi-model code reviews"
+        description: "MANDATORY: Run security, quality, consistency, holistic, and vibe-coding reviews. Cannot proceed without at least 3 successful reviews."
+        required: true
+        skippable: false
+        notes:
+          - "[critical] MANDATORY for orchestrator changes - we must dogfood our own review process"
+          - "[models] Security + Quality (Codex), Consistency + Holistic (Gemini), Vibe-Coding (Grok)"
+          - "[minimum] At least 3 of 5 reviews must complete successfully"
+          - "[enforce] CANNOT advance without reviews - this validates our review workflow works"
+          - "[learning] Reviews caught critical bugs in orchestrator that we missed"
+
+      - id: "collect_review_results"
+        name: "Collect All Review Results"
+        description: "Wait for all reviews to complete and aggregate findings."
+        required: true
+        notes:
+          - "[gate] Wait for ALL reviews before proceeding"
+          - "[block] If CRITICAL issues found, fix before advancing"
+
+  # ===========================================================================
+  # PHASE 4: VERIFY
+  # ===========================================================================
+  - id: "VERIFY"
+    name: "Final Verification"
+    description: "Perform final checks including adherence validation."
+    items:
+      - id: "full_test_suite"
+        name: "Run full test suite"
+        description: "Ensure no regressions after review fixes."
+        required: true
+        verification:
+          type: "command"
+          command: "python -m pytest tests/ -v"
+          expect_exit_code: 0
+
+      - id: "validate_adherence"
+        name: "Run adherence validation"
+        description: "MANDATORY: Validate that we followed orchestrator workflow correctly. Dogfooding check."
+        required: true
+        notes:
+          - "[enforce] Run: orchestrator validate-adherence (when Phase 2 implemented)"
+          - "[check] Did we use parallel agents when possible?"
+          - "[check] Did we run all 5 third-party reviews?"
+          - "[check] Did we follow TDD (write tests first)?"
+          - "[dogfooding] This ensures orchestrator development follows orchestrator practices"
+          - "[note] Phase 2 (AdherenceValidator) will be implemented later - manual check for now"
+
+  # ===========================================================================
+  # PHASE 5: LEARN
+  # ===========================================================================
+  - id: "LEARN"
+    name: "Learning & Documentation"
+    description: "Document learnings and update orchestrator's own documentation."
+    items:
+      - id: "workflow_adherence_check"
+        name: "Workflow Adherence Self-Assessment"
+        description: "Validate that we followed orchestrator workflow correctly."
+        required: true
+        notes:
+          - "[check] Did we assess parallel execution opportunity in PLAN?"
+          - "[check] Did we use parallel agents if recommended?"
+          - "[check] Did we run all 5 third-party model reviews?"
+          - "[check] Did we follow TDD (tests before code)?"
+          - "[check] Did we document learnings?"
+          - "[dogfooding] We must follow our own advice when working on orchestrator"
+
+      - id: "document_learnings"
+        name: "Document Learnings"
+        description: "Update LEARNINGS.md with insights from this workflow."
+        required: true
+        verification:
+          type: "file_exists"
+          path: "LEARNINGS.md"
+
+      - id: "propose_actions"
+        name: "Propose Recommended Actions"
+        description: "Based on learnings, propose actions with tradeoff analysis."
+        required: true
+        notes:
+          - "[critical] Include complexity vs benefit tradeoff for ROADMAP items"
+          - "[critical] Categorize: ✅ RECOMMEND / ⚠️ DEFER / 🔍 EXPLORATORY"
+          - "[yagni] Only propose if evidence of actual need"
+
+      - id: "update_documentation"
+        name: "Update Documentation"
+        description: "Update CLAUDE.md, README.md, CHANGELOG.md as needed."
+        required: true
+        skippable: true
+        skip_conditions: ["no_user_facing_changes"]
+
+      - id: "update_bundled_workflow"
+        name: "Update Bundled Workflow if Needed"
+        description: "If workflow.yaml changed, update src/default_workflow.yaml (bundled template)."
+        required: true
+        skippable: true
+        skip_conditions: ["workflow_not_modified"]
+        notes:
+          - "[important] Changes to workflow.yaml should be backported to src/default_workflow.yaml"
+          - "[reason] Bundled workflow is what new users get - keep it current"
+
+      - id: "capture_workflow_feedback"
+        name: "Capture Workflow Feedback"
+        description: "AUTOMATIC: Capture feedback about this orchestrator development workflow."
+        required: false
+        verification:
+          type: "command"
+          command: "orchestrator feedback capture --auto"
+
+      - id: "commit_and_sync"
+        name: "Commit and Sync Changes"
+        description: "Commit changes with descriptive message and push to remote."
+        required: true
+        notes:
+          - "[tip] Message format: 'feat/fix/docs: <summary>'"
+          - "[exclude] Don't commit: .env, .workflow_state.json, secrets"
