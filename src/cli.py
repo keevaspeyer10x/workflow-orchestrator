@@ -2808,15 +2808,13 @@ def cmd_sessions(args):
         else:
             # Fallback: show basic stats from TranscriptLogger
             sessions = logger.list_sessions(limit=last_n)
-            print(f"
-Session Statistics (last {days} days)")
+            print(f"\nSession Statistics (last {days} days)")
             print("=" * 60)
             print(f"Total Sessions: {len(sessions)}")
             if sessions:
                 total_size = sum(s['size_bytes'] for s in sessions) / 1024
                 print(f"Total Size: {total_size:.1f} KB")
-            print("
-Note: Enhanced session logging not enabled.")
+            print("\nNote: Enhanced session logging not enabled.")
             print("Enable by integrating SessionLogger in your workflow.")
             print("=" * 60)
 
