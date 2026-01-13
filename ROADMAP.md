@@ -124,6 +124,41 @@ Low-medium effort, high value for users who want to multitask. Option A provides
 - [x] Update CLAUDE.md with session management usage
 - [ ] Add `--workflow` flag to all orchestrator commands (deferred - lower priority)
 
+**Phase 4: Git Worktree Isolation (Planned)**
+
+For truly parallel Claude Code sessions (two terminals, two Happy chats simultaneously):
+
+**Pre-requisite (BLOCKER):**
+- [x] **Validate Claude Code works in worktrees** - ✅ CONFIRMED (2026-01-13)
+  - Created test worktree, ran orchestrator, made commit, merged, cleaned up
+  - All operations work identically to main repo
+  - Happy already uses git worktrees internally:
+    - `sources/utils/createWorktree.ts` - Creates worktrees with collision handling
+    - `sources/utils/generateWorktreeName.ts` - Human-readable names (adjective-noun)
+    - `machineBash()` accepts basePath parameter for cwd
+  - **BLOCKER CLEARED** - Proceed with Phase 4 implementation when ready
+
+**MVP Tasks (v1):**
+- [ ] Add `WorktreeManager` class (create/list/cleanup)
+- [ ] Copy `.env*` files to worktrees on creation
+- [ ] Handle dirty main branch gracefully (stash or error)
+- [ ] Modify `cmd_start --isolated` to create worktree
+- [ ] Modify `cmd_finish` to merge + cleanup worktree
+- [ ] Add `orchestrator doctor` for worktree reconciliation
+- [ ] Print worktree path (don't cd for user)
+- [ ] Document port conflict strategy
+
+**v2 Tasks (Defer):**
+- [ ] Human-readable naming (task-slug-sessionid)
+- [ ] Auto-cleanup timers (7d prune, 24h conflict preserve)
+- [ ] Max concurrent worktrees limit
+- [ ] Pre-warmed worktree templates
+- [ ] Symlinked node_modules/venv
+
+**Architecture (5-model consensus):** Git worktrees provide complete filesystem isolation.
+Each session gets its own branch + working directory. Conflicts detected only at merge time.
+Plan file: `.claude/plans/dreamy-crunching-parasol.md`
+
 ---
 
 
@@ -332,6 +367,88 @@ This is a blocker for zero-human-review workflows. Reviews silently failing defe
 - [ ] After key reload, reviews can be retried
 - [ ] `orchestrator finish` verifies all required reviews passed
 - [ ] API key loss is detected and communicated
+
+---
+
+#### CORE-031: Auto-Sync on Workflow Finish
+**Status:** Planned
+**Complexity:** MEDIUM
+**Priority:** HIGH
+**Source:** User observation (2026-01-13) - "Shouldn't orchestrator finish handle the sync and merge - particularly if there are conflicts"
+
+**Problem:**
+Currently `orchestrator finish` only:
+1. Validates review completion
+2. Generates the summary report
+3. Updates workflow state to "completed"
+
+It does NOT:
+- Push commits to remote
+- Handle merge conflicts with remote
+- Sync the --isolated worktree changes properly
+
+This is especially critical for `--isolated` worktrees where the entire purpose is merging changes back safely.
+
+**Current Behavior (Incomplete):**
+- User must manually run `git push` after `orchestrator finish`
+- If remote has diverged, user discovers conflicts only when pushing
+- No guidance on conflict resolution
+- Easy to forget to push, leaving work unsynced
+
+**Desired Behavior:**
+1. **Fetch before finish:** Check if remote has diverged
+2. **Handle conflicts:** If conflicts exist, offer resolution options:
+   - Rebase onto remote (preferred)
+   - Merge remote into local
+   - Abort and let user handle manually
+3. **Push after success:** Auto-push to remote after successful merge
+4. **Clear feedback:** Show what was pushed, any conflicts resolved
+5. **--no-push flag:** Allow skipping for local-only workflows
+
+**Implementation:**
+```python
+def cmd_finish(args):
+    # ... existing validation ...
+
+    if not args.no_push:
+        # Fetch and check for divergence
+        result = git_fetch()
+        if has_diverged():
+            if has_conflicts():
+                # Use orchestrator resolve for intelligent resolution
+                resolution = resolve_conflicts()
+                if not resolution.success:
+                    print("Conflicts require manual resolution")
+                    print("After resolving, run: orchestrator finish --continue")
+                    return
+            else:
+                # Clean rebase/merge
+                git_rebase_or_merge()
+
+        # Push to remote
+        git_push()
+        print(f"✓ Pushed to {remote_branch}")
+```
+
+**For --isolated workflows:**
+The existing `merge_and_cleanup()` merges worktree → original branch, but:
+- Should also push the merged result to remote
+- Should handle remote conflicts before merging locally
+
+**Complexity vs Benefit:**
+- **Effort:** MEDIUM - Git operations + conflict handling
+- **Benefit:** HIGH - Prevents forgotten pushes, catches conflicts early
+- **Risk:** LOW - --no-push provides escape hatch
+
+**Tasks:**
+- [ ] Add `--no-push` flag to `orchestrator finish`
+- [ ] Implement fetch + divergence detection
+- [ ] Integrate with `orchestrator resolve` for conflicts
+- [ ] Add `--continue` flag for post-resolution finish
+- [ ] Update --isolated flow to push after merge
+- [ ] Add clear feedback on what was pushed
+- [ ] Document in CLAUDE.md
+- [ ] Add tests for sync scenarios
 
 ---
 
