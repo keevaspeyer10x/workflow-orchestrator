@@ -563,8 +563,7 @@ phases:
         name: "Finish Workflow"
         description: "Complete the workflow by running 'orchestrator finish'. This commits changes and syncs to remote automatically. The agent MUST run this command - do not leave workflow in incomplete state."
         required: true
-        skippable: true
-        skip_conditions: ["no_changes_to_commit", "user_will_commit_manually"]
+        skippable: false
         verification:
           type: "manual_gate"
           description: "User confirms ready to finish workflow."

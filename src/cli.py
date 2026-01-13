@@ -1341,6 +1341,22 @@ def cmd_finish(args):
         engine.abandon_workflow(args.reason)
         print("✓ Workflow abandoned")
     else:
+        # Validate all required items in current phase are completed
+        # This uses the same logic as can_advance_phase() - driven by YAML required/skippable flags
+        can_finish, blockers, _ = engine.can_advance_phase()
+        skip_item_check = getattr(args, 'skip_item_check', False)
+        if not can_finish and not skip_item_check:
+            print("=" * 60)
+            print("⚠️  INCOMPLETE ITEMS")
+            print("=" * 60)
+            print("Required items not completed:")
+            for blocker in blockers:
+                print(f"  • {blocker}")
+            print()
+            print("Complete the required items first, or use --force to skip this check.")
+            print("=" * 60)
+            sys.exit(1)
+
         # WF-014: Validate that required reviews were completed
         skip_review_check = getattr(args, 'skip_review_check', False)
         if not skip_review_check:
@@ -5744,6 +5760,8 @@ Examples:
     finish_parser.add_argument('--skip-learn', action='store_true', help='Skip learning report')
     finish_parser.add_argument('--skip-review-check', action='store_true', dest='skip_review_check',
                               help='Skip the external review validation (requires --reason)')
+    finish_parser.add_argument('--force', action='store_true', dest='skip_item_check',
+                              help='Skip incomplete items check (finish even if required items not done)')
     finish_parser.add_argument('--no-push', action='store_true', dest='no_push',
                               help='Skip auto-push to remote (CORE-031)')
     finish_parser.add_argument('--continue', action='store_true', dest='continue_sync',
