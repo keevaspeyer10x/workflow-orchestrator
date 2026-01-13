@@ -536,3 +536,305 @@ pytest tests/ -v --cov=src/orchestrator --cov=src/agent_sdk
 - [ ] Phase transition latency <500ms (p95)
 - [ ] All tests pass (unit + integration + e2e)
 - [ ] Test coverage >90%
+
+---
+
+# CORE-025: Multi-Repo Containment Strategy Test Cases
+
+## Unit Tests: PathResolver (`tests/test_path_resolver.py`)
+
+### Repo Root Detection
+| Test | Description |
+|------|-------------|
+| `test_repo_root_detection_git` | CWD subdirectory with `.git/` in parent → `base_dir` points to parent |
+| `test_repo_root_detection_workflow_yaml` | `workflow.yaml` found before `.git/` → uses that directory |
+| `test_repo_root_fallback_cwd` | No `.git/` or `workflow.yaml` → falls back to CWD |
+
+### Path Resolution
+| Test | Description |
+|------|-------------|
+| `test_session_dir_path` | `session_id="abc12345"` → returns `.orchestrator/sessions/abc12345/` |
+| `test_session_dir_no_id_raises` | `session_id=None` → raises ValueError |
+| `test_state_file_with_session` | Returns `.orchestrator/sessions/<id>/state.json` |
+| `test_state_file_without_session` | Returns `.orchestrator/state.json` |
+| `test_log_file_path` | Returns correct log path based on session |
+| `test_checkpoints_dir_path` | Returns correct checkpoints directory |
+| `test_feedback_dir_path` | Returns correct feedback directory |
+| `test_meta_file_path` | Returns `.orchestrator/meta.json` |
+| `test_migration_marker_path` | Returns `.orchestrator/.migration_complete` |
+
+### Legacy Path Detection
+| Test | Description |
+|------|-------------|
+| `test_find_legacy_state_exists` | `.workflow_state.json` exists → returns path |
+| `test_find_legacy_state_not_exists` | No legacy file → returns None |
+
+## Unit Tests: SessionManager (`tests/test_session_manager.py`)
+
+### Session Creation
+| Test | Description |
+|------|-------------|
+| `test_create_session_returns_id` | Returns 8-char UUID |
+| `test_create_session_creates_directory` | Session directory created |
+| `test_create_session_creates_meta_json` | `meta.json` created with session info |
+| `test_create_session_sets_current` | `current` file updated |
+
+### Session Management
+| Test | Description |
+|------|-------------|
+| `test_get_current_session_exists` | Returns session ID from `current` file |
+| `test_get_current_session_not_exists` | No `current` file → returns None |
+| `test_list_sessions_multiple` | Returns list of all session directories |
+| `test_list_sessions_empty` | No sessions → returns empty list |
+
+## Integration Tests
+
+### Dual-Read Strategy
+| Test | Description |
+|------|-------------|
+| `test_dual_read_new_path_exists` | State in new path → reads from new |
+| `test_dual_read_legacy_fallback` | State only in legacy → reads legacy, writes new |
+| `test_dual_read_both_exist` | Both exist → prefers new, logs warning |
+
+### File Locking
+| Test | Description |
+|------|-------------|
+| `test_file_lock_prevents_concurrent_migration` | Second process waits for lock |
+| `test_file_lock_timeout` | Lock timeout raises appropriate error |
+
+### Atomic Operations
+| Test | Description |
+|------|-------------|
+| `test_atomic_write_temp_and_rename` | Temp file created then renamed |
+| `test_atomic_write_crash_recovery` | Temp file exists → can clean up |
+
+### Session Isolation
+| Test | Description |
+|------|-------------|
+| `test_concurrent_sessions_no_corruption` | Two processes, different sessions, no data corruption |
+
+## Edge Case Tests
+
+| Case | Expected Behavior |
+|------|-------------------|
+| Windows paths | Handle backslashes correctly |
+| Nested repos | Find nearest repo root |
+| Cross-filesystem migration | Uses copy + delete |
+| Symbolic link detection | Warn, don't follow |
+| Empty session ID | Raises ValueError |
+| Permissions error on write | Raises PermissionError with clear message |
+| Disk full during migration | Atomic operation cleans up temp file |
+
+## Acceptance Criteria
+
+- [ ] All state stored in `.orchestrator/sessions/<session-id>/`
+- [ ] Concurrent sessions don't conflict
+- [ ] Legacy paths still readable (dual-read)
+- [ ] Only new structure written to
+- [ ] Repo root detection works from subdirectories
+- [ ] File locking prevents race conditions
+- [ ] meta.json generated with repo identity
+
+---
+
+# CORE-025 Phase 2: WorkflowEngine Integration Test Cases
+
+## Unit Tests: WorkflowEngine (`tests/test_engine.py`)
+
+### Engine Initialization
+| Test | Description |
+|------|-------------|
+| `test_engine_init_with_session` | Engine with session_id sets up paths correctly |
+| `test_engine_init_without_session` | Engine without session_id uses default paths |
+| `test_engine_state_file_uses_paths` | `engine.state_file` matches `paths.state_file()` |
+| `test_engine_log_file_uses_paths` | `engine.log_file` matches `paths.log_file()` |
+
+### Dual-Read Pattern
+| Test | Description |
+|------|-------------|
+| `test_load_state_from_legacy` | Legacy `.workflow_state.json` loads correctly |
+| `test_load_state_prefers_new_path` | New path preferred when both exist |
+| `test_save_state_uses_new_path` | State saved to new path only |
+| `test_save_state_creates_session_dir` | Session directory created on first save |
+| `test_legacy_not_modified_on_save` | Legacy file unchanged when writing to new path |
+
+### Log File Handling
+| Test | Description |
+|------|-------------|
+| `test_log_event_uses_new_path` | Events logged to session log file |
+| `test_get_events_reads_from_new_path` | Events read from session log file |
+
+## Unit Tests: CLI (`tests/test_cli.py`)
+
+### Session Creation
+| Test | Description |
+|------|-------------|
+| `test_cmd_start_creates_session` | `orchestrator start` creates session |
+| `test_cmd_start_creates_gitignore` | `.orchestrator/.gitignore` created with `*` |
+| `test_cmd_start_sets_current_session` | Current session pointer updated |
+| `test_get_engine_uses_current_session` | `get_engine()` uses current session |
+
+### Session Continuity
+| Test | Description |
+|------|-------------|
+| `test_cmd_status_uses_current_session` | Status shows workflow from current session |
+| `test_cmd_complete_uses_current_session` | Complete updates correct session state |
+
+## Unit Tests: CheckpointManager (`tests/test_checkpoint.py`)
+
+### Path Integration
+| Test | Description |
+|------|-------------|
+| `test_checkpoint_init_with_paths` | Accepts OrchestratorPaths in constructor |
+| `test_checkpoint_uses_session_dir` | Uses `paths.checkpoints_dir()` |
+| `test_checkpoint_dual_read_legacy` | Reads legacy `.workflow_checkpoints/` |
+
+## Unit Tests: LearningEngine (`tests/test_learning_engine.py`)
+
+### Path Integration
+| Test | Description |
+|------|-------------|
+| `test_learning_init_with_paths` | Accepts OrchestratorPaths in constructor |
+| `test_learning_uses_session_paths` | Uses session paths for state/log files |
+
+## Integration Tests (`tests/test_engine_integration.py`)
+
+### Full Workflow Lifecycle
+| Test | Description |
+|------|-------------|
+| `test_full_workflow_with_sessions` | Complete workflow in session directory |
+| `test_workflow_state_in_session_dir` | State file in `.orchestrator/sessions/<id>/state.json` |
+| `test_workflow_log_in_session_dir` | Log file in `.orchestrator/sessions/<id>/log.jsonl` |
+
+### Backward Compatibility
+| Test | Description |
+|------|-------------|
+| `test_legacy_state_loads` | Existing `.workflow_state.json` works |
+| `test_legacy_workflow_completes` | Can complete workflow from legacy state |
+
+### Multiple Sessions
+| Test | Description |
+|------|-------------|
+| `test_concurrent_sessions` | Two workflows in different dirs don't conflict |
+| `test_session_isolation` | State changes in one session don't affect another |
+
+## Edge Cases
+
+| Case | Expected Behavior |
+|------|-------------------|
+| Empty session_id string | Raises ValueError |
+| Session directory creation fails | Clear error message |
+| Legacy state corrupt | Clear error, don't crash |
+| Mixed legacy and new checkpoints | Both accessible |
+
+## Test Execution
+
+```bash
+# Run Phase 2 specific tests
+pytest tests/test_engine.py -v -k "session"
+pytest tests/test_cli.py -v -k "session"
+pytest tests/test_engine_integration.py -v
+
+# All tests with coverage
+pytest tests/ -v --cov=src
+```
+
+## Acceptance Criteria
+
+- [ ] `orchestrator start` creates session in `.orchestrator/sessions/<id>/`
+- [ ] State and log files go to session directory
+- [ ] Legacy `.workflow_state.json` still readable
+- [ ] CheckpointManager uses session paths
+- [ ] LearningEngine uses session paths
+- [ ] `.orchestrator/.gitignore` created automatically
+
+---
+
+# CORE-025 Phase 3: Session Management CLI Test Cases
+
+## Unit Tests: CLI Commands (`tests/test_session_cli.py`)
+
+### workflow list
+
+| Test | Description |
+|------|-------------|
+| `test_workflow_list_no_sessions` | Shows "No workflow sessions found" when empty |
+| `test_workflow_list_single_session` | Shows single session with details |
+| `test_workflow_list_multiple_sessions` | Shows all sessions, current marked with `*` |
+| `test_workflow_list_shows_task` | Task description shown from state.json |
+| `test_workflow_list_shows_status` | Status (active/completed/abandoned) shown |
+| `test_workflow_list_shows_relative_time` | Shows "2h ago", "3d ago" etc. |
+| `test_workflow_list_working_dir` | Respects --dir argument |
+
+### workflow switch
+
+| Test | Description |
+|------|-------------|
+| `test_workflow_switch_valid` | Switches to existing session |
+| `test_workflow_switch_invalid` | Error for non-existent session ID |
+| `test_workflow_switch_already_current` | Message when switching to current session |
+| `test_workflow_switch_partial_id` | Error with helpful message for partial ID |
+| `test_workflow_switch_updates_current` | .orchestrator/current file updated |
+
+### workflow info
+
+| Test | Description |
+|------|-------------|
+| `test_workflow_info_current_session` | Shows current session when no ID given |
+| `test_workflow_info_specific_session` | Shows info for specified session ID |
+| `test_workflow_info_no_current` | Error when no current session and no ID |
+| `test_workflow_info_invalid_id` | Error for non-existent session |
+| `test_workflow_info_shows_all_fields` | Shows task, created, status, phase, progress |
+
+### workflow cleanup
+
+| Test | Description |
+|------|-------------|
+| `test_workflow_cleanup_dry_run` | Shows what would be removed, no deletion |
+| `test_workflow_cleanup_older_than` | Only removes sessions older than threshold |
+| `test_workflow_cleanup_by_status` | Filters by status (abandoned/completed) |
+| `test_workflow_cleanup_requires_confirmation` | Prompts for confirmation without --yes |
+| `test_workflow_cleanup_skip_current` | Never removes current session |
+| `test_workflow_cleanup_yes_flag` | Removes without confirmation when --yes |
+| `test_workflow_cleanup_no_matches` | Message when no sessions match criteria |
+| `test_workflow_cleanup_deletes_correctly` | Session directories actually removed |
+
+## Integration Tests
+
+| Test | Description |
+|------|-------------|
+| `test_list_after_start` | `orchestrator start` then `workflow list` shows session |
+| `test_switch_and_status` | Switch session, `orchestrator status` shows new session |
+| `test_cleanup_preserves_active` | Cleanup with --status=abandoned keeps active |
+| `test_full_lifecycle` | Create, switch, info, cleanup flow works end-to-end |
+
+## Edge Cases
+
+| Case | Expected Behavior |
+|------|-------------------|
+| Session with missing state.json | Shows "unknown" for task/status |
+| Session with corrupt meta.json | Graceful degradation, shows ID only |
+| Very old session (years) | Shows "2y ago" format |
+| Session created just now | Shows "just now" or "0m ago" |
+| Empty session directory | Listed but with minimal info |
+| Concurrent cleanup race | File locking prevents corruption |
+
+## Test Execution
+
+```bash
+# Run Phase 3 specific tests
+pytest tests/test_session_cli.py -v
+
+# Run with coverage
+pytest tests/test_session_cli.py -v --cov=src.cli
+```
+
+## Acceptance Criteria
+
+- [ ] `orchestrator workflow list` shows all sessions with current marked
+- [ ] `orchestrator workflow switch <id>` updates current pointer
+- [ ] `orchestrator workflow info` shows session details
+- [ ] `orchestrator workflow cleanup` removes old sessions with confirmation
+- [ ] Tests pass in tests/test_session_cli.py
+- [ ] CLAUDE.md updated with workflow session commands
+- [ ] ROADMAP.md updated to mark Phase 3 complete

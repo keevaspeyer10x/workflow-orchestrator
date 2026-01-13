@@ -108,7 +108,7 @@ Low-medium effort, high value for users who want to multitask. Option A provides
 - ✅ **Phase 1** (458d302): PathResolver and SessionManager - centralized path resolution
 - ✅ **Phase 2** (a142e98): WorkflowEngine integration - CLI session creation on `orchestrator start`
 - ✅ **Phase 2b** (pending commit): Migration script + remove legacy code - all 3 repos migrated to `.orchestrator/sessions/`
-- 🔲 **Phase 3**: CLI commands for session management (list/switch sessions)
+- ✅ **Phase 3**: CLI commands for session management (`orchestrator workflow list/switch/info/cleanup`)
 
 **Tasks:**
 - [x] Design session-scoped state file naming scheme (PathResolver)
@@ -117,10 +117,12 @@ Low-medium effort, high value for users who want to multitask. Option A provides
 - [x] Create migration script (`scripts/migrate_to_sessions.py`)
 - [x] Migrate all 3 repos (workflow-orchestrator, multiminds, visual-verification-service)
 - [x] Remove legacy dual-read pattern (cleaner single-path implementation)
-- [ ] Add `--workflow` flag to all orchestrator commands
-- [ ] Add workflow selection/switching UX
-- [ ] Add `orchestrator workflows list` command
-- [ ] Update CLAUDE.md with multi-workflow usage
+- [x] Add workflow selection/switching UX (`orchestrator workflow switch`)
+- [x] Add `orchestrator workflow list` command
+- [x] Add `orchestrator workflow info` command
+- [x] Add `orchestrator workflow cleanup` command
+- [x] Update CLAUDE.md with session management usage
+- [ ] Add `--workflow` flag to all orchestrator commands (deferred - lower priority)
 
 ---
 

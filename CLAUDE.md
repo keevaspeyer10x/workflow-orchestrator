@@ -209,6 +209,49 @@ With Happy configured:
 - Monitor agent progress in the Happy app
 - Seamless handoff between mobile and desktop
 
+## Workflow Session Management (CORE-025)
+
+Manage multiple workflow sessions in a single repository. Each `orchestrator start` creates a new session with isolated state.
+
+### Commands
+
+```bash
+# List all sessions in current repo
+orchestrator workflow list
+# Output:
+#   * b02f0302 (current) - Task: "Implement feature" - Status: active - 2h ago
+#     5b4293b1           - Task: "Fix bug"          - Status: completed - 3d ago
+
+# Switch to a different session
+orchestrator workflow switch 5b4293b1
+
+# Show details about current (or specific) session
+orchestrator workflow info
+orchestrator workflow info 5b4293b1
+
+# Clean up old sessions
+orchestrator workflow cleanup --older-than 30    # Default: 30 days
+orchestrator workflow cleanup --status abandoned  # Only abandoned
+orchestrator workflow cleanup --dry-run           # Preview only
+```
+
+### Session Directory Structure
+
+Each session stores its state in `.orchestrator/sessions/<session-id>/`:
+```
+.orchestrator/
+├── sessions/
+│   ├── b02f0302/
+│   │   ├── state.json   # Workflow state
+│   │   ├── log.jsonl    # Event log
+│   │   └── meta.json    # Session metadata
+│   └── 5b4293b1/
+│       └── ...
+└── current              # Points to active session ID
+```
+
+**Note:** The current session is never removed by `cleanup`.
+
 ## Zero-Config Workflow Enforcement (PRD-008)
 
 The `orchestrator enforce` command provides zero-setup workflow enforcement for AI agents.
@@ -369,6 +412,10 @@ orchestrator finish
 | `orchestrator approval stats` | Show approval queue statistics |
 | `orchestrator approval watch` | Watch for new approval requests (with tmux bell notification) |
 | `orchestrator approval summary` | Show decision summary (auto-approved vs human-approved) |
+| `orchestrator workflow list` | List all workflow sessions in current repo |
+| `orchestrator workflow switch <id>` | Switch to a different workflow session |
+| `orchestrator workflow info [id]` | Show details about a session |
+| `orchestrator workflow cleanup` | Remove old/abandoned sessions |
 
 ## Workflow Rules
 

@@ -120,7 +120,7 @@ class SessionManager:
             session_id: Session ID to get info for
 
         Returns:
-            Session metadata dict if exists, None otherwise
+            Session metadata dict if exists and valid, None otherwise
         """
         session_dir = self.paths.orchestrator_dir / "sessions" / session_id
         meta_file = session_dir / "meta.json"
@@ -128,7 +128,10 @@ class SessionManager:
         if not meta_file.exists():
             return None
 
-        return json.loads(meta_file.read_text())
+        try:
+            return json.loads(meta_file.read_text())
+        except json.JSONDecodeError:
+            return None
 
     def delete_session(self, session_id: str) -> bool:
         """Delete a session.

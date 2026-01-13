@@ -1,130 +1,161 @@
-# CORE-025 Phase 2: WorkflowEngine Integration Plan
+# CORE-025 Phase 3: Session Management CLI - Implementation Plan
 
 ## Overview
 
-Integrate `OrchestratorPaths` and `SessionManager` (from Phase 1) with `WorkflowEngine` so all orchestrator files are stored in `.orchestrator/sessions/<session-id>/` instead of scattered across repo root.
+Add CLI commands for workflow session management using the `orchestrator workflow` subcommand group.
 
-## Prerequisites (Phase 1 Complete)
+**Naming Decision:** Use `orchestrator workflow` instead of `orchestrator sessions` to avoid conflict with existing `sessions` command (CORE-024) which manages session transcripts.
 
-- `src/path_resolver.py` - `OrchestratorPaths` class
-- `src/session_manager.py` - `SessionManager` class
-- 34 unit tests passing (commit 458d302)
+## Commands to Implement
 
-## Implementation Tasks
+### 1. `orchestrator workflow list`
+List all workflow sessions in current repository.
 
-### Task 1: Update WorkflowEngine (`src/engine.py`)
-
-**Changes:**
-1. Add `session_id` parameter to `__init__`
-2. Initialize `OrchestratorPaths` with base_dir and session_id
-3. Replace hardcoded paths with `self.paths.state_file()` and `self.paths.log_file()`
-4. Implement dual-read pattern in `load_state()`:
-   - Check new path first: `.orchestrator/sessions/<id>/state.json`
-   - Fall back to legacy: `.workflow_state.json`
-   - Always write to new path only
-
-**Key code changes:**
-```python
-from .path_resolver import OrchestratorPaths
-
-class WorkflowEngine:
-    def __init__(self, working_dir: str = ".", session_id: str = None, ...):
-        self.working_dir = Path(working_dir).resolve()
-        self.paths = OrchestratorPaths(base_dir=self.working_dir, session_id=session_id)
-        self.state_file = self.paths.state_file()
-        self.log_file = self.paths.log_file()
-        # ... rest unchanged
+**Output Format:**
+```
+Workflow Sessions in /path/to/repo:
+  * b02f0302 (current) - Task: "Implement CORE-025" - Status: active - 2h ago
+    5b4293b1           - Task: "Fix login bug"     - Status: completed - 3d ago
+    67c18990           - Task: "Add tests"         - Status: abandoned - 1w ago
 ```
 
-### Task 2: Update CLI (`src/cli.py`)
+**Implementation:**
+- Use `SessionManager.list_sessions()` to get session IDs
+- Use `SessionManager.get_session_info()` for each to get metadata
+- Read state.json from each session to get task/status
+- Format with current session marked with `*`
+- Show relative timestamps (2h ago, 3d ago, etc.)
 
-**Changes:**
-1. Update `get_engine()` to:
-   - Check for current session via SessionManager
-   - Pass session_id to WorkflowEngine
-2. Update `cmd_start()` to:
-   - Create new session via SessionManager
-   - Create `.orchestrator/.gitignore` with `*` content
-   - Pass session_id to WorkflowEngine
-3. Add session-related CLI commands (optional, defer to Phase 3)
+### 2. `orchestrator workflow switch <id>`
+Switch to a different workflow session.
 
-**Key code changes:**
-```python
-from src.session_manager import SessionManager
-from src.path_resolver import OrchestratorPaths
-
-def get_engine(args) -> WorkflowEngine:
-    working_dir = getattr(args, 'dir', '.') or '.'
-    paths = OrchestratorPaths(base_dir=Path(working_dir))
-    session_mgr = SessionManager(paths)
-    session_id = session_mgr.get_current_session()
-
-    # Pass session_id to engine
-    engine = WorkflowEngine(working_dir, session_id=session_id)
-    engine.load_state()
-    # ...
+**Output Format:**
+```
+Switched to session 5b4293b1
 ```
 
-### Task 3: Update CheckpointManager (`src/checkpoint.py`)
+**Implementation:**
+- Use `SessionManager.set_current_session(session_id)` (already validates existence)
+- Print confirmation message
 
-**Changes:**
-1. Accept `OrchestratorPaths` or `session_id` in constructor
-2. Replace hardcoded `.workflow_checkpoints` with `paths.checkpoints_dir()`
-3. Implement dual-read for existing checkpoints
+### 3. `orchestrator workflow info [id]`
+Show detailed information about a session.
 
-### Task 4: Update LearningEngine (`src/learning_engine.py`)
+**Output Format:**
+```
+Session: b02f0302 (current)
+Task: Implement CORE-025 Phase 3
+Created: 2026-01-13 10:30:00
+Status: active
+Phase: EXECUTE (3/5)
+Items: 4/8 completed
+```
 
-**Changes:**
-1. Accept `OrchestratorPaths` in constructor
-2. Replace hardcoded paths with path resolver methods
-3. Support reading from both legacy and new locations
+**Implementation:**
+- If no ID provided, use current session
+- Read session meta.json for creation time
+- Read state.json for task, status, phase, progress
+- Format as readable output
 
-### Task 5: Create `.orchestrator/.gitignore`
+### 4. `orchestrator workflow cleanup`
+Remove old/abandoned sessions.
 
-**Location:** `.orchestrator/.gitignore`
-**Content:** `*` (ignore all files - sessions contain ephemeral state)
+**Flags:**
+- `--older-than <days>` - Remove sessions older than N days (default: 30)
+- `--status <status>` - Only remove sessions with this status (e.g., "abandoned", "completed")
+- `--dry-run` - Show what would be removed without removing
+- `--yes` - Skip confirmation prompt
 
-This is created automatically on `orchestrator start`.
+**Output Format:**
+```
+Found 3 sessions to remove:
+  67c18990 - abandoned - 45d old
+  abc12345 - completed - 60d old
+  def67890 - abandoned - 90d old
 
-### Task 6: Integration Tests
+Remove these sessions? [y/N]: y
+Removed 3 sessions.
+```
 
-Add tests for:
-1. Start workflow → creates session in `.orchestrator/sessions/<id>/`
-2. Complete items → writes state to new path
-3. Legacy `.workflow_state.json` still readable (backward compat)
-4. Multiple concurrent sessions don't conflict
-5. Resume from checkpoint works with new paths
-
-## Execution Mode
-
-**Decision:** SEQUENTIAL execution
-
-**Reasoning:**
-- Tasks are highly interdependent (Task 2 depends on Task 1, etc.)
-- Codebase is small and focused
-- Need to maintain backward compatibility throughout
-- Single agent can complete efficiently
-
-## Safety Requirements
-
-1. **File locking** - Keep existing fcntl locking in engine.py
-2. **Atomic writes** - Keep temp-file-and-rename pattern in save_state()
-3. **No auto-delete** - Don't automatically delete legacy files
-4. **Backward compat** - Legacy files readable, but writes go to new location
-
-## Testing Strategy
-
-1. Unit tests for each modified module
-2. Integration test for full workflow lifecycle
-3. Migration test: existing `.workflow_state.json` loads correctly
-4. Concurrent access test: multiple sessions work independently
+**Implementation:**
+- Iterate sessions, filter by age and/or status
+- Show preview, prompt for confirmation (unless --yes)
+- Use `SessionManager.delete_session()` for each
 
 ## Files to Modify
 
-| File | Type | Description |
-|------|------|-------------|
-| `src/engine.py` | Major | Add paths integration, dual-read |
-| `src/cli.py` | Major | Session creation, engine init |
-| `src/checkpoint.py` | Minor | Use paths.checkpoints_dir() |
-| `src/learning_engine.py` | Minor | Use paths for state/log files |
-| `tests/test_engine_integration.py` | New | Integration tests |
+### 1. `src/cli.py`
+Add new subcommand group and handlers:
+
+```python
+# Add workflow subcommand group (after prd_parser)
+workflow_parser = subparsers.add_parser('workflow', help='Manage workflow sessions (CORE-025)')
+workflow_subparsers = workflow_parser.add_subparsers(dest='workflow_command', help='Workflow session commands')
+
+# workflow list
+workflow_list = workflow_subparsers.add_parser('list', help='List all workflow sessions')
+workflow_list.add_argument('-d', '--dir', help='Working directory')
+workflow_list.set_defaults(func=cmd_workflow_list)
+
+# workflow switch
+workflow_switch = workflow_subparsers.add_parser('switch', help='Switch to a different session')
+workflow_switch.add_argument('session_id', help='Session ID to switch to')
+workflow_switch.add_argument('-d', '--dir', help='Working directory')
+workflow_switch.set_defaults(func=cmd_workflow_switch)
+
+# workflow info
+workflow_info = workflow_subparsers.add_parser('info', help='Show session details')
+workflow_info.add_argument('session_id', nargs='?', help='Session ID (default: current)')
+workflow_info.add_argument('-d', '--dir', help='Working directory')
+workflow_info.set_defaults(func=cmd_workflow_info)
+
+# workflow cleanup
+workflow_cleanup = workflow_subparsers.add_parser('cleanup', help='Remove old sessions')
+workflow_cleanup.add_argument('--older-than', type=int, default=30, help='Days threshold (default: 30)')
+workflow_cleanup.add_argument('--status', choices=['abandoned', 'completed', 'all'], help='Filter by status')
+workflow_cleanup.add_argument('--dry-run', action='store_true', help='Show what would be removed')
+workflow_cleanup.add_argument('--yes', '-y', action='store_true', help='Skip confirmation')
+workflow_cleanup.add_argument('-d', '--dir', help='Working directory')
+workflow_cleanup.set_defaults(func=cmd_workflow_cleanup)
+```
+
+Add command handler functions:
+- `cmd_workflow_list(args)`
+- `cmd_workflow_switch(args)`
+- `cmd_workflow_info(args)`
+- `cmd_workflow_cleanup(args)`
+
+### 2. `src/session_manager.py`
+May need minor enhancements:
+- Add method to get session status from state.json (or keep in CLI)
+- Session age calculation helper
+
+### 3. `tests/test_session_cli.py` (new file)
+Test all four commands with various scenarios.
+
+## Implementation Order
+
+1. Add parser and subparsers for `workflow` command group
+2. Implement `cmd_workflow_list` - most complex, handles output formatting
+3. Implement `cmd_workflow_switch` - simplest, just calls SessionManager
+4. Implement `cmd_workflow_info` - reads and formats session data
+5. Implement `cmd_workflow_cleanup` - handles filtering and confirmation
+6. Add tests for all commands
+7. Update CLAUDE.md documentation
+8. Update ROADMAP.md to mark Phase 3 complete
+
+## Dependencies
+
+- `OrchestratorPaths` (src/path_resolver.py) - already exists
+- `SessionManager` (src/session_manager.py) - already exists
+- Existing CLI patterns in src/cli.py
+
+## Definition of Done
+
+- [ ] `orchestrator workflow list` shows all sessions with current marked
+- [ ] `orchestrator workflow switch <id>` updates current pointer
+- [ ] `orchestrator workflow info` shows session details
+- [ ] `orchestrator workflow cleanup` removes old sessions with confirmation
+- [ ] Tests pass in tests/test_session_cli.py
+- [ ] CLAUDE.md updated with workflow session commands
+- [ ] ROADMAP.md updated to mark Phase 3 complete

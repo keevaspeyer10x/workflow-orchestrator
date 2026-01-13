@@ -1,92 +1,80 @@
-# CORE-025 Phase 2: Risk Analysis
+# CORE-025 Phase 3: Session Management CLI - Risk Analysis
 
 ## Risk Assessment
 
-### Risk 1: Breaking Backward Compatibility
-**Severity:** HIGH
-**Likelihood:** MEDIUM
-**Impact:** Users with existing `.workflow_state.json` lose access to active workflows
+### Overall Risk: LOW
 
+The implementation is additive CLI commands using existing infrastructure. No changes to core workflow engine or state management.
+
+## Risk Matrix
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| Breaking existing CLI commands | Very Low | High | New subcommand group, no modification to existing commands |
+| Data loss from cleanup | Low | High | Require confirmation, support --dry-run |
+| Session switching breaks workflow | Very Low | Medium | SessionManager.set_current_session already validates |
+| Performance with many sessions | Low | Low | Lazy loading, only read state when needed |
+
+## Detailed Risk Analysis
+
+### 1. CLI Namespace Collision (Risk: RESOLVED)
+**Analysis:** Original spec used `sessions` which conflicts with CORE-024 transcripts.
+**Resolution:** User approved `workflow` as the subcommand group.
+
+### 2. Data Loss from Cleanup (Risk: LOW)
+**Analysis:** `workflow cleanup` permanently deletes session directories.
 **Mitigation:**
-- Implement dual-read pattern: check new path first, fall back to legacy
-- Never auto-delete legacy files
-- Document migration path for users
-- Integration test: verify legacy state files load correctly
+- Require explicit --yes flag or confirmation prompt
+- Support --dry-run to preview changes
+- Never delete current session
+- Log all deletions
 
-### Risk 2: Race Conditions with Concurrent Access
-**Severity:** MEDIUM
-**Likelihood:** LOW
-**Impact:** State corruption if multiple processes access same session
-
+### 3. State Corruption (Risk: VERY LOW)
+**Analysis:** Commands read/write to .orchestrator/current file.
 **Mitigation:**
-- Keep existing fcntl file locking (already in engine.py)
-- Sessions are isolated by design (each has own directory)
-- Test concurrent access patterns
+- Use existing SessionManager methods (already tested)
+- Atomic file operations already implemented
 
-### Risk 3: Path Resolution Errors
-**Severity:** MEDIUM
-**Likelihood:** LOW
-**Impact:** Files created in wrong location or not found
-
+### 4. Usability Issues (Risk: LOW)
+**Analysis:** Users may find new command group confusing.
 **Mitigation:**
-- OrchestratorPaths already has unit tests (34 passing)
-- Add integration tests verifying paths in real workflow
-- Use absolute paths internally
+- Clear help text
+- Consistent output formatting
+- Document in CLAUDE.md
 
-### Risk 4: Session Creation Failure
-**Severity:** LOW
-**Likelihood:** LOW
-**Impact:** Workflow can't start if `.orchestrator/` creation fails
+## Impact Assessment
 
-**Mitigation:**
-- SessionManager.create_session() uses mkdir with exist_ok=True
-- Fail early with clear error message
-- Test permission scenarios
+### Positive Impacts
+1. **Visibility:** Users can see all workflow sessions in a repo
+2. **Control:** Switch between sessions easily
+3. **Cleanup:** Remove abandoned sessions to reduce clutter
 
-### Risk 5: CLI Breaking Changes
-**Severity:** MEDIUM
-**Likelihood:** LOW
-**Impact:** Existing scripts using `orchestrator` CLI break
+### No Impact (Unchanged)
+1. Existing `orchestrator start/status/complete/etc` commands
+2. Session transcript commands (`orchestrator sessions`)
+3. Core workflow engine behavior
 
-**Mitigation:**
-- No changes to CLI command interface
-- Only internal implementation changes
-- All existing commands work identically
+## Security Considerations
 
-## Impact Analysis
-
-### Files Modified
-| File | Risk Level | Rollback Complexity |
-|------|------------|---------------------|
-| src/engine.py | HIGH | MEDIUM - Core logic changes |
-| src/cli.py | MEDIUM | LOW - Initialization changes |
-| src/checkpoint.py | LOW | LOW - Path changes only |
-| src/learning_engine.py | LOW | LOW - Path changes only |
-
-### Dependencies Affected
-- All CLI commands use WorkflowEngine
-- Checkpoint and Learning features depend on path resolution
-- No external API changes
+### File System Access
+- Only operates within .orchestrator/ directory
+- Uses existing path resolution (no path traversal risk)
+- Delete operations scoped to session directories only
 
 ## Rollback Plan
 
-If issues are discovered:
-1. Revert to commit 458d302 (Phase 1 complete)
-2. Users with new `.orchestrator/` structure can copy state files back to root
-3. Legacy path support means existing workflows continue working
+If issues arise:
+1. Commands are additive - can be removed without affecting other functionality
+2. No database migrations or schema changes
+3. Session data format unchanged
 
-## Testing Requirements
+## Conclusion
 
-1. **Backward Compatibility Test**
-   - Existing `.workflow_state.json` loads correctly
-   - Workflow can complete with legacy files
+**Recommendation: PROCEED**
 
-2. **New Path Test**
-   - New workflows create files in `.orchestrator/sessions/<id>/`
-   - All operations work with new paths
+- Risk is very low due to using existing infrastructure
+- Benefits (visibility, control) improve user experience
+- Easy rollback if issues arise
 
-3. **Migration Test**
-   - Mixed scenario: legacy state, new checkpoints
+---
 
-4. **Concurrency Test**
-   - Multiple sessions in parallel don't conflict

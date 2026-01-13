@@ -4329,6 +4329,285 @@ def migrate_legacy_feedback(working_dir):
         return False
 
 
+# =============================================================================
+# CORE-025 Phase 3: Workflow Session CLI Commands
+# =============================================================================
+
+def _format_relative_time(dt: datetime) -> str:
+    """Format datetime as relative time (e.g., '2h ago', '3d ago')."""
+    from datetime import timezone
+
+    now = datetime.now(timezone.utc)
+    if dt.tzinfo is None:
+        # Assume UTC for naive datetime
+        dt = dt.replace(tzinfo=timezone.utc)
+
+    diff = now - dt
+    seconds = diff.total_seconds()
+
+    if seconds < 60:
+        return "just now"
+    elif seconds < 3600:
+        minutes = int(seconds / 60)
+        return f"{minutes}m ago"
+    elif seconds < 86400:
+        hours = int(seconds / 3600)
+        return f"{hours}h ago"
+    elif seconds < 604800:
+        days = int(seconds / 86400)
+        return f"{days}d ago"
+    elif seconds < 31536000:
+        weeks = int(seconds / 604800)
+        return f"{weeks}w ago"
+    else:
+        years = int(seconds / 31536000)
+        return f"{years}y ago"
+
+
+def _get_session_details(session_dir: Path) -> dict:
+    """Get details for a session directory.
+
+    Returns dict with: task, status, created_at, phase, progress
+    """
+    details = {
+        'task': 'unknown',
+        'status': 'unknown',
+        'created_at': None,
+        'phase': None,
+        'progress': None
+    }
+
+    # Read meta.json for creation time
+    meta_file = session_dir / 'meta.json'
+    if meta_file.exists():
+        try:
+            meta = json.loads(meta_file.read_text())
+            if 'created_at' in meta:
+                details['created_at'] = datetime.fromisoformat(meta['created_at'])
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # Read state.json for task/status/phase
+    state_file = session_dir / 'state.json'
+    if state_file.exists():
+        try:
+            state = json.loads(state_file.read_text())
+            details['task'] = state.get('task', 'unknown')
+            details['status'] = state.get('status', 'unknown')
+            details['phase'] = state.get('current_phase')
+
+            # Calculate progress
+            phases = state.get('phases', {})
+            if phases:
+                completed = sum(1 for p in phases.values() if p.get('status') == 'complete')
+                total = len(phases)
+                details['progress'] = f"{completed}/{total}"
+        except json.JSONDecodeError:
+            pass
+
+    return details
+
+
+def cmd_workflow_list(args):
+    """List all workflow sessions (CORE-025 Phase 3)."""
+    from src.path_resolver import OrchestratorPaths
+    from src.session_manager import SessionManager
+
+    working_dir = Path(args.dir or '.')
+    paths = OrchestratorPaths(base_dir=working_dir)
+    manager = SessionManager(paths)
+
+    sessions = manager.list_sessions()
+    current_session = manager.get_current_session()
+
+    if not sessions:
+        print("No workflow sessions found.")
+        print(f"\nStart a workflow with: orchestrator start \"task description\"")
+        return
+
+    print(f"Workflow Sessions in {working_dir.absolute()}:")
+    print("")
+
+    # Sort sessions by creation time (newest first)
+    session_data = []
+    for sid in sessions:
+        session_dir = paths.orchestrator_dir / "sessions" / sid
+        details = _get_session_details(session_dir)
+        session_data.append((sid, details))
+
+    # Sort by created_at, newest first (None dates go to end)
+    session_data.sort(key=lambda x: x[1]['created_at'] or datetime.min, reverse=True)
+
+    for sid, details in session_data:
+        is_current = sid == current_session
+        marker = "*" if is_current else " "
+        current_label = " (current)" if is_current else ""
+
+        time_str = _format_relative_time(details['created_at']) if details['created_at'] else "unknown"
+
+        # Truncate task if too long
+        task = details['task']
+        if len(task) > 40:
+            task = task[:37] + "..."
+
+        print(f"  {marker} {sid}{current_label}")
+        print(f"      Task: {task}")
+        print(f"      Status: {details['status']} | {time_str}")
+        print("")
+
+
+def cmd_workflow_switch(args):
+    """Switch to a different workflow session (CORE-025 Phase 3)."""
+    from src.path_resolver import OrchestratorPaths
+    from src.session_manager import SessionManager
+
+    working_dir = Path(args.dir or '.')
+    paths = OrchestratorPaths(base_dir=working_dir)
+    manager = SessionManager(paths)
+
+    session_id = args.session_id
+    current = manager.get_current_session()
+
+    if session_id == current:
+        print(f"Already on session {session_id}")
+        return
+
+    try:
+        manager.set_current_session(session_id)
+        print(f"Switched to session {session_id}")
+    except ValueError as e:
+        print(f"Error: {e}")
+        print(f"\nUse 'orchestrator workflow list' to see available sessions.")
+
+
+def cmd_workflow_info(args):
+    """Show details about a workflow session (CORE-025 Phase 3)."""
+    from src.path_resolver import OrchestratorPaths
+    from src.session_manager import SessionManager
+
+    working_dir = Path(args.dir or '.')
+    paths = OrchestratorPaths(base_dir=working_dir)
+    manager = SessionManager(paths)
+
+    session_id = args.session_id
+
+    if not session_id:
+        session_id = manager.get_current_session()
+        if not session_id:
+            print("No current session. Specify a session ID or start a workflow.")
+            return
+
+    # Check session exists
+    session_dir = paths.orchestrator_dir / "sessions" / session_id
+    if not session_dir.exists():
+        print(f"Session not found: {session_id}")
+        print(f"\nUse 'orchestrator workflow list' to see available sessions.")
+        return
+
+    details = _get_session_details(session_dir)
+    current = manager.get_current_session()
+    is_current = session_id == current
+
+    print(f"Session: {session_id}" + (" (current)" if is_current else ""))
+    print(f"Task: {details['task']}")
+    if details['created_at']:
+        print(f"Created: {details['created_at'].strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Status: {details['status']}")
+    if details['phase']:
+        print(f"Phase: {details['phase']}" + (f" ({details['progress']})" if details['progress'] else ""))
+
+
+def cmd_workflow_cleanup(args):
+    """Remove old workflow sessions (CORE-025 Phase 3)."""
+    from src.path_resolver import OrchestratorPaths
+    from src.session_manager import SessionManager
+
+    working_dir = Path(args.dir or '.')
+    paths = OrchestratorPaths(base_dir=working_dir)
+    manager = SessionManager(paths)
+
+    sessions = manager.list_sessions()
+    current_session = manager.get_current_session()
+
+    if not sessions:
+        print("No workflow sessions found.")
+        return
+
+    older_than_days = args.older_than
+    status_filter = args.status
+    dry_run = args.dry_run
+    skip_confirm = args.yes
+
+    # Find sessions to remove
+    to_remove = []
+    cutoff_date = datetime.now() - timedelta(days=older_than_days)
+
+    for sid in sessions:
+        # Never remove current session
+        if sid == current_session:
+            continue
+
+        session_dir = paths.orchestrator_dir / "sessions" / sid
+        details = _get_session_details(session_dir)
+
+        # Check age filter
+        if details['created_at']:
+            from datetime import timezone
+            created = details['created_at']
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            cutoff = cutoff_date.replace(tzinfo=timezone.utc)
+            if created > cutoff:
+                continue
+
+        # Check status filter
+        if status_filter and status_filter != 'all':
+            if details['status'] != status_filter:
+                continue
+
+        to_remove.append((sid, details))
+
+    if not to_remove:
+        print("No sessions match the cleanup criteria.")
+        if current_session:
+            print(f"(Current session '{current_session}' is always protected)")
+        return
+
+    # Show what will be removed
+    print(f"Found {len(to_remove)} session(s) to remove:")
+    print("")
+    for sid, details in to_remove:
+        age = ""
+        if details['created_at']:
+            days_old = (datetime.now() - details['created_at'].replace(tzinfo=None)).days
+            age = f" - {days_old}d old"
+        print(f"  {sid} - {details['status']}{age}")
+    print("")
+
+    if dry_run:
+        print("(dry-run mode - no sessions removed)")
+        return
+
+    # Confirm
+    if not skip_confirm:
+        try:
+            response = input("Remove these sessions? [y/N]: ")
+            if response.lower() != 'y':
+                print("Cancelled.")
+                return
+        except (EOFError, KeyboardInterrupt):
+            print("\nCancelled.")
+            return
+
+    # Remove sessions
+    removed = 0
+    for sid, _ in to_remove:
+        if manager.delete_session(sid):
+            removed += 1
+
+    print(f"Removed {removed} session(s).")
+
+
 def cmd_feedback_capture(args):
     """Capture workflow feedback (WF-034 Phase 3b - Two-tier system)."""
     # Check opt-out
@@ -5415,6 +5694,38 @@ Examples:
     prd_cleanup.set_defaults(func=cmd_prd_cleanup)
 
     prd_parser.set_defaults(func=lambda args: prd_parser.print_help() if not args.prd_command else None)
+
+    # Workflow session command (CORE-025 Phase 3)
+    workflow_parser = subparsers.add_parser('workflow', help='Manage workflow sessions (CORE-025)')
+    workflow_subparsers = workflow_parser.add_subparsers(dest='workflow_command', help='Workflow session commands')
+
+    # workflow list
+    workflow_list = workflow_subparsers.add_parser('list', help='List all workflow sessions')
+    workflow_list.add_argument('-d', '--dir', help='Working directory')
+    workflow_list.set_defaults(func=cmd_workflow_list)
+
+    # workflow switch
+    workflow_switch = workflow_subparsers.add_parser('switch', help='Switch to a different session')
+    workflow_switch.add_argument('session_id', help='Session ID to switch to')
+    workflow_switch.add_argument('-d', '--dir', help='Working directory')
+    workflow_switch.set_defaults(func=cmd_workflow_switch)
+
+    # workflow info
+    workflow_info = workflow_subparsers.add_parser('info', help='Show session details')
+    workflow_info.add_argument('session_id', nargs='?', help='Session ID (default: current)')
+    workflow_info.add_argument('-d', '--dir', help='Working directory')
+    workflow_info.set_defaults(func=cmd_workflow_info)
+
+    # workflow cleanup
+    workflow_cleanup = workflow_subparsers.add_parser('cleanup', help='Remove old sessions')
+    workflow_cleanup.add_argument('--older-than', type=int, default=30, help='Days threshold (default: 30)')
+    workflow_cleanup.add_argument('--status', choices=['abandoned', 'completed', 'all'], help='Filter by status')
+    workflow_cleanup.add_argument('--dry-run', action='store_true', help='Show what would be removed')
+    workflow_cleanup.add_argument('--yes', '-y', action='store_true', help='Skip confirmation')
+    workflow_cleanup.add_argument('-d', '--dir', help='Working directory')
+    workflow_cleanup.set_defaults(func=cmd_workflow_cleanup)
+
+    workflow_parser.set_defaults(func=lambda args: workflow_parser.print_help() if not args.workflow_command else None)
 
     # Feedback command (WF-034 Phase 3a)
     feedback_parser = subparsers.add_parser('feedback', help='Capture workflow feedback')
