@@ -61,10 +61,6 @@ class WorkflowEngine:
         self.state_file = self.paths.state_file()
         self.log_file = self.paths.log_file()
 
-        # Legacy paths for dual-read pattern
-        self._legacy_state_file = self.working_dir / ".workflow_state.json"
-        self._legacy_log_file = self.working_dir / ".workflow_log.jsonl"
-
         self.workflow_def: Optional[WorkflowDef] = None
         self.state: Optional[WorkflowState] = None
         # Step enforcement
@@ -223,25 +219,11 @@ class WorkflowEngine:
             raise ValueError(f"Failed to load workflow from {yaml_path}: {e}")
     
     def load_state(self) -> Optional[WorkflowState]:
-        """Load the current workflow state from the state file.
-
-        CORE-025: Implements dual-read pattern:
-        1. Check new path first (.orchestrator/sessions/<id>/state.json)
-        2. Fall back to legacy (.workflow_state.json) if new path doesn't exist
-        """
-        # CORE-025: Dual-read pattern - check new path first, fall back to legacy
-        state_path = None
-        if self.state_file.exists():
-            state_path = self.state_file
-            logger.debug(f"Loading state from new path: {state_path}")
-        elif self._legacy_state_file.exists():
-            state_path = self._legacy_state_file
-            logger.debug(f"Loading state from legacy path: {state_path}")
-
-        if state_path is None:
+        """Load the current workflow state from the state file."""
+        if not self.state_file.exists():
             return None
 
-        with open(state_path, 'r') as f:
+        with open(self.state_file, 'r') as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_SH)
             try:
                 data = json.load(f)

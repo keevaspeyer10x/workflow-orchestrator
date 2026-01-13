@@ -126,10 +126,14 @@ class TestStateBackwardCompatibility:
             }
         }
 
-        state_file = temp_workflow_dir / ".workflow_state.json"
+        # CORE-025: Use session-based path instead of legacy
+        session_id = "test_sess"
+        session_dir = temp_workflow_dir / ".orchestrator" / "sessions" / session_id
+        session_dir.mkdir(parents=True, exist_ok=True)
+        state_file = session_dir / "state.json"
         state_file.write_text(json.dumps(state_data))
 
-        engine = WorkflowEngine(str(temp_workflow_dir))
+        engine = WorkflowEngine(str(temp_workflow_dir), session_id=session_id)
         engine.load_state()
 
         # Should load without error

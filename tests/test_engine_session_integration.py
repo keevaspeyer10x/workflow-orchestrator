@@ -47,28 +47,6 @@ phases:
     return yaml_path
 
 
-@pytest.fixture
-def legacy_state_data():
-    """Sample legacy state data."""
-    return {
-        "workflow_id": "wf_legacy123",
-        "workflow_type": "test-workflow",
-        "workflow_version": "1.0.0",
-        "task_description": "Legacy task",
-        "current_phase_id": "PLAN",
-        "status": "active",
-        "phases": {
-            "PLAN": {
-                "id": "PLAN",
-                "status": "active",
-                "items": {
-                    "check_roadmap": {"id": "check_roadmap", "status": "pending"}
-                }
-            }
-        }
-    }
-
-
 class TestEngineInitialization:
     """Tests for WorkflowEngine initialization with session support."""
 
@@ -102,21 +80,8 @@ class TestEngineInitialization:
         assert engine.log_file == engine.paths.log_file()
 
 
-class TestDualReadPattern:
-    """Tests for dual-read pattern (new path preferred, legacy fallback)."""
-
-    def test_load_state_from_legacy(self, temp_dir, legacy_state_data, workflow_yaml):
-        """Legacy .workflow_state.json loads correctly."""
-        # Create legacy state file
-        legacy_file = temp_dir / ".workflow_state.json"
-        legacy_file.write_text(json.dumps(legacy_state_data))
-
-        engine = WorkflowEngine(working_dir=str(temp_dir))
-        state = engine.load_state()
-
-        assert state is not None
-        assert state.workflow_id == "wf_legacy123"
-        assert state.task_description == "Legacy task"
+class TestStateHandling:
+    """Tests for state handling with session-based paths."""
 
     def test_load_state_prefers_new_path(self, temp_dir, workflow_yaml):
         """New path preferred when both exist."""
@@ -285,35 +250,6 @@ class TestWorkflowLifecycle:
 
         expected_path = temp_dir / ".orchestrator" / "sessions" / session_id / "log.jsonl"
         assert expected_path.exists()
-
-
-class TestBackwardCompatibility:
-    """Tests for backward compatibility with legacy files."""
-
-    def test_legacy_state_loads(self, temp_dir, legacy_state_data, workflow_yaml):
-        """Existing .workflow_state.json works."""
-        # Create legacy state
-        (temp_dir / ".workflow_state.json").write_text(json.dumps(legacy_state_data))
-
-        # Engine without session should find legacy
-        engine = WorkflowEngine(working_dir=str(temp_dir))
-        state = engine.load_state()
-
-        assert state is not None
-        assert state.workflow_id == "wf_legacy123"
-
-    def test_legacy_workflow_operations(self, temp_dir, legacy_state_data, workflow_yaml):
-        """Can complete workflow from legacy state."""
-        # Create legacy state
-        (temp_dir / ".workflow_state.json").write_text(json.dumps(legacy_state_data))
-
-        engine = WorkflowEngine(working_dir=str(temp_dir))
-        engine.load_state()
-        engine.load_workflow_def(str(workflow_yaml))
-
-        # Should be able to complete items
-        success, msg = engine.complete_item("check_roadmap", notes="Done")
-        assert success
 
 
 class TestSessionIsolation:

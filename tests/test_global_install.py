@@ -205,8 +205,13 @@ class TestBackwardCompatibility:
     """Tests for backward compatibility."""
 
     def test_existing_state_files_work(self, tmp_path):
-        """Existing .workflow_state.json files still work."""
+        """Session-based state files work correctly."""
         from src.engine import WorkflowEngine
+
+        # CORE-025: Use session-based path instead of legacy
+        session_id = "test_sess"
+        session_dir = tmp_path / ".orchestrator" / "sessions" / session_id
+        session_dir.mkdir(parents=True, exist_ok=True)
 
         # Create a state file with all required fields
         state_content = """{
@@ -220,9 +225,9 @@ class TestBackwardCompatibility:
     "created_at": "2025-01-01T00:00:00Z",
     "updated_at": "2025-01-01T00:00:00Z"
 }"""
-        (tmp_path / ".workflow_state.json").write_text(state_content)
+        (session_dir / "state.json").write_text(state_content)
 
-        engine = WorkflowEngine(str(tmp_path))
+        engine = WorkflowEngine(str(tmp_path), session_id=session_id)
         engine.load_state()
 
         # Should load without error

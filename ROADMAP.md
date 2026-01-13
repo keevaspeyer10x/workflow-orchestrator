@@ -106,17 +106,19 @@ Low-medium effort, high value for users who want to multitask. Option A provides
 
 **Implementation Progress:**
 - ✅ **Phase 1** (458d302): PathResolver and SessionManager - centralized path resolution
-- ✅ **Phase 2** (current): WorkflowEngine integration - dual-read pattern, CLI session creation
+- ✅ **Phase 2** (a142e98): WorkflowEngine integration - CLI session creation on `orchestrator start`
+- ✅ **Phase 2b** (pending commit): Migration script + remove legacy code - all 3 repos migrated to `.orchestrator/sessions/`
 - 🔲 **Phase 3**: CLI commands for session management (list/switch sessions)
-- 🔲 **Phase 4**: Migration tooling for existing workflows
 
 **Tasks:**
 - [x] Design session-scoped state file naming scheme (PathResolver)
-- [x] Refactor StateManager to support multiple state files (WorkflowEngine + dual-read)
-- [x] Add tests for concurrent workflow state access (19 integration tests)
+- [x] Refactor StateManager to support session-aware paths (WorkflowEngine)
+- [x] Add tests for concurrent workflow state access (16 integration tests)
+- [x] Create migration script (`scripts/migrate_to_sessions.py`)
+- [x] Migrate all 3 repos (workflow-orchestrator, multiminds, visual-verification-service)
+- [x] Remove legacy dual-read pattern (cleaner single-path implementation)
 - [ ] Add `--workflow` flag to all orchestrator commands
 - [ ] Add workflow selection/switching UX
-- [ ] Auto-migrate existing `.workflow_state.json` to new format
 - [ ] Add `orchestrator workflows list` command
 - [ ] Update CLAUDE.md with multi-workflow usage
 
