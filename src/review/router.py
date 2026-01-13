@@ -56,22 +56,47 @@ API_KEYS_TO_LOAD = [
     "XAI_API_KEY",
 ]
 
+# Lowercase variants (e.g., Happy uses lowercase env vars)
+API_KEY_ALIASES = {
+    "XAI_API_KEY": ["xai_api_key", "grok_api_key"],
+    "OPENROUTER_API_KEY": ["openrouter_api_key"],
+    "OPENAI_API_KEY": ["openai_api_key"],
+    "GEMINI_API_KEY": ["gemini_api_key"],
+}
+
 
 def ensure_api_keys_loaded() -> dict[str, bool]:
     """
     Load API keys from SecretsManager into environment if not already set.
 
+    Also normalizes lowercase variants (e.g., grok_api_key -> XAI_API_KEY)
+    to ensure compatibility with tools like Happy that use lowercase env vars.
+
     This allows SOPS-encrypted secrets to be used by CLI tools and litellm
     without requiring manual 'eval $(sops -d ...)' commands.
 
     Returns:
-        Dict of key_name -> was_loaded (True if loaded from secrets)
+        Dict of key_name -> was_loaded (True if loaded from secrets or alias)
     """
     loaded = {}
     for key_name in API_KEYS_TO_LOAD:
         if os.environ.get(key_name):
-            # Already in environment
+            # Already in environment (uppercase)
             loaded[key_name] = False
+            continue
+
+        # Check for lowercase aliases (e.g., grok_api_key -> XAI_API_KEY)
+        aliases = API_KEY_ALIASES.get(key_name, [])
+        alias_value = None
+        for alias in aliases:
+            alias_value = os.environ.get(alias)
+            if alias_value:
+                os.environ[key_name] = alias_value
+                loaded[key_name] = True
+                logger.debug(f"Normalized {alias} -> {key_name}")
+                break
+
+        if loaded.get(key_name):
             continue
 
         # Try to get from secrets (SOPS, GitHub repo, etc.)

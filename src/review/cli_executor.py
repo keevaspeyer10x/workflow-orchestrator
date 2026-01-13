@@ -249,13 +249,18 @@ Analyze the git diff and changed files to provide your review. Output your findi
         logger.info(f"Using Grok model from registry: {model_id}")
 
         # Try OpenRouter first (more reliable), fall back to XAI direct
-        api_key = os.environ.get("OPENROUTER_API_KEY")
+        # Check both uppercase and lowercase variants (Happy uses lowercase)
+        api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("openrouter_api_key")
         use_openrouter = bool(api_key)
 
         if not api_key:
-            api_key = os.environ.get("XAI_API_KEY")
+            api_key = (
+                os.environ.get("XAI_API_KEY") or
+                os.environ.get("xai_api_key") or
+                os.environ.get("grok_api_key")
+            )
             if not api_key:
-                raise ValueError("Neither OPENROUTER_API_KEY nor XAI_API_KEY environment variable set")
+                raise ValueError("No Grok API key found. Set XAI_API_KEY, xai_api_key, or grok_api_key")
 
         # Get git diff for context
         try:
@@ -337,5 +342,11 @@ Analyze the code changes and provide your review."""
         return {
             "codex": shutil.which("codex") is not None,
             "gemini": shutil.which("gemini") is not None,
-            "grok": bool(os.environ.get("XAI_API_KEY")),
+            "grok": bool(
+                os.environ.get("XAI_API_KEY") or
+                os.environ.get("xai_api_key") or
+                os.environ.get("grok_api_key") or
+                os.environ.get("OPENROUTER_API_KEY") or
+                os.environ.get("openrouter_api_key")
+            ),
         }
