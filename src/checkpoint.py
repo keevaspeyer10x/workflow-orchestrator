@@ -10,8 +10,11 @@ import logging
 import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, TYPE_CHECKING
 from dataclasses import dataclass, field, asdict
+
+if TYPE_CHECKING:
+    from .path_resolver import OrchestratorPaths
 
 logger = logging.getLogger(__name__)
 
@@ -48,11 +51,22 @@ class CheckpointManager:
     """
     Manages checkpoint creation, storage, and retrieval.
     """
-    
-    def __init__(self, working_dir: str = "."):
+
+    def __init__(
+        self,
+        working_dir: str = ".",
+        paths: Optional["OrchestratorPaths"] = None
+    ):
         self.working_dir = Path(working_dir).resolve()
-        self.checkpoints_dir = self.working_dir / ".workflow_checkpoints"
-        self.checkpoints_dir.mkdir(exist_ok=True)
+
+        # CORE-025: Use OrchestratorPaths if provided, else use legacy path
+        if paths is not None:
+            self.checkpoints_dir = paths.checkpoints_dir()
+        else:
+            # Legacy path for backward compatibility
+            self.checkpoints_dir = self.working_dir / ".workflow_checkpoints"
+
+        self.checkpoints_dir.mkdir(parents=True, exist_ok=True)
     
     def create_checkpoint(
         self,

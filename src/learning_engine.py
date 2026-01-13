@@ -13,10 +13,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from .schema import WorkflowEvent, EventType, WorkflowState
 from .analytics import WorkflowAnalytics
+
+if TYPE_CHECKING:
+    from .path_resolver import OrchestratorPaths
 
 
 # ============================================================================
@@ -60,11 +63,23 @@ class LearningEngine:
     """
     Generates learning reports and manages the LEARNINGS.md file.
     """
-    
-    def __init__(self, working_dir: str = "."):
+
+    def __init__(
+        self,
+        working_dir: str = ".",
+        paths: Optional["OrchestratorPaths"] = None
+    ):
         self.working_dir = Path(working_dir)
-        self.state_file = self.working_dir / ".workflow_state.json"
-        self.log_file = self.working_dir / ".workflow_log.jsonl"
+
+        # CORE-025: Use OrchestratorPaths if provided, else use legacy paths
+        if paths is not None:
+            self.state_file = paths.state_file()
+            self.log_file = paths.log_file()
+        else:
+            # Legacy paths for backward compatibility
+            self.state_file = self.working_dir / ".workflow_state.json"
+            self.log_file = self.working_dir / ".workflow_log.jsonl"
+
         self.learnings_file = self.working_dir / "LEARNINGS.md"
         self.analytics = WorkflowAnalytics(working_dir)
     

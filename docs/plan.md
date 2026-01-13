@@ -1,97 +1,130 @@
-# CORE-025: Multi-Repo Containment Strategy - Phase 1 Plan
+# CORE-025 Phase 2: WorkflowEngine Integration Plan
 
 ## Overview
 
-Consolidate all orchestrator files into `.orchestrator/` directory with session-first architecture.
+Integrate `OrchestratorPaths` and `SessionManager` (from Phase 1) with `WorkflowEngine` so all orchestrator files are stored in `.orchestrator/sessions/<session-id>/` instead of scattered across repo root.
 
-## Execution Strategy
+## Prerequisites (Phase 1 Complete)
 
-**Sequential execution** - These tasks have dependencies and must be done in order:
-1. PathResolver depends on nothing
-2. SessionManager depends on PathResolver
-3. WorkflowEngine integration depends on both
-4. Tests depend on implementation
+- `src/path_resolver.py` - `OrchestratorPaths` class
+- `src/session_manager.py` - `SessionManager` class
+- 34 unit tests passing (commit 458d302)
 
-## Implementation Steps
+## Implementation Tasks
 
-### Step 1: Create PathResolver (`src/path_resolver.py`)
+### Task 1: Update WorkflowEngine (`src/engine.py`)
 
-New file with `OrchestratorPaths` class:
-- `_find_repo_root()` - Walk up to `.git/` or `workflow.yaml`
-- `session_dir()` - `.orchestrator/sessions/<session-id>/`
-- `state_file()` - Returns new path (always)
-- `find_legacy_state_file()` - Returns old path if exists
-- `log_file()`, `checkpoints_dir()`, `feedback_dir()`
-- `meta_file()`, `migration_marker()`
+**Changes:**
+1. Add `session_id` parameter to `__init__`
+2. Initialize `OrchestratorPaths` with base_dir and session_id
+3. Replace hardcoded paths with `self.paths.state_file()` and `self.paths.log_file()`
+4. Implement dual-read pattern in `load_state()`:
+   - Check new path first: `.orchestrator/sessions/<id>/state.json`
+   - Fall back to legacy: `.workflow_state.json`
+   - Always write to new path only
 
-### Step 2: Create SessionManager (`src/session_manager.py`)
+**Key code changes:**
+```python
+from .path_resolver import OrchestratorPaths
 
-New file with `SessionManager` class:
-- `create_session()` - Generate UUID4[:8], create directory
-- `_set_current_session()` - Write to `.orchestrator/current`
-- `get_current_session()` - Read from `.orchestrator/current`
-- `list_sessions()` - List all session directories
+class WorkflowEngine:
+    def __init__(self, working_dir: str = ".", session_id: str = None, ...):
+        self.working_dir = Path(working_dir).resolve()
+        self.paths = OrchestratorPaths(base_dir=self.working_dir, session_id=session_id)
+        self.state_file = self.paths.state_file()
+        self.log_file = self.paths.log_file()
+        # ... rest unchanged
+```
 
-### Step 3: Implement Dual-Read/New-Write in WorkflowEngine
+### Task 2: Update CLI (`src/cli.py`)
 
-Update state loading to:
-1. Check new path first
-2. Fall back to legacy path
-3. Write only to new path
-4. Keep old files (don't delete)
+**Changes:**
+1. Update `get_engine()` to:
+   - Check for current session via SessionManager
+   - Pass session_id to WorkflowEngine
+2. Update `cmd_start()` to:
+   - Create new session via SessionManager
+   - Create `.orchestrator/.gitignore` with `*` content
+   - Pass session_id to WorkflowEngine
+3. Add session-related CLI commands (optional, defer to Phase 3)
 
-### Step 4: Add File Locking
+**Key code changes:**
+```python
+from src.session_manager import SessionManager
+from src.path_resolver import OrchestratorPaths
 
-Install `filelock` dependency and implement:
-- Migration lock (`.orchestrator/.migration.lock`)
-- Atomic operations (temp-file-and-rename)
-- Timeout handling
+def get_engine(args) -> WorkflowEngine:
+    working_dir = getattr(args, 'dir', '.') or '.'
+    paths = OrchestratorPaths(base_dir=Path(working_dir))
+    session_mgr = SessionManager(paths)
+    session_id = session_mgr.get_current_session()
 
-### Step 5: Update WorkflowEngine Integration
+    # Pass session_id to engine
+    engine = WorkflowEngine(working_dir, session_id=session_id)
+    engine.load_state()
+    # ...
+```
 
-- Add `session_id` parameter to `__init__`
-- Create `SessionManager` instance on workflow start
-- Update all path references to use `OrchestratorPaths`
+### Task 3: Update CheckpointManager (`src/checkpoint.py`)
 
-### Step 6: Generate meta.json
+**Changes:**
+1. Accept `OrchestratorPaths` or `session_id` in constructor
+2. Replace hardcoded `.workflow_checkpoints` with `paths.checkpoints_dir()`
+3. Implement dual-read for existing checkpoints
 
-Create repo identity file with:
-- `created_at` timestamp
-- `repo_root` path
-- `git_remote` URL (if available)
-- `orchestrator_version`
+### Task 4: Update LearningEngine (`src/learning_engine.py`)
 
-### Step 7: Normal vs Portable Mode
+**Changes:**
+1. Accept `OrchestratorPaths` in constructor
+2. Replace hardcoded paths with path resolver methods
+3. Support reading from both legacy and new locations
 
-- Normal: Create `.orchestrator/.gitignore` with `*`
-- Portable (`--portable` flag): No gitignore
+### Task 5: Create `.orchestrator/.gitignore`
+
+**Location:** `.orchestrator/.gitignore`
+**Content:** `*` (ignore all files - sessions contain ephemeral state)
+
+This is created automatically on `orchestrator start`.
+
+### Task 6: Integration Tests
+
+Add tests for:
+1. Start workflow → creates session in `.orchestrator/sessions/<id>/`
+2. Complete items → writes state to new path
+3. Legacy `.workflow_state.json` still readable (backward compat)
+4. Multiple concurrent sessions don't conflict
+5. Resume from checkpoint works with new paths
+
+## Execution Mode
+
+**Decision:** SEQUENTIAL execution
+
+**Reasoning:**
+- Tasks are highly interdependent (Task 2 depends on Task 1, etc.)
+- Codebase is small and focused
+- Need to maintain backward compatibility throughout
+- Single agent can complete efficiently
+
+## Safety Requirements
+
+1. **File locking** - Keep existing fcntl locking in engine.py
+2. **Atomic writes** - Keep temp-file-and-rename pattern in save_state()
+3. **No auto-delete** - Don't automatically delete legacy files
+4. **Backward compat** - Legacy files readable, but writes go to new location
+
+## Testing Strategy
+
+1. Unit tests for each modified module
+2. Integration test for full workflow lifecycle
+3. Migration test: existing `.workflow_state.json` loads correctly
+4. Concurrent access test: multiple sessions work independently
 
 ## Files to Modify
 
-| File | Changes |
-|------|---------|
-| `src/path_resolver.py` | NEW - OrchestratorPaths class |
-| `src/session_manager.py` | NEW - SessionManager class |
-| `src/engine.py` | Update state/log/checkpoint paths |
-| `src/cli.py` | Add session creation on `start` |
-| `pyproject.toml` | Add `filelock` dependency |
-| `tests/test_path_resolver.py` | NEW - Unit tests |
-| `tests/test_session_manager.py` | NEW - Unit tests |
-
-## Success Criteria
-
-- [ ] All state stored in `.orchestrator/sessions/<session-id>/`
-- [ ] Concurrent sessions don't conflict
-- [ ] Legacy paths still readable (dual-read)
-- [ ] Only new structure written to
-- [ ] Repo root detection works from subdirectories
-- [ ] File locking prevents race conditions
-- [ ] meta.json generated with repo identity
-
-## Out of Scope (Phase 1)
-
-- Migration command (`orchestrator migrate`) - Phase 2
-- Doctor command (`orchestrator doctor`) - Phase 2
-- Config precedence hierarchy - Phase 3
-- Snapshot export/import - Phase 4
-- Web mode auto-commit - Phase 4
+| File | Type | Description |
+|------|------|-------------|
+| `src/engine.py` | Major | Add paths integration, dual-read |
+| `src/cli.py` | Major | Session creation, engine init |
+| `src/checkpoint.py` | Minor | Use paths.checkpoints_dir() |
+| `src/learning_engine.py` | Minor | Use paths for state/log files |
+| `tests/test_engine_integration.py` | New | Integration tests |

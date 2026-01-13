@@ -76,6 +76,8 @@ from src.adherence_validator import (
     format_adherence_report,
     find_session_log_for_workflow,
 )
+from src.path_resolver import OrchestratorPaths
+from src.session_manager import SessionManager
 
 VERSION = "2.0.0"
 
@@ -274,28 +276,50 @@ def check_review_api_keys() -> Optional[str]:
 
 
 def get_engine(args) -> WorkflowEngine:
-    """Create an engine instance with the working directory."""
-    working_dir = getattr(args, 'dir', '.') or '.'
-    engine = WorkflowEngine(working_dir)
-    
+    """Create an engine instance with the working directory.
+
+    CORE-025: Uses SessionManager to get current session and passes it to engine.
+    """
+    working_dir = Path(getattr(args, 'dir', '.') or '.')
+
+    # CORE-025: Check for current session
+    paths = OrchestratorPaths(base_dir=working_dir)
+    session_mgr = SessionManager(paths)
+    session_id = session_mgr.get_current_session()
+
+    # Pass session_id to engine for session-aware path resolution
+    engine = WorkflowEngine(str(working_dir), session_id=session_id)
+
     # Try to load existing state (this also loads workflow def from stored path)
     engine.load_state()
-    
+
     # If no workflow def loaded yet, try default location
     if engine.state and not engine.workflow_def:
-        yaml_path = Path(working_dir) / "workflow.yaml"
+        yaml_path = working_dir / "workflow.yaml"
         if yaml_path.exists():
             engine.load_workflow_def(str(yaml_path))
         else:
             print(f"Warning: workflow.yaml not found. Some features may not work.", file=sys.stderr)
-    
+
     return engine
 
 
 def cmd_start(args):
     """Start a new workflow."""
     working_dir = Path(args.dir or '.')
-    engine = WorkflowEngine(working_dir)
+
+    # CORE-025: Create new session for this workflow
+    paths = OrchestratorPaths(base_dir=working_dir)
+    session_mgr = SessionManager(paths)
+    session_id = session_mgr.create_session()
+
+    # Create .gitignore in .orchestrator/ to ignore all session files
+    gitignore_path = paths.orchestrator_dir / ".gitignore"
+    if not gitignore_path.exists():
+        paths.ensure_dirs()  # Create the directory first
+        gitignore_path.write_text("*\n")
+
+    engine = WorkflowEngine(str(working_dir), session_id=session_id)
 
     # Use explicit workflow if specified, otherwise use config discovery
     if args.workflow and args.workflow != 'workflow.yaml':
@@ -2054,7 +2078,17 @@ def cmd_checkpoint(args):
         print("Error: No active workflow")
         sys.exit(1)
     
-    checkpoint_mgr = CheckpointManager(args.dir or '.')
+    # CORE-025: Use session-aware paths for checkpoints
+    working_dir = Path(args.dir or '.')
+    paths = OrchestratorPaths(base_dir=working_dir)
+    session_mgr = SessionManager(paths)
+    session_id = session_mgr.get_current_session()
+    
+    if session_id:
+        paths = OrchestratorPaths(base_dir=working_dir, session_id=session_id)
+        checkpoint_mgr = CheckpointManager(str(working_dir), paths=paths)
+    else:
+        checkpoint_mgr = CheckpointManager(str(working_dir))
     
     # Parse key decisions
     decisions = getattr(args, 'decision', None) or []
@@ -2094,7 +2128,17 @@ def cmd_checkpoint(args):
 
 def cmd_checkpoints(args):
     """List all checkpoints."""
-    checkpoint_mgr = CheckpointManager(args.dir or '.')
+    # CORE-025: Use session-aware paths for checkpoints
+    working_dir = Path(args.dir or '.')
+    paths = OrchestratorPaths(base_dir=working_dir)
+    session_mgr = SessionManager(paths)
+    session_id = session_mgr.get_current_session()
+    
+    if session_id:
+        paths = OrchestratorPaths(base_dir=working_dir, session_id=session_id)
+        checkpoint_mgr = CheckpointManager(str(working_dir), paths=paths)
+    else:
+        checkpoint_mgr = CheckpointManager(str(working_dir))
     
     # Handle cleanup
     if getattr(args, 'cleanup', False):
@@ -2106,8 +2150,8 @@ def cmd_checkpoints(args):
     # Get workflow ID filter
     workflow_id = None
     if not getattr(args, 'all', False):
-        engine = WorkflowEngine(args.dir or '.')
-        engine.load_state()
+        # CORE-025: Use get_engine for session-aware state loading
+        engine = get_engine(args)
         if engine.state:
             workflow_id = engine.state.workflow_id
     
@@ -2132,7 +2176,17 @@ def cmd_checkpoints(args):
 
 def cmd_resume(args):
     """Resume from a checkpoint."""
-    checkpoint_mgr = CheckpointManager(args.dir or '.')
+    # CORE-025: Use session-aware paths for checkpoints
+    working_dir = Path(args.dir or '.')
+    paths = OrchestratorPaths(base_dir=working_dir)
+    session_mgr = SessionManager(paths)
+    session_id = session_mgr.get_current_session()
+    
+    if session_id:
+        paths = OrchestratorPaths(base_dir=working_dir, session_id=session_id)
+        checkpoint_mgr = CheckpointManager(str(working_dir), paths=paths)
+    else:
+        checkpoint_mgr = CheckpointManager(str(working_dir))
 
     # Get checkpoint
     checkpoint_id = getattr(args, 'from_checkpoint', None)

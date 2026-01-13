@@ -104,15 +104,21 @@ orchestrator status  # Uses default workflow
 **Reasoning:**
 Low-medium effort, high value for users who want to multitask. Option A provides full isolation without DB complexity. Should trigger implementation when users attempt parallel workflows (not before).
 
+**Implementation Progress:**
+- ✅ **Phase 1** (458d302): PathResolver and SessionManager - centralized path resolution
+- ✅ **Phase 2** (current): WorkflowEngine integration - dual-read pattern, CLI session creation
+- 🔲 **Phase 3**: CLI commands for session management (list/switch sessions)
+- 🔲 **Phase 4**: Migration tooling for existing workflows
+
 **Tasks:**
-- [ ] Design session-scoped state file naming scheme
-- [ ] Refactor StateManager to support multiple state files
+- [x] Design session-scoped state file naming scheme (PathResolver)
+- [x] Refactor StateManager to support multiple state files (WorkflowEngine + dual-read)
+- [x] Add tests for concurrent workflow state access (19 integration tests)
 - [ ] Add `--workflow` flag to all orchestrator commands
 - [ ] Add workflow selection/switching UX
 - [ ] Auto-migrate existing `.workflow_state.json` to new format
 - [ ] Add `orchestrator workflows list` command
 - [ ] Update CLAUDE.md with multi-workflow usage
-- [ ] Add tests for concurrent workflow state access
 
 ---
 

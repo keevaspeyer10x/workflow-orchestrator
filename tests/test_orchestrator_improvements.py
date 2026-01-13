@@ -202,6 +202,8 @@ class TestTestCommandFlag:
         """TC-FLAG-001: --test-command overrides default."""
         from src.cli import cmd_start
         from src.engine import WorkflowEngine
+        from src.path_resolver import OrchestratorPaths
+        from src.session_manager import SessionManager
 
         args = Namespace(
             dir=str(tmp_path),
@@ -218,8 +220,11 @@ class TestTestCommandFlag:
         with patch('src.cli.print') as mock_print:
             cmd_start(args)
 
-        # Load the engine and check settings - need to load state first
-        engine = WorkflowEngine(tmp_path)
+        # CORE-025: Use session-aware engine lookup
+        paths = OrchestratorPaths(base_dir=tmp_path)
+        session_mgr = SessionManager(paths)
+        session_id = session_mgr.get_current_session()
+        engine = WorkflowEngine(tmp_path, session_id=session_id)
         engine.load_state()
         assert engine.workflow_def.settings.get("test_command") == "pytest -v --cov"
 
@@ -227,6 +232,8 @@ class TestTestCommandFlag:
         """TC-FLAG-002: --build-command overrides default."""
         from src.cli import cmd_start
         from src.engine import WorkflowEngine
+        from src.path_resolver import OrchestratorPaths
+        from src.session_manager import SessionManager
 
         args = Namespace(
             dir=str(tmp_path),
@@ -242,7 +249,11 @@ class TestTestCommandFlag:
         with patch('src.cli.print') as mock_print:
             cmd_start(args)
 
-        engine = WorkflowEngine(tmp_path)
+        # CORE-025: Use session-aware engine lookup
+        paths = OrchestratorPaths(base_dir=tmp_path)
+        session_mgr = SessionManager(paths)
+        session_id = session_mgr.get_current_session()
+        engine = WorkflowEngine(tmp_path, session_id=session_id)
         engine.load_state()
         assert engine.workflow_def.settings.get("build_command") == "pip install -e .[dev]"
 
@@ -250,6 +261,8 @@ class TestTestCommandFlag:
         """TC-FLAG-003: CLI flag takes priority over auto-detection."""
         from src.cli import cmd_start
         from src.engine import WorkflowEngine
+        from src.path_resolver import OrchestratorPaths
+        from src.session_manager import SessionManager
 
         # Create a Python project
         (tmp_path / "pyproject.toml").write_text("[project]")
@@ -268,7 +281,11 @@ class TestTestCommandFlag:
         with patch('src.cli.print') as mock_print:
             cmd_start(args)
 
-        engine = WorkflowEngine(tmp_path)
+        # CORE-025: Use session-aware engine lookup
+        paths = OrchestratorPaths(base_dir=tmp_path)
+        session_mgr = SessionManager(paths)
+        session_id = session_mgr.get_current_session()
+        engine = WorkflowEngine(tmp_path, session_id=session_id)
         engine.load_state()
         # CLI flag should win over auto-detected "pytest"
         assert engine.workflow_def.settings.get("test_command") == "python -m unittest discover"
@@ -394,9 +411,15 @@ class TestForceSkip:
         # Start fresh for cleaner test
         engine2 = WorkflowEngine(tmp_path)
         yaml_path2 = find_workflow_path(tmp_path)
-        # Need new workflow ID
+        # Need new workflow ID - remove state file (could be legacy or new path)
         import os
-        os.remove(tmp_path / ".workflow_state.json")
+        import shutil
+        legacy_state = tmp_path / ".workflow_state.json"
+        new_state_dir = tmp_path / ".orchestrator"
+        if legacy_state.exists():
+            os.remove(legacy_state)
+        if new_state_dir.exists():
+            shutil.rmtree(new_state_dir)
         engine2.start_workflow(str(yaml_path2), "Test task 2")
 
         # Skip early items
@@ -578,7 +601,13 @@ class TestAutoDetectionIntegration:
         with patch('src.cli.print') as mock_print:
             cmd_start(args)
 
-        engine = WorkflowEngine(tmp_path)
+        # CORE-025: Use session-aware engine lookup
+        from src.path_resolver import OrchestratorPaths
+        from src.session_manager import SessionManager
+        paths = OrchestratorPaths(base_dir=tmp_path)
+        session_mgr = SessionManager(paths)
+        session_id = session_mgr.get_current_session()
+        engine = WorkflowEngine(tmp_path, session_id=session_id)
         engine.load_state()
 
         # Should auto-detect and use pytest
@@ -606,7 +635,13 @@ class TestAutoDetectionIntegration:
         with patch('src.cli.print') as mock_print:
             cmd_start(args)
 
-        engine = WorkflowEngine(tmp_path)
+        # CORE-025: Use session-aware engine lookup
+        from src.path_resolver import OrchestratorPaths
+        from src.session_manager import SessionManager
+        paths = OrchestratorPaths(base_dir=tmp_path)
+        session_mgr = SessionManager(paths)
+        session_id = session_mgr.get_current_session()
+        engine = WorkflowEngine(tmp_path, session_id=session_id)
         engine.load_state()
 
         # Should keep npm test

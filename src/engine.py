@@ -30,6 +30,7 @@ from .enforcement import (
     validate_evidence_depth,
     get_evidence_schema,
 )
+from .path_resolver import OrchestratorPaths
 
 # Template pattern for {{variable}} substitution
 _TEMPLATE_PATTERN = re.compile(r"\{\{(\w+)\}\}")
@@ -44,11 +45,26 @@ class WorkflowEngine:
     """
     The core workflow engine that manages state transitions and verification.
     """
-    
-    def __init__(self, working_dir: str = ".", settings: Optional[WorkflowSettings] = None):
+
+    def __init__(
+        self,
+        working_dir: str = ".",
+        settings: Optional[WorkflowSettings] = None,
+        session_id: Optional[str] = None
+    ):
         self.working_dir = Path(working_dir).resolve()
-        self.state_file = self.working_dir / ".workflow_state.json"
-        self.log_file = self.working_dir / ".workflow_log.jsonl"
+
+        # CORE-025: Use OrchestratorPaths for centralized path resolution
+        self.paths = OrchestratorPaths(base_dir=self.working_dir, session_id=session_id)
+
+        # State and log file paths (session-aware)
+        self.state_file = self.paths.state_file()
+        self.log_file = self.paths.log_file()
+
+        # Legacy paths for dual-read pattern
+        self._legacy_state_file = self.working_dir / ".workflow_state.json"
+        self._legacy_log_file = self.working_dir / ".workflow_log.jsonl"
+
         self.workflow_def: Optional[WorkflowDef] = None
         self.state: Optional[WorkflowState] = None
         # Step enforcement
@@ -207,22 +223,36 @@ class WorkflowEngine:
             raise ValueError(f"Failed to load workflow from {yaml_path}: {e}")
     
     def load_state(self) -> Optional[WorkflowState]:
-        """Load the current workflow state from the state file."""
-        if not self.state_file.exists():
+        """Load the current workflow state from the state file.
+
+        CORE-025: Implements dual-read pattern:
+        1. Check new path first (.orchestrator/sessions/<id>/state.json)
+        2. Fall back to legacy (.workflow_state.json) if new path doesn't exist
+        """
+        # CORE-025: Dual-read pattern - check new path first, fall back to legacy
+        state_path = None
+        if self.state_file.exists():
+            state_path = self.state_file
+            logger.debug(f"Loading state from new path: {state_path}")
+        elif self._legacy_state_file.exists():
+            state_path = self._legacy_state_file
+            logger.debug(f"Loading state from legacy path: {state_path}")
+
+        if state_path is None:
             return None
-        
-        with open(self.state_file, 'r') as f:
+
+        with open(state_path, 'r') as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_SH)
             try:
                 data = json.load(f)
             finally:
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-        
+
         # Parse datetime strings
         data = self._parse_state_datetimes(data)
-        
+
         self.state = WorkflowState(**data)
-        
+
         # PRIORITY 1: Use version-locked workflow definition from state (prevents schema drift)
         if self.state and self.state.workflow_definition:
             try:
@@ -232,7 +262,7 @@ class WorkflowEngine:
             except Exception as e:
                 logger.warning(f"Failed to load stored workflow definition: {e}")
                 # Fall through to load from file
-        
+
         # PRIORITY 2: Fallback to loading from YAML file (for backwards compatibility)
         if self.state and self.state.metadata.get("workflow_yaml_path"):
             yaml_path = Path(self.state.metadata["workflow_yaml_path"])
@@ -244,20 +274,23 @@ class WorkflowEngine:
             elif (self.working_dir / "workflow.yaml").exists():
                 # Fallback to default location
                 self.load_workflow_def(str(self.working_dir / "workflow.yaml"))
-        
+
         return self.state
     
     def save_state(self):
         """Save the current workflow state to the state file (with file locking)."""
         if not self.state:
             return
-        
+
         self.state.update_timestamp()
-        
+
+        # CORE-025: Ensure session directory exists before writing
+        self.paths.ensure_dirs()
+
         # Write to temp file first, then atomic rename
         # Keep lock until after rename to prevent race condition
         temp_file = self.state_file.with_suffix('.tmp')
-        
+
         with open(temp_file, 'w') as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
             try:
@@ -267,9 +300,12 @@ class WorkflowEngine:
                 temp_file.replace(self.state_file)
             finally:
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-    
+
     def log_event(self, event: WorkflowEvent):
         """Append an event to the log file (with file locking)."""
+        # CORE-025: Ensure session directory exists before logging
+        self.paths.ensure_dirs()
+
         with open(self.log_file, 'a') as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
             try:

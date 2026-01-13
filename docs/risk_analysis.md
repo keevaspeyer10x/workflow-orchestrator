@@ -1,58 +1,92 @@
-# CORE-025 Risk Analysis
+# CORE-025 Phase 2: Risk Analysis
 
-## High Risk
+## Risk Assessment
 
-### R1: Concurrent Access Corruption
-**Risk**: Multiple Claude sessions writing to same state file
-**Mitigation**: File locking with `filelock` package, session isolation via directories
-**Residual**: Lock timeout could still cause issues under heavy load
+### Risk 1: Breaking Backward Compatibility
+**Severity:** HIGH
+**Likelihood:** MEDIUM
+**Impact:** Users with existing `.workflow_state.json` lose access to active workflows
 
-### R2: Partial Migration State
-**Risk**: Crash mid-migration leaves inconsistent state
-**Mitigation**: Atomic operations (temp-file-and-rename), all-or-nothing with marker file
-**Residual**: Filesystem-level failures still possible
+**Mitigation:**
+- Implement dual-read pattern: check new path first, fall back to legacy
+- Never auto-delete legacy files
+- Document migration path for users
+- Integration test: verify legacy state files load correctly
 
-### R3: Breaking Existing Workflows
-**Risk**: Legacy workflows stop working after update
-**Mitigation**: Dual-read pattern - always check legacy path as fallback
-**Residual**: Edge cases in path resolution
+### Risk 2: Race Conditions with Concurrent Access
+**Severity:** MEDIUM
+**Likelihood:** LOW
+**Impact:** State corruption if multiple processes access same session
 
-## Medium Risk
+**Mitigation:**
+- Keep existing fcntl file locking (already in engine.py)
+- Sessions are isolated by design (each has own directory)
+- Test concurrent access patterns
 
-### R4: Windows Compatibility
-**Risk**: Path handling differs on Windows (symlinks, long paths)
-**Mitigation**: Use file for `current` pointer instead of symlink, test on Windows
-**Residual**: Untested edge cases
+### Risk 3: Path Resolution Errors
+**Severity:** MEDIUM
+**Likelihood:** LOW
+**Impact:** Files created in wrong location or not found
 
-### R5: Cross-Filesystem Migration
-**Risk**: `shutil.move` becomes copy+delete across filesystems
-**Mitigation**: Use `shutil.copy2` + explicit delete, handle failures gracefully
-**Residual**: Performance impact
+**Mitigation:**
+- OrchestratorPaths already has unit tests (34 passing)
+- Add integration tests verifying paths in real workflow
+- Use absolute paths internally
 
-### R6: Session Directory Growth
-**Risk**: Many sessions accumulate over time
-**Mitigation**: Document cleanup, defer session pruning to Phase 2
-**Residual**: Disk usage
+### Risk 4: Session Creation Failure
+**Severity:** LOW
+**Likelihood:** LOW
+**Impact:** Workflow can't start if `.orchestrator/` creation fails
 
-## Low Risk
+**Mitigation:**
+- SessionManager.create_session() uses mkdir with exist_ok=True
+- Fail early with clear error message
+- Test permission scenarios
 
-### R7: Git Remote Detection Failure
-**Risk**: Cannot detect git remote for meta.json
-**Mitigation**: Make git_remote optional, graceful fallback
-**Residual**: None significant
+### Risk 5: CLI Breaking Changes
+**Severity:** MEDIUM
+**Likelihood:** LOW
+**Impact:** Existing scripts using `orchestrator` CLI break
 
-### R8: Repo Root Detection Edge Cases
-**Risk**: Nested repos or no .git directory
-**Mitigation**: Fall back to cwd, document behavior
-**Residual**: User confusion in edge cases
+**Mitigation:**
+- No changes to CLI command interface
+- Only internal implementation changes
+- All existing commands work identically
 
-## Mitigations Summary
+## Impact Analysis
 
-| Risk | Severity | Mitigation Strategy |
-|------|----------|---------------------|
-| Concurrent access | High | File locking + session isolation |
-| Partial migration | High | Atomic operations |
-| Breaking workflows | High | Dual-read fallback |
-| Windows compat | Medium | File-based current pointer |
-| Cross-filesystem | Medium | Explicit copy+delete |
-| Session growth | Medium | Defer cleanup to Phase 2 |
+### Files Modified
+| File | Risk Level | Rollback Complexity |
+|------|------------|---------------------|
+| src/engine.py | HIGH | MEDIUM - Core logic changes |
+| src/cli.py | MEDIUM | LOW - Initialization changes |
+| src/checkpoint.py | LOW | LOW - Path changes only |
+| src/learning_engine.py | LOW | LOW - Path changes only |
+
+### Dependencies Affected
+- All CLI commands use WorkflowEngine
+- Checkpoint and Learning features depend on path resolution
+- No external API changes
+
+## Rollback Plan
+
+If issues are discovered:
+1. Revert to commit 458d302 (Phase 1 complete)
+2. Users with new `.orchestrator/` structure can copy state files back to root
+3. Legacy path support means existing workflows continue working
+
+## Testing Requirements
+
+1. **Backward Compatibility Test**
+   - Existing `.workflow_state.json` loads correctly
+   - Workflow can complete with legacy files
+
+2. **New Path Test**
+   - New workflows create files in `.orchestrator/sessions/<id>/`
+   - All operations work with new paths
+
+3. **Migration Test**
+   - Mixed scenario: legacy state, new checkpoints
+
+4. **Concurrency Test**
+   - Multiple sessions in parallel don't conflict
