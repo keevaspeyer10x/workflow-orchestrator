@@ -17,6 +17,22 @@ When completing a roadmap item:
 
 > Items identified during v2.2 implementation for future work
 
+### Documentation
+
+#### DOCS-001: ROADMAP.md Exceeds Token Limits
+**Status:** Planned | **Priority:** HIGH | **Complexity:** LOW
+**Source:** AI tool read failure (2026-01-13)
+
+ROADMAP.md is 4,223 lines (~45K tokens), exceeding the 25K token limit for AI tools.
+Need to restructure so it can be read in a single pass.
+
+Potential approaches:
+- Split into index + separate PRD files
+- Compress entries to shorter summaries
+- Archive deferred items
+
+---
+
 ### Critical - Blocking Parallel Execution
 
 
