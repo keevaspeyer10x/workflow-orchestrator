@@ -2,6 +2,31 @@
 
 All notable changes to the workflow-orchestrator.
 
+## [2.9.0] - 2026-01-13
+
+### Added
+- **CORE-025 Phase 1: Multi-Repo Containment Strategy Foundation**
+  - **OrchestratorPaths class**: Centralized path resolution for all orchestrator files (`src/path_resolver.py`)
+    - Auto-detects repo root by walking up to `.git/` or `workflow.yaml`
+    - Session-aware paths: `.orchestrator/sessions/<session-id>/`
+    - Legacy path detection for backward compatibility
+    - Supports normal (gitignored) vs portable (committed) modes
+  - **SessionManager class**: Session lifecycle management (`src/session_manager.py`)
+    - 8-character UUID session IDs
+    - Session metadata with creation timestamp and repo root
+    - Current session pointer (`.orchestrator/current` file)
+    - Session listing and switching
+  - **34 new unit tests**: Full coverage for PathResolver and SessionManager
+  - **filelock dependency**: Added for concurrent access safety (Phase 1.4)
+
+### Changed
+- pyproject.toml now includes `filelock>=3.0` dependency
+
+### Technical Details
+- New directory structure: `.orchestrator/sessions/<session-id>/state.json`, `log.jsonl`, etc.
+- Dual-read pattern ready: New paths preferred, legacy paths as fallback
+- Phase 2 (WorkflowEngine integration) deferred to keep Phase 1 focused
+
 ## [2.8.1] - 2026-01-12
 
 ### Added
