@@ -252,6 +252,65 @@ Each session stores its state in `.orchestrator/sessions/<session-id>/`:
 
 **Note:** The current session is never removed by `cleanup`.
 
+## Git Worktree Isolation (CORE-025 Phase 4)
+
+Run truly parallel workflows using isolated git worktrees. This allows you to have multiple active branches and working directories simultaneously.
+
+### Usage
+
+```bash
+# Start an isolated session (creates new worktree)
+orchestrator start "Refactor login" --isolated
+
+# Output:
+# ✓ Created isolated worktree at: /path/to/repo/.orchestrator/worktrees/abc12345
+#   Branch: wf-abc12345
+#   Original branch: main
+#
+#   To work in the worktree, run:
+#     cd /path/to/repo/.orchestrator/worktrees/abc12345
+```
+
+### How It Works
+
+1. **Isolation**: Creates a new git worktree at `.orchestrator/worktrees/<session-id>/`
+2. **Branching**: Creates a dedicated branch `wf-<session-id>` from your current HEAD
+3. **Environment**: Copies `.env` and `.env.*` files to the worktree automatically
+4. **Merge**: When you run `orchestrator finish`, changes are auto-merged back to the original branch
+5. **Cleanup**: The worktree and temporary branch are removed after successful merge
+
+### Port Conflicts
+
+When running parallel sessions (e.g., multiple Next.js apps), you may encounter port conflicts.
+
+**Strategy:**
+1. Use different ports for each session
+2. Configure via environment variables in the worktree:
+   ```bash
+   # In worktree 1
+   export PORT=3001
+   npm run dev
+
+   # In worktree 2
+   export PORT=3002
+   npm run dev
+   ```
+
+### Troubleshooting
+
+Use `orchestrator doctor` to diagnose and fix worktree issues:
+
+```bash
+# Check status
+orchestrator doctor
+
+# Clean up orphaned worktrees
+orchestrator doctor --cleanup
+
+# Fix session metadata
+orchestrator doctor --fix
+```
+
 ## Zero-Config Workflow Enforcement (PRD-008)
 
 The `orchestrator enforce` command provides zero-setup workflow enforcement for AI agents.

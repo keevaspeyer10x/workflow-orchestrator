@@ -307,11 +307,64 @@ def get_engine(args) -> WorkflowEngine:
 def cmd_start(args):
     """Start a new workflow."""
     working_dir = Path(args.dir or '.')
+    isolated = getattr(args, 'isolated', False)
+    worktree_path = None
+    original_branch = None
 
     # CORE-025: Create new session for this workflow
     paths = OrchestratorPaths(base_dir=working_dir)
     session_mgr = SessionManager(paths)
     session_id = session_mgr.create_session()
+
+    # Create .gitignore in .orchestrator/ to ignore all session files
+    gitignore_path = paths.orchestrator_dir / ".gitignore"
+    if not gitignore_path.exists():
+        paths.ensure_dirs()  # Create the directory first
+        gitignore_path.write_text("*\n")
+
+    # CORE-025 Phase 4: Handle --isolated flag for worktree isolation
+    if isolated:
+        from .worktree_manager import WorktreeManager, DirtyWorkingDirectoryError, BranchExistsError
+
+        try:
+            wt_manager = WorktreeManager(working_dir)
+
+            # Get current branch before creating worktree
+            import subprocess
+            result = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=working_dir, capture_output=True, text=True
+            )
+            original_branch = result.stdout.strip()
+
+            worktree_path = wt_manager.create(session_id)
+            print(f"\n✓ Created isolated worktree at: {worktree_path}")
+            print(f"  Branch: wf-{session_id}")
+            print(f"  Original branch: {original_branch}")
+            print(f"\n  To work in the worktree, run:")
+            print(f"    cd {worktree_path}")
+            print()
+
+            # Update session metadata with worktree info
+            updates = {
+                'isolated': True,
+                'worktree_path': str(worktree_path),
+                'original_branch': original_branch,
+                'worktree_branch': f"wf-{session_id}"
+            }
+            session_mgr.update_session_info(session_id, updates)
+
+        except DirtyWorkingDirectoryError as e:
+            print(f"Error: {e}")
+            print("\nCommit or stash your changes before using --isolated")
+            # Clean up the session we just created
+            session_mgr.delete_session(session_id)
+            sys.exit(1)
+        except BranchExistsError as e:
+            print(f"Error: {e}")
+            # Clean up the session we just created
+            session_mgr.delete_session(session_id)
+            sys.exit(1)
 
     # Create .gitignore in .orchestrator/ to ignore all session files
     gitignore_path = paths.orchestrator_dir / ".gitignore"
@@ -1319,6 +1372,47 @@ def cmd_finish(args):
         engine.complete_workflow(notes=notes)
         completed_at = engine.state.completed_at
 
+        # CORE-025 Phase 4: Handle worktree merge for isolated workflows
+        worktree_merged = False
+        worktree_merge_info = None
+        working_dir = Path(args.dir or '.')
+        paths = OrchestratorPaths(base_dir=working_dir)
+        session_mgr = SessionManager(paths)
+        current_session = session_mgr.get_current_session()
+
+        if current_session:
+            session_info = session_mgr.get_session_info(current_session)
+            if session_info and session_info.get('isolated'):
+                from .worktree_manager import WorktreeManager, MergeConflictError, WorktreeError
+                import json
+
+                original_branch = session_info.get('original_branch')
+                worktree_path = session_info.get('worktree_path')
+
+                if original_branch and worktree_path:
+                    try:
+                        wt_manager = WorktreeManager(working_dir)
+                        merge_result = wt_manager.merge_and_cleanup(current_session, original_branch)
+                        worktree_merged = True
+                        worktree_merge_info = {
+                            'success': merge_result.success,
+                            'commits': merge_result.merged_commits,
+                            'original_branch': original_branch
+                        }
+                    except MergeConflictError as e:
+                        print()
+                        print("=" * 60)
+                        print("⚠️  WORKTREE MERGE CONFLICT")
+                        print("=" * 60)
+                        print(str(e))
+                        print()
+                        print("Resolve the conflict manually, then run:")
+                        print(f"  orchestrator doctor --cleanup")
+                        print("=" * 60)
+                        # Don't exit - workflow is complete, just merge failed
+                    except WorktreeError as e:
+                        print(f"\n⚠️  Worktree cleanup warning: {e}")
+
         # WF-027: Capture summary to buffer for saving to file
         from io import StringIO
         summary_buffer = StringIO()
@@ -1466,6 +1560,15 @@ def cmd_finish(args):
                 output()
         except Exception as e:
             print(f"Warning: Could not parse LEARNINGS.md: {e}", file=sys.stderr)
+
+        # CORE-025 Phase 4: Show worktree merge result
+        if worktree_merged and worktree_merge_info:
+            output()
+            output("WORKTREE MERGE")
+            output("-" * 60)
+            output(f"  ✓ Merged {worktree_merge_info['commits']} commits to {worktree_merge_info['original_branch']}")
+            output("  ✓ Worktree cleaned up")
+            output()
 
         # WF-027: Save summary to archive file
         working_dir = Path(args.dir or '.')
@@ -2763,6 +2866,136 @@ def cmd_config(args):
         print(f"Unknown action: {action}")
         print("Available actions: set, get, list")
         sys.exit(1)
+
+
+def cmd_doctor(args):
+    """Check worktree health and perform cleanup (CORE-025 Phase 4)."""
+    from .worktree_manager import WorktreeManager
+
+    working_dir = Path(args.dir or '.')
+    cleanup = getattr(args, 'cleanup', False)
+    fix = getattr(args, 'fix', False)
+
+    # Check if we're in a git repo
+    import subprocess
+    result = subprocess.run(
+        ["git", "rev-parse", "--git-dir"],
+        cwd=working_dir, capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        print("Error: Not a git repository")
+        sys.exit(1)
+
+    wt_manager = WorktreeManager(working_dir)
+    paths = OrchestratorPaths(base_dir=working_dir)
+    session_mgr = SessionManager(paths)
+
+    print("=" * 60)
+    print("ORCHESTRATOR DOCTOR")
+    print("=" * 60)
+    print()
+
+    # List all worktrees
+    worktrees = wt_manager.list()
+    sessions = session_mgr.list_sessions()
+
+    print("WORKTREE STATUS")
+    print("-" * 60)
+
+    if not worktrees:
+        print("  No orchestrator-managed worktrees found")
+    else:
+        for wt in worktrees:
+            session_info = session_mgr.get_session_info(wt.session_id)
+            if session_info:
+                status = "active" if session_info.get('isolated') else "unknown"
+                print(f"  ✓ {wt.session_id}")
+                print(f"    Path: {wt.path}")
+                print(f"    Branch: {wt.branch}")
+                print(f"    Status: {status}")
+            else:
+                print(f"  ⚠ {wt.session_id} (ORPHANED - no matching session)")
+                print(f"    Path: {wt.path}")
+                print(f"    Branch: {wt.branch}")
+    print()
+
+    # Find orphaned worktrees (worktrees without sessions)
+    orphaned_worktrees = []
+    for wt in worktrees:
+        if wt.session_id not in sessions:
+            orphaned_worktrees.append(wt)
+
+    # Find sessions claiming isolated but no worktree
+    missing_worktrees = []
+    for session_id in sessions:
+        session_info = session_mgr.get_session_info(session_id)
+        if session_info and session_info.get('isolated'):
+            has_worktree = any(wt.session_id == session_id for wt in worktrees)
+            if not has_worktree:
+                missing_worktrees.append(session_id)
+
+    # Report issues
+    issues_found = False
+
+    if orphaned_worktrees:
+        issues_found = True
+        print("ISSUES FOUND")
+        print("-" * 60)
+        print(f"  ⚠ {len(orphaned_worktrees)} orphaned worktree(s)")
+        for wt in orphaned_worktrees:
+            print(f"    - {wt.session_id}: {wt.path}")
+
+    if missing_worktrees:
+        issues_found = True
+        if not orphaned_worktrees:
+            print("ISSUES FOUND")
+            print("-" * 60)
+        print(f"  ⚠ {len(missing_worktrees)} session(s) with missing worktrees")
+        for session_id in missing_worktrees:
+            print(f"    - {session_id}")
+
+    if not issues_found:
+        print("HEALTH CHECK")
+        print("-" * 60)
+        print("  ✓ No issues found")
+    print()
+
+    # Cleanup mode
+    if cleanup or fix:
+        if orphaned_worktrees:
+            print("CLEANUP")
+            print("-" * 60)
+            for wt in orphaned_worktrees:
+                try:
+                    success = wt_manager.cleanup(wt.session_id)
+                    if success:
+                        print(f"  ✓ Removed orphaned worktree: {wt.session_id}")
+                    else:
+                        print(f"  ✗ Failed to remove: {wt.session_id}")
+                except Exception as e:
+                    print(f"  ✗ Error removing {wt.session_id}: {e}")
+            print()
+
+        if missing_worktrees and fix:
+            print("FIX")
+            print("-" * 60)
+            for session_id in missing_worktrees:
+                # Clear the isolated flag since worktree is gone
+                updates = {
+                    'isolated': False,
+                    'worktree_path': None
+                }
+                if session_mgr.update_session_info(session_id, updates):
+                    print(f"  ✓ Cleared isolated flag for session: {session_id}")
+            print()
+
+    elif issues_found:
+        print("To fix issues, run:")
+        print("  orchestrator doctor --cleanup    # Remove orphaned worktrees")
+        print("  orchestrator doctor --fix        # Fix session metadata")
+        print()
+
+    print("=" * 60)
 
 
 def cmd_secrets(args):
@@ -5302,6 +5535,8 @@ Examples:
                               help='Override test command (e.g., "pytest -v")')
     start_parser.add_argument('--build-command', dest='build_command',
                               help='Override build command (e.g., "pip install -e .")')
+    start_parser.add_argument('--isolated', action='store_true',
+                              help='Create git worktree for isolated execution (CORE-025)')
     start_parser.set_defaults(func=cmd_start)
 
     # Init command
@@ -5560,6 +5795,14 @@ Examples:
     config_parser.add_argument('key', nargs='?', help='Configuration key')
     config_parser.add_argument('value', nargs='?', help='Configuration value (for set)')
     config_parser.set_defaults(func=cmd_config)
+
+    # Doctor command (CORE-025 Phase 4)
+    doctor_parser = subparsers.add_parser('doctor', help='Check worktree health and perform cleanup')
+    doctor_parser.add_argument('--cleanup', action='store_true',
+                               help='Remove orphaned worktrees')
+    doctor_parser.add_argument('--fix', action='store_true',
+                               help='Fix session metadata for missing worktrees')
+    doctor_parser.set_defaults(func=cmd_doctor)
 
     # Secrets command
     secrets_parser = subparsers.add_parser('secrets', help='Manage and test secret access')

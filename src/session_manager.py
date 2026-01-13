@@ -133,6 +133,33 @@ class SessionManager:
         except json.JSONDecodeError:
             return None
 
+    def update_session_info(self, session_id: str, updates: Dict[str, Any]) -> bool:
+        """Update session metadata.
+
+        Args:
+            session_id: Session ID to update
+            updates: Dictionary of fields to update/add
+
+        Returns:
+            True if successful, False if session or meta file not found
+        """
+        session_dir = self.paths.orchestrator_dir / "sessions" / session_id
+        meta_file = session_dir / "meta.json"
+
+        if not meta_file.exists():
+            return False
+
+        try:
+            # Read existing
+            data = json.loads(meta_file.read_text())
+            # Update
+            data.update(updates)
+            # Write back
+            meta_file.write_text(json.dumps(data, indent=2))
+            return True
+        except (json.JSONDecodeError, OSError):
+            return False
+
     def delete_session(self, session_id: str) -> bool:
         """Delete a session.
 

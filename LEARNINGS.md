@@ -2,6 +2,50 @@
 
 ---
 
+## Session: CORE-025 Phase 4 - Git Worktree Isolation MVP
+**Date:** 2026-01-13
+**Context:** Implementing git worktree isolation for truly parallel Claude Code sessions
+
+### Task Summary
+Added git worktree isolation to enable parallel workflow execution. Created WorktreeManager class, --isolated flag on cmd_start, auto-merge on cmd_finish, and orchestrator doctor command for worktree health.
+
+### What Worked Well
+1. **TDD approach** - Writing 16 tests first helped define the exact behavior needed for worktree operations
+2. **User decision points** - Asking about merge strategy and dirty state handling upfront avoided rework
+3. **Sequential execution decision** - Correctly identified tight dependencies that precluded parallel agents
+
+### Challenges Encountered
+1. **Git worktree behavior** - Had to handle `.orchestrator` directory appearing as untracked, requiring gitignore
+2. **Branch naming** - `git init` creates `master` not `main` - needed to detect actual branch name
+3. **Dirty state detection** - Creating `.env` files in tests made repo dirty, needed gitignore setup first
+4. **Consistency review timeout** - Gemini review timed out (300s) but 4/5 reviews was sufficient
+
+### Key Technical Decisions
+1. **Worktree location**: `.orchestrator/worktrees/<session-id>/` - keeps worktrees with orchestrator state
+2. **Branch naming**: `wf-<session-id>` - predictable and auto-cleaned
+3. **Env file copying**: Only `.env` and `.env.*` patterns (not `.envrc`, `.envoy`, etc.)
+4. **Merge on finish**: Auto-merge to original branch, preserve worktree on conflict for manual resolution
+5. **Dirty state**: Error and refuse rather than auto-stash - safest option
+
+### Implementation Stats
+- **Files created**: 2 (worktree_manager.py, test_worktree_manager.py)
+- **Files modified**: 2 (cli.py, session_manager.py)
+- **Tests**: 16 new tests, all passing
+- **Reviews**: 4/5 passed (security, quality, holistic, vibe-coding)
+- **Duration**: ~2 hours
+
+### Immediate Actions
+- None - MVP is complete and functional
+
+### Future Improvements (ROADMAP candidates)
+- Human-readable worktree naming (task-slug-sessionid)
+- Auto-cleanup timers for stale worktrees
+- Max concurrent worktrees limit
+- Pre-warmed worktree templates
+- Symlinked node_modules/venv for faster startup
+
+---
+
 ## Session: Zero-Human Workflow Design - REVIEW/VERIFY Phase Critique
 **Date:** 2026-01-11
 **Context:** Analysis of workflow phases for zero-human code review systems
