@@ -1,78 +1,128 @@
-# CORE-025 Test Cases: Multi-Repo Containment Strategy
+# CORE-025 Phase 4: Test Cases
 
-## Unit Tests: PathResolver (`tests/test_path_resolver.py`)
+## Unit Tests: WorktreeManager
 
-### Repo Root Detection
-| Test | Description |
-|------|-------------|
-| `test_repo_root_detection_git` | CWD subdirectory with `.git/` in parent → `base_dir` points to parent |
-| `test_repo_root_detection_workflow_yaml` | `workflow.yaml` found before `.git/` → uses that directory |
-| `test_repo_root_fallback_cwd` | No `.git/` or `workflow.yaml` → falls back to CWD |
+### test_worktree_manager.py
 
-### Path Resolution
-| Test | Description |
-|------|-------------|
-| `test_session_dir_path` | `session_id="abc12345"` → returns `.orchestrator/sessions/abc12345/` |
-| `test_session_dir_no_id_raises` | `session_id=None` → raises ValueError |
-| `test_state_file_with_session` | Returns `.orchestrator/sessions/<id>/state.json` |
-| `test_state_file_without_session` | Returns `.orchestrator/state.json` |
-| `test_log_file_path` | Returns correct log path based on session |
-| `test_checkpoints_dir_path` | Returns correct checkpoints directory |
-| `test_feedback_dir_path` | Returns correct feedback directory |
-| `test_meta_file_path` | Returns `.orchestrator/meta.json` |
-| `test_migration_marker_path` | Returns `.orchestrator/.migration_complete` |
+#### Test: create_worktree_success
+- Setup: Clean git repo with no uncommitted changes
+- Action: Call `manager.create(session_id="abc12345")`
+- Assert:
+  - Worktree directory exists at `.orchestrator/worktrees/abc12345`
+  - Branch `wf-abc12345` exists
+  - Worktree is registered in `git worktree list`
 
-### Legacy Path Detection
-| Test | Description |
-|------|-------------|
-| `test_find_legacy_state_exists` | `.workflow_state.json` exists → returns path |
-| `test_find_legacy_state_not_exists` | No legacy file → returns None |
+#### Test: create_worktree_copies_env_files
+- Setup: Create `.env` and `.env.local` in repo root
+- Action: Call `manager.create(session_id="abc12345")`
+- Assert:
+  - `.env` copied to worktree
+  - `.env.local` copied to worktree
+  - Other files not copied (e.g., `.envrc`)
 
-## Unit Tests: SessionManager (`tests/test_session_manager.py`)
+#### Test: create_worktree_fails_on_dirty_repo
+- Setup: Git repo with uncommitted changes
+- Action: Call `manager.create(session_id="abc12345")`
+- Assert:
+  - Raises `DirtyWorkingDirectoryError`
+  - No worktree created
+  - No branch created
 
-### Session Creation
-| Test | Description |
-|------|-------------|
-| `test_create_session_returns_id` | Returns 8-char UUID |
-| `test_create_session_creates_directory` | Session directory created |
-| `test_create_session_creates_meta_json` | `meta.json` created with session info |
-| `test_create_session_sets_current` | `current` file updated |
+#### Test: list_worktrees_empty
+- Setup: Clean git repo with no worktrees
+- Action: Call `manager.list()`
+- Assert: Returns empty list
 
-### Session Management
-| Test | Description |
-|------|-------------|
-| `test_get_current_session_exists` | Returns session ID from `current` file |
-| `test_get_current_session_not_exists` | No `current` file → returns None |
-| `test_list_sessions_multiple` | Returns list of all session directories |
-| `test_list_sessions_empty` | No sessions → returns empty list |
+#### Test: list_worktrees_with_entries
+- Setup: Create 2 worktrees
+- Action: Call `manager.list()`
+- Assert:
+  - Returns list with 2 WorktreeInfo objects
+  - Each has session_id, path, branch
 
-## Integration Tests
+#### Test: cleanup_worktree_success
+- Setup: Create worktree
+- Action: Call `manager.cleanup(session_id="abc12345")`
+- Assert:
+  - Worktree directory removed
+  - Branch deleted (if merged)
+  - Returns True
 
-### Dual-Read Strategy
-| Test | Description |
-|------|-------------|
-| `test_dual_read_new_path_exists` | State in new path → reads from new |
-| `test_dual_read_legacy_fallback` | State only in legacy → reads legacy, writes new |
-| `test_dual_read_both_exist` | Both exist → prefers new, logs warning |
+#### Test: cleanup_worktree_not_found
+- Setup: No worktree exists
+- Action: Call `manager.cleanup(session_id="nonexistent")`
+- Assert: Returns False
 
-### File Locking
-| Test | Description |
-|------|-------------|
-| `test_file_lock_prevents_concurrent_migration` | Second process waits for lock |
-| `test_file_lock_timeout` | Lock timeout raises appropriate error |
+#### Test: merge_and_cleanup_success
+- Setup: Create worktree, make commits
+- Action: Call `manager.merge_and_cleanup(session_id, target_branch)`
+- Assert:
+  - Changes merged to target branch
+  - Worktree removed
+  - Worktree branch deleted
 
-### Atomic Operations
-| Test | Description |
-|------|-------------|
-| `test_atomic_write_temp_and_rename` | Temp file created then renamed |
-| `test_atomic_write_crash_recovery` | Temp file exists → can clean up |
+#### Test: merge_and_cleanup_conflict
+- Setup: Create worktree, make conflicting changes on both branches
+- Action: Call `manager.merge_and_cleanup(session_id, target_branch)`
+- Assert:
+  - Raises `MergeConflictError`
+  - Worktree NOT removed (for manual resolution)
+  - Error message includes resolution steps
 
-## Acceptance Criteria
+## Integration Tests: CLI
 
-- [ ] All state stored in `.orchestrator/sessions/<session-id>/`
-- [ ] Concurrent sessions don't conflict
-- [ ] Legacy paths still readable (dual-read)
-- [ ] Only new structure written to
-- [ ] Repo root detection works from subdirectories
-- [ ] File locking prevents race conditions
-- [ ] meta.json generated with repo identity
+### test_cli_isolated.py
+
+#### Test: start_isolated_creates_worktree
+- Action: `orchestrator start "Test task" --isolated`
+- Assert:
+  - Session created
+  - Worktree created
+  - Output includes worktree path
+
+#### Test: start_isolated_fails_on_dirty
+- Setup: Uncommitted changes
+- Action: `orchestrator start "Test task" --isolated`
+- Assert:
+  - Exit code 1
+  - Error message about uncommitted changes
+  - No session created
+
+#### Test: finish_isolated_merges_changes
+- Setup: Create isolated workflow, make changes, commit
+- Action: `orchestrator finish`
+- Assert:
+  - Changes merged to original branch
+  - Worktree cleaned up
+  - Success message
+
+#### Test: doctor_shows_worktree_status
+- Setup: Create isolated workflow
+- Action: `orchestrator doctor`
+- Assert:
+  - Output shows worktree status
+  - Shows session ID and path
+
+#### Test: doctor_cleanup_removes_orphans
+- Setup: Create worktree manually (no session)
+- Action: `orchestrator doctor --cleanup`
+- Assert:
+  - Orphaned worktree removed
+  - Success message
+
+## Edge Cases
+
+#### Test: git_version_check
+- Setup: Mock git version to 2.4
+- Action: Try to create worktree
+- Assert: Clear error about git version requirement
+
+#### Test: branch_name_collision
+- Setup: Branch `wf-abc12345` already exists
+- Action: Try to create worktree with session_id `abc12345`
+- Assert: Error or use alternative name
+
+#### Test: nested_worktree_detection
+- Setup: Run orchestrator from within a worktree
+- Action: `orchestrator start --isolated`
+- Assert: Error about nested worktrees not supported
