@@ -273,11 +273,28 @@ orchestrator start "Refactor login" --isolated
 
 ### How It Works
 
-1. **Isolation**: Creates a new git worktree at `.orchestrator/worktrees/<session-id>/`
+1. **Isolation**: Creates a new git worktree with human-readable name (e.g., `20260113-brave-falcon-abc12345`)
 2. **Branching**: Creates a dedicated branch `wf-<session-id>` from your current HEAD
 3. **Environment**: Copies `.env` and `.env.*` files to the worktree automatically
 4. **Merge**: When you run `orchestrator finish`, changes are auto-merged back to the original branch
 5. **Cleanup**: The worktree and temporary branch are removed after successful merge
+6. **Auto-cleanup**: Stale worktrees (>7 days old) are automatically cleaned up on session start
+
+### Human-Readable Names
+
+Worktrees are created with human-readable names in the format:
+```
+YYYYMMDD-adjective-noun-sessionid
+```
+
+Examples:
+- `20260113-brave-falcon-abc12345`
+- `20260113-swift-eagle-def67890`
+
+This format ensures:
+- **Chronological sorting**: Date prefix means alphabetical order = time order
+- **Easy identification**: Adjective-noun pairs are memorable (like Happy's naming)
+- **Session linking**: Session ID suffix links back to workflow state
 
 ### Port Conflicts
 
@@ -301,15 +318,20 @@ When running parallel sessions (e.g., multiple Next.js apps), you may encounter 
 Use `orchestrator doctor` to diagnose and fix worktree issues:
 
 ```bash
-# Check status
+# Check status (shows human-readable names and age)
 orchestrator doctor
 
 # Clean up orphaned worktrees
 orchestrator doctor --cleanup
 
+# Clean up only worktrees older than 7 days
+orchestrator doctor --cleanup --older-than 7
+
 # Fix session metadata
 orchestrator doctor --fix
 ```
+
+**Note:** Stale worktrees are automatically cleaned up on session start (>7 days old). This is configured in `.claude/hooks/session-start.sh`.
 
 ## Zero-Config Workflow Enforcement (PRD-008)
 

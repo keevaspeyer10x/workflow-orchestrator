@@ -4,16 +4,50 @@ This module provides WorktreeManager for creating, listing, and cleaning up
 git worktrees that enable parallel Claude Code sessions without file conflicts.
 
 Each isolated workflow gets its own worktree with:
+    - Human-readable name (YYYYMMDD-adjective-noun-sessionid)
     - Unique branch (wf-<session-id>)
     - Copy of .env* files
     - Independent working directory
 """
 
+import random
 import shutil
 import subprocess
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
+
+# Word lists for human-readable names (like Happy's worktree naming)
+ADJECTIVES = [
+    "brave", "calm", "eager", "fair", "gentle", "happy", "jolly", "keen",
+    "lively", "merry", "noble", "proud", "quick", "rapid", "silent", "swift",
+    "tender", "vivid", "warm", "zesty", "bright", "clever", "daring", "fierce"
+]
+
+NOUNS = [
+    "falcon", "tiger", "eagle", "lion", "wolf", "bear", "hawk", "fox",
+    "deer", "owl", "raven", "swan", "crane", "heron", "otter", "lynx",
+    "puma", "cobra", "viper", "shark", "whale", "dolphin", "seal", "orca"
+]
+
+
+def generate_worktree_name(session_id: str) -> str:
+    """Generate a human-readable worktree name.
+
+    Format: YYYYMMDD-adjective-noun-sessionid
+    This format ensures chronological ordering when sorted alphabetically.
+
+    Args:
+        session_id: 8-character session ID
+
+    Returns:
+        Human-readable name like "20260113-brave-falcon-abc12345"
+    """
+    date_prefix = datetime.now().strftime("%Y%m%d")
+    adjective = random.choice(ADJECTIVES)
+    noun = random.choice(NOUNS)
+    return f"{date_prefix}-{adjective}-{noun}-{session_id}"
 
 
 class WorktreeError(Exception):
@@ -47,6 +81,8 @@ class WorktreeInfo:
     session_id: str
     path: Path
     branch: str
+    name: str = ""  # Human-readable name (directory name)
+    created_at: Optional[datetime] = None  # Creation time from directory name
 
 
 @dataclass
@@ -122,8 +158,11 @@ class WorktreeManager:
     def create(self, session_id: str) -> Path:
         """Create a new worktree for a session.
 
-        Creates a worktree at .orchestrator/worktrees/<session_id> with
+        Creates a worktree at .orchestrator/worktrees/<human-readable-name> with
         a new branch wf-<session_id>.
+
+        The human-readable name format is: YYYYMMDD-adjective-noun-sessionid
+        This ensures chronological ordering when sorted alphabetically.
 
         Args:
             session_id: Unique session identifier
@@ -143,7 +182,8 @@ class WorktreeManager:
             )
 
         branch_name = f"wf-{session_id}"
-        worktree_path = self.worktrees_dir / session_id
+        worktree_name = generate_worktree_name(session_id)
+        worktree_path = self.worktrees_dir / worktree_name
 
         # Check if branch already exists
         if self._branch_exists(branch_name):
@@ -181,11 +221,41 @@ class WorktreeManager:
                 dest = worktree_path / env_file.name
                 shutil.copy2(env_file, dest)
 
+    def _parse_worktree_name(self, name: str) -> tuple[str, Optional[datetime]]:
+        """Parse a worktree directory name to extract session_id and created_at.
+
+        Supports both formats:
+        - New format: YYYYMMDD-adjective-noun-sessionid (e.g., 20260113-brave-falcon-abc12345)
+        - Legacy format: just session_id (e.g., abc12345)
+
+        Args:
+            name: Directory name of the worktree
+
+        Returns:
+            Tuple of (session_id, created_at) where created_at may be None for legacy format
+        """
+        import re
+
+        # Try new format: YYYYMMDD-adjective-noun-sessionid
+        # Session ID can be alphanumeric (not just hex)
+        new_format = re.match(r'^(\d{8})-[a-z]+-[a-z]+-(.+)$', name)
+        if new_format:
+            date_str = new_format.group(1)
+            session_id = new_format.group(2)
+            try:
+                created_at = datetime.strptime(date_str, "%Y%m%d")
+                return session_id, created_at
+            except ValueError:
+                pass
+
+        # Legacy format: just the session_id
+        return name, None
+
     def list(self) -> List[WorktreeInfo]:
         """List all orchestrator-managed worktrees.
 
         Returns:
-            List of WorktreeInfo objects for each worktree
+            List of WorktreeInfo objects for each worktree, sorted by creation date (newest first)
         """
         if not self.worktrees_dir.exists():
             return []
@@ -212,14 +282,38 @@ class WorktreeManager:
         for wt in worktrees:
             wt_path = Path(wt.get("path", ""))
             if self.worktrees_dir in wt_path.parents or wt_path.parent == self.worktrees_dir:
-                session_id = wt_path.name
+                dir_name = wt_path.name
+                session_id, created_at = self._parse_worktree_name(dir_name)
                 managed.append(WorktreeInfo(
                     session_id=session_id,
                     path=wt_path,
-                    branch=wt.get("branch", "")
+                    branch=wt.get("branch", ""),
+                    name=dir_name,
+                    created_at=created_at
                 ))
 
+        # Sort by created_at (newest first), with None values at the end
+        managed.sort(key=lambda x: (x.created_at is None, x.created_at), reverse=True)
+
         return managed
+
+    def _find_worktree_by_session(self, session_id: str) -> Optional[WorktreeInfo]:
+        """Find a worktree by session_id.
+
+        Searches through all managed worktrees to find one matching the session_id.
+        This supports both legacy format (session_id as directory name) and new
+        human-readable format (YYYYMMDD-adjective-noun-sessionid).
+
+        Args:
+            session_id: Session ID to find
+
+        Returns:
+            WorktreeInfo if found, None otherwise
+        """
+        for wt in self.list():
+            if wt.session_id == session_id:
+                return wt
+        return None
 
     def cleanup(self, session_id: str) -> bool:
         """Remove a worktree and optionally delete its branch.
@@ -230,11 +324,18 @@ class WorktreeManager:
         Returns:
             True if worktree was removed, False if not found
         """
-        worktree_path = self.worktrees_dir / session_id
         branch_name = f"wf-{session_id}"
 
-        if not worktree_path.exists():
-            return False
+        # Find the worktree (supports both legacy and new naming)
+        wt = self._find_worktree_by_session(session_id)
+        if not wt:
+            # Also check legacy path directly for backward compatibility
+            legacy_path = self.worktrees_dir / session_id
+            if not legacy_path.exists():
+                return False
+            worktree_path = legacy_path
+        else:
+            worktree_path = wt.path
 
         # Remove worktree
         self._run_git(["worktree", "remove", str(worktree_path), "--force"], check=False)
@@ -254,9 +355,15 @@ class WorktreeManager:
         Returns:
             Path to worktree if it exists, None otherwise
         """
-        worktree_path = self.worktrees_dir / session_id
-        if worktree_path.exists():
-            return worktree_path
+        wt = self._find_worktree_by_session(session_id)
+        if wt:
+            return wt.path
+
+        # Check legacy path directly for backward compatibility
+        legacy_path = self.worktrees_dir / session_id
+        if legacy_path.exists():
+            return legacy_path
+
         return None
 
     def merge_and_cleanup(self, session_id: str, target_branch: str) -> MergeResult:
@@ -273,10 +380,10 @@ class WorktreeManager:
             WorktreeNotFoundError: If worktree doesn't exist
             MergeConflictError: If merge has conflicts
         """
-        worktree_path = self.worktrees_dir / session_id
+        worktree_path = self.get_worktree_path(session_id)
         branch_name = f"wf-{session_id}"
 
-        if not worktree_path.exists():
+        if not worktree_path:
             raise WorktreeNotFoundError(f"Worktree not found: {session_id}")
 
         # Get commit count before merge

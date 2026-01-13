@@ -55,11 +55,12 @@ class TestWorktreeManager:
 
         result = manager.create(session_id)
 
-        # Worktree should exist
-        expected_path = git_repo / ".orchestrator" / "worktrees" / session_id
-        assert result == expected_path
-        assert expected_path.exists()
-        assert expected_path.is_dir()
+        # Worktree should exist with human-readable name containing session_id
+        assert result.exists()
+        assert result.is_dir()
+        assert result.parent == git_repo / ".orchestrator" / "worktrees"
+        # Name should end with session_id (format: YYYYMMDD-adjective-noun-sessionid)
+        assert result.name.endswith(f"-{session_id}")
 
         # Branch should exist
         branch_result = subprocess.run(
@@ -312,3 +313,74 @@ class TestMergeResult:
 
         assert result.success is True
         assert result.merged_commits == 3
+
+
+class TestHumanReadableNaming:
+    """Test human-readable worktree naming"""
+
+    def test_generate_worktree_name_format(self):
+        """Test that generated names have correct format"""
+        from src.worktree_manager import generate_worktree_name
+        from datetime import datetime
+
+        session_id = "abc12345"
+        name = generate_worktree_name(session_id)
+
+        # Format should be YYYYMMDD-adjective-noun-sessionid
+        parts = name.split("-")
+        assert len(parts) == 4
+
+        # First part should be today's date
+        today = datetime.now().strftime("%Y%m%d")
+        assert parts[0] == today
+
+        # Last part should be session_id
+        assert parts[3] == session_id
+
+    def test_parse_worktree_name_new_format(self):
+        """Test parsing new format worktree names"""
+        from src.worktree_manager import WorktreeManager
+        from datetime import datetime
+
+        manager = WorktreeManager(Path("/tmp"))
+
+        # Test new format
+        session_id, created_at = manager._parse_worktree_name("20260113-brave-falcon-abc12345")
+        assert session_id == "abc12345"
+        assert created_at == datetime(2026, 1, 13)
+
+    def test_parse_worktree_name_legacy_format(self):
+        """Test parsing legacy format worktree names"""
+        from src.worktree_manager import WorktreeManager
+
+        manager = WorktreeManager(Path("/tmp"))
+
+        # Test legacy format (just session_id)
+        session_id, created_at = manager._parse_worktree_name("abc12345")
+        assert session_id == "abc12345"
+        assert created_at is None
+
+    def test_worktree_info_has_name_and_date(self, tmp_path):
+        """Test that list() returns WorktreeInfo with name and created_at"""
+        from src.worktree_manager import WorktreeManager
+        import subprocess
+
+        # Create a git repo
+        subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmp_path, check=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
+        (tmp_path / ".gitignore").write_text(".orchestrator/\n")
+        subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+        subprocess.run(["git", "commit", "-m", "Initial"], cwd=tmp_path, check=True, capture_output=True)
+
+        manager = WorktreeManager(tmp_path)
+        manager.create("testsession")
+
+        worktrees = manager.list()
+        assert len(worktrees) == 1
+
+        wt = worktrees[0]
+        assert wt.session_id == "testsession"
+        assert wt.name != ""  # Should have human-readable name
+        assert wt.name.endswith("-testsession")
+        assert wt.created_at is not None  # Should have creation date

@@ -11,7 +11,13 @@ cd "$PROJECT_DIR"
 
 echo "=== Workflow Orchestrator Session Start ==="
 
-# 1. Update orchestrator
+# 1. Auto-cleanup stale worktrees (older than 7 days)
+if command -v orchestrator &> /dev/null; then
+    echo "Cleaning up stale worktrees..."
+    orchestrator doctor --cleanup --older-than 7 2>/dev/null || true
+fi
+
+# 2. Update orchestrator
 echo "Checking workflow orchestrator..."
 pip install -q --upgrade git+https://github.com/keevaspeyer10x/workflow-orchestrator.git 2>/dev/null || true
 

@@ -2875,6 +2875,7 @@ def cmd_doctor(args):
     working_dir = Path(args.dir or '.')
     cleanup = getattr(args, 'cleanup', False)
     fix = getattr(args, 'fix', False)
+    older_than_days = getattr(args, 'older_than', 0)
 
     # Check if we're in a git repo
     import subprocess
@@ -2907,15 +2908,22 @@ def cmd_doctor(args):
     else:
         for wt in worktrees:
             session_info = session_mgr.get_session_info(wt.session_id)
+            # Display human-readable name if available, otherwise session_id
+            display_name = wt.name if wt.name else wt.session_id
+            age_str = ""
+            if wt.created_at:
+                age_days = (datetime.now() - wt.created_at).days
+                age_str = f" ({age_days}d old)"
+
             if session_info:
                 status = "active" if session_info.get('isolated') else "unknown"
-                print(f"  ✓ {wt.session_id}")
-                print(f"    Path: {wt.path}")
+                print(f"  ✓ {display_name}{age_str}")
+                print(f"    Session: {wt.session_id}")
                 print(f"    Branch: {wt.branch}")
                 print(f"    Status: {status}")
             else:
-                print(f"  ⚠ {wt.session_id} (ORPHANED - no matching session)")
-                print(f"    Path: {wt.path}")
+                print(f"  ⚠ {display_name}{age_str} (ORPHANED)")
+                print(f"    Session: {wt.session_id}")
                 print(f"    Branch: {wt.branch}")
     print()
 
@@ -2962,18 +2970,31 @@ def cmd_doctor(args):
 
     # Cleanup mode
     if cleanup or fix:
-        if orphaned_worktrees:
+        # Filter orphaned worktrees by age if --older-than specified
+        worktrees_to_cleanup = orphaned_worktrees
+        if older_than_days > 0:
+            cutoff_date = datetime.now() - timedelta(days=older_than_days)
+            worktrees_to_cleanup = [
+                wt for wt in orphaned_worktrees
+                if wt.created_at and wt.created_at < cutoff_date
+            ]
+            skipped = len(orphaned_worktrees) - len(worktrees_to_cleanup)
+            if skipped > 0:
+                print(f"  Skipping {skipped} orphaned worktree(s) newer than {older_than_days} days")
+
+        if worktrees_to_cleanup:
             print("CLEANUP")
             print("-" * 60)
-            for wt in orphaned_worktrees:
+            for wt in worktrees_to_cleanup:
+                display_name = wt.name if wt.name else wt.session_id
                 try:
                     success = wt_manager.cleanup(wt.session_id)
                     if success:
-                        print(f"  ✓ Removed orphaned worktree: {wt.session_id}")
+                        print(f"  ✓ Removed orphaned worktree: {display_name}")
                     else:
-                        print(f"  ✗ Failed to remove: {wt.session_id}")
+                        print(f"  ✗ Failed to remove: {display_name}")
                 except Exception as e:
-                    print(f"  ✗ Error removing {wt.session_id}: {e}")
+                    print(f"  ✗ Error removing {display_name}: {e}")
             print()
 
         if missing_worktrees and fix:
@@ -5802,6 +5823,8 @@ Examples:
                                help='Remove orphaned worktrees')
     doctor_parser.add_argument('--fix', action='store_true',
                                help='Fix session metadata for missing worktrees')
+    doctor_parser.add_argument('--older-than', type=int, default=0,
+                               help='Only cleanup worktrees older than N days (default: 0 = all orphaned)')
     doctor_parser.set_defaults(func=cmd_doctor)
 
     # Secrets command
