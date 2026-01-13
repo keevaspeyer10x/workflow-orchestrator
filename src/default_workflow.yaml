@@ -560,15 +560,16 @@ phases:
           - "[privacy] Only captures workflow metadata, no code or sensitive data"
 
       - id: "commit_and_sync"
-        name: "Commit and Sync Changes"
-        description: "Ask user if they are ready to commit and sync to main. If approved: 1) Run git status/diff, 2) Auto-generate commit message from workflow task and changes, 3) Stage relevant files (exclude .env, secrets, workflow state), 4) Commit and push."
+        name: "Finish Workflow"
+        description: "Complete the workflow by running 'orchestrator finish'. This commits changes and syncs to remote automatically. The agent MUST run this command - do not leave workflow in incomplete state."
         required: true
         skippable: true
         skip_conditions: ["no_changes_to_commit", "user_will_commit_manually"]
         verification:
           type: "manual_gate"
-          description: "User confirms ready to commit and sync changes to main."
+          description: "User confirms ready to finish workflow."
         notes:
-          - "[tip] Auto-generate commit message: summarize the task from workflow state + key changes from git diff"
-          - "[tip] Commit message format: 'feat/fix/chore: <summary from task>' with bullet points of what changed"
+          - "[action] Run: orchestrator finish"
+          - "[auto] This command: commits changes, syncs to remote, generates summary"
+          - "[important] Do NOT skip this step or leave workflow incomplete - always run 'orchestrator finish'"
           - "[caution] Exclude from commit: .env, .workflow_state.json, .workflow_log.jsonl, secrets, credentials"

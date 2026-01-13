@@ -2403,6 +2403,45 @@ def cmd_review(args):
     else:
         results = {review_type: router.execute_review(review_type)}
 
+    # Log reviews to workflow if active (fixes review persistence bug)
+    engine = None
+    try:
+        engine = get_engine(args)
+        if engine and engine.state:
+            for review_name, result in results.items():
+                event_type = EventType.REVIEW_COMPLETED if result.success else EventType.REVIEW_FAILED
+                engine.log_event(WorkflowEvent(
+                    event_type=event_type,
+                    workflow_id=engine.state.workflow_id,
+                    phase_id=engine.state.current_phase_id,
+                    message=f"Review {review_name}: {'passed' if result.success else 'failed'}",
+                    details={
+                        "review_type": review_name,
+                        "model": result.model_used,
+                        "method": result.method_used,
+                        "success": result.success,
+                        "findings_count": len(result.findings) if result.findings else 0,
+                        "blocking_count": result.blocking_count if hasattr(result, 'blocking_count') else 0,
+                        "error": result.error,
+                    }
+                ))
+            # Store in metadata for finish summary
+            if "review_models" not in engine.state.metadata:
+                engine.state.metadata["review_models"] = {}
+            phase = engine.state.current_phase_id or "reviews"
+            if phase not in engine.state.metadata["review_models"]:
+                engine.state.metadata["review_models"][phase] = {}
+            for review_name, result in results.items():
+                engine.state.metadata["review_models"][phase][result.model_used] = {
+                    "review_type": review_name,
+                    "success": result.success,
+                    "issues": len(result.findings) if result.findings else 0,
+                    "method": result.method_used,
+                }
+            engine.save_state()
+    except Exception:
+        pass  # No active workflow, that's fine
+
     if args.json:
         output = {k: v.to_dict() for k, v in results.items()}
         print(json.dumps(output, indent=2, default=str))
