@@ -66,6 +66,7 @@ from src.git_conflict_resolver import (
     check_conflicts,
     format_escalation_for_user,
 )
+from src.sync_manager import SyncManager, SyncResult
 from src.resolution.llm_resolver import (
     LLMResolver,
     LLMResolutionResult,
@@ -1413,6 +1414,49 @@ def cmd_finish(args):
                     except WorktreeError as e:
                         print(f"\n⚠️  Worktree cleanup warning: {e}")
 
+        # CORE-031: Auto-sync with remote
+        sync_result = None
+        no_push = getattr(args, 'no_push', False)
+        continue_sync = getattr(args, 'continue_sync', False)
+
+        if not no_push:
+            sync_mgr = SyncManager(working_dir)
+            upstream = sync_mgr.get_remote_tracking_branch()
+
+            if upstream:
+                print()
+
+                if continue_sync:
+                    # --continue: User resolved conflicts, just try to push
+                    print("Continuing sync after conflict resolution...")
+                    sync_result = sync_mgr.push()
+                else:
+                    # Normal sync: fetch, check divergence, rebase if needed, push
+                    print("Syncing with remote...")
+                    sync_result = sync_mgr.sync()
+
+                if not sync_result.success and sync_result.conflicts:
+                    print()
+                    print("=" * 60)
+                    print("⚠️  SYNC CONFLICT DETECTED")
+                    print("=" * 60)
+                    print("Remote has changes that conflict with yours.")
+                    print()
+                    print("To resolve:")
+                    print("  1. Run: orchestrator resolve --apply")
+                    print("  2. Then: orchestrator finish --continue")
+                    print()
+                    print("Or to skip sync:")
+                    print("  orchestrator finish --no-push")
+                    print("=" * 60)
+                    # Don't exit - workflow state is already saved, just sync failed
+                elif sync_result.success and sync_result.pushed_commits > 0:
+                    print(f"✓ Pushed {sync_result.pushed_commits} commit(s) to {upstream}")
+                elif sync_result.success:
+                    print("✓ Already in sync with remote")
+                else:
+                    print(f"⚠️  Sync failed: {sync_result.message}")
+
         # WF-027: Capture summary to buffer for saving to file
         from io import StringIO
         summary_buffer = StringIO()
@@ -1568,6 +1612,19 @@ def cmd_finish(args):
             output("-" * 60)
             output(f"  ✓ Merged {worktree_merge_info['commits']} commits to {worktree_merge_info['original_branch']}")
             output("  ✓ Worktree cleaned up")
+            output()
+
+        # CORE-031: Show sync result
+        if sync_result is not None:
+            output("REMOTE SYNC")
+            output("-" * 60)
+            if sync_result.success:
+                if sync_result.pushed_commits > 0:
+                    output(f"  ✓ Pushed {sync_result.pushed_commits} commit(s) to remote")
+                else:
+                    output("  ✓ Already in sync with remote")
+            else:
+                output(f"  ⚠️  {sync_result.message}")
             output()
 
         # WF-027: Save summary to archive file
@@ -5648,6 +5705,10 @@ Examples:
     finish_parser.add_argument('--skip-learn', action='store_true', help='Skip learning report')
     finish_parser.add_argument('--skip-review-check', action='store_true', dest='skip_review_check',
                               help='Skip the external review validation (requires --reason)')
+    finish_parser.add_argument('--no-push', action='store_true', dest='no_push',
+                              help='Skip auto-push to remote (CORE-031)')
+    finish_parser.add_argument('--continue', action='store_true', dest='continue_sync',
+                              help='Continue after resolving sync conflicts (CORE-031)')
     finish_parser.set_defaults(func=cmd_finish)
     
     # Analyze command

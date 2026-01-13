@@ -1,75 +1,94 @@
-# CORE-025 Phase 4: Risk Analysis
+# CORE-031: Risk Analysis
 
 ## Risk Assessment
 
-### High Risk
+### Risk 1: Accidental Push to Wrong Branch
+**Severity:** HIGH
+**Likelihood:** LOW
 
-#### R1: Merge Conflicts on Finish
-**Risk**: When merging worktree branch back to original, conflicts may occur if the original branch has changed.
-**Mitigation**:
-- Detect merge conflicts before attempting auto-merge
-- Provide clear error message with resolution steps
-- Offer `--no-merge` flag to skip auto-merge
-- Store unmerged worktree path for manual resolution
+**Description:** Auto-push could push to wrong remote branch if tracking is misconfigured.
 
-#### R2: Orphaned Worktrees
-**Risk**: Crash or interruption leaves worktrees without cleanup.
-**Mitigation**:
-- `orchestrator doctor` command for reconciliation
-- Store worktree metadata in session for recovery
-- Clear warning when orphans detected
+**Mitigation:**
+- Always use `git rev-parse --abbrev-ref --symbolic-full-name @{u}` to get actual upstream
+- Refuse to push if no upstream is configured (require explicit `git push -u`)
+- Log which branch we're pushing to before pushing
 
-### Medium Risk
+### Risk 2: Force Push / Destructive Operations
+**Severity:** CRITICAL
+**Likelihood:** VERY LOW
 
-#### R3: Disk Space
-**Risk**: Each worktree consumes disk space (full working copy).
-**Mitigation**:
-- Document space requirements
-- `orchestrator doctor --cleanup` for manual cleanup
-- Future: max concurrent limit (deferred to v2)
+**Description:** Sync logic must NEVER do force push or rewrite history.
 
-#### R4: Git Version Compatibility
-**Risk**: Worktrees require Git 2.5+ (released 2015).
-**Mitigation**:
-- Check git version before worktree operations
-- Clear error message if git too old
-- Document minimum version requirement
+**Mitigation:**
+- Never use `--force` flag
+- Only use `git push` (not `git push -f`)
+- Fail gracefully if push rejected - let user handle
 
-#### R5: Port Conflicts
-**Risk**: Multiple worktree sessions may try to use same ports.
-**Mitigation**:
-- Document port conflict strategy in CLAUDE.md
-- Recommend different PORT env vars per worktree
-- Future: automatic port allocation (deferred)
+### Risk 3: Conflict Resolution Fails Mid-Sync
+**Severity:** MEDIUM
+**Likelihood:** MEDIUM
 
-### Low Risk
+**Description:** If sync starts, detects conflicts, but then conflict resolution fails, user could be in an awkward state.
 
-#### R6: .env File Sensitivity
-**Risk**: Copying .env files to worktrees duplicates secrets.
-**Mitigation**:
-- Worktrees are in .orchestrator/ (gitignored)
-- .env files are not committed to git
-- Cleanup removes worktree and .env copies
+**Mitigation:**
+- Use `--continue` flag to resume from interrupted state
+- Save state before starting any destructive operations
+- Provide clear instructions for manual recovery
+- Don't abort workflow completion - just skip sync
 
-#### R7: Branch Naming Collisions
-**Risk**: Session ID collision creates duplicate branch names.
-**Mitigation**:
-- 8-char UUID prefix has extremely low collision probability
-- Check branch exists before creating
-- Error with clear message if collision occurs
+### Risk 4: No Network / Remote Unreachable
+**Severity:** LOW
+**Likelihood:** MEDIUM
+
+**Description:** Network issues during fetch/push could cause confusing errors.
+
+**Mitigation:**
+- Set reasonable timeout (30s for fetch, 60s for push)
+- Clear error message: "Remote unreachable - use --no-push to skip"
+- Non-fatal: workflow still completes, just warns about sync failure
+
+### Risk 5: Large Push Takes Too Long
+**Severity:** LOW
+**Likelihood:** LOW
+
+**Description:** Very large commits could timeout during push.
+
+**Mitigation:**
+- Configurable timeout (default 60s)
+- Progress indication where possible
+- Warn but don't fail workflow on timeout
+
+### Risk 6: Isolated Worktree + Remote Conflicts
+**Severity:** MEDIUM
+**Likelihood:** LOW
+
+**Description:** For `--isolated` workflows, merge to original branch succeeds but push to remote fails.
+
+**Mitigation:**
+- Merge happens locally first (already working)
+- Push failure is non-fatal - warn user
+- User can manually push if needed
 
 ## Impact Assessment
 
-| Area | Impact | Notes |
-|------|--------|-------|
-| Existing workflows | None | Only affects new `--isolated` workflows |
-| CLI interface | Low | Additive changes, no breaking changes |
-| Session management | Low | New metadata fields, backward compatible |
-| File system | Medium | New .orchestrator/worktrees/ directory |
+### Affected Components
+1. `src/cli.py` - cmd_finish function (existing, well-tested)
+2. `src/sync_manager.py` - New module (isolated, testable)
+3. `src/worktree_manager.py` - Minor addition (push after merge)
+
+### Breaking Changes
+- **None** - All new flags are additive
+- Existing workflows continue to work (just gain auto-push)
+- `--no-push` provides escape hatch for old behavior
+
+### Backwards Compatibility
+- Default behavior changes from "no sync" to "auto sync"
+- Users who relied on manual push will now have auto push
+- This is intentional and desired per user feedback
+- `--no-push` flag preserves old behavior if needed
 
 ## Rollback Plan
-
-If issues are discovered:
-1. Remove `--isolated` flag from cmd_start (returns to non-isolated behavior)
-2. `orchestrator doctor --cleanup` removes all worktrees
-3. Session metadata fields are safely ignored by older versions
+If issues discovered:
+1. `--no-push` flag allows immediate workaround
+2. Can revert to previous behavior by making `--no-push` the default
+3. `SyncManager` is isolated - can be disabled without affecting rest of finish

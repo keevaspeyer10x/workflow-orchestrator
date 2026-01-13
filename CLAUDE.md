@@ -457,9 +457,37 @@ orchestrator skip <item_id> --reason "Why skipped"
 # Advance to next phase
 orchestrator advance
 
-# Finish workflow
+# Finish workflow (auto-syncs with remote)
 orchestrator finish
+
+# Finish without pushing to remote
+orchestrator finish --no-push
+
+# Continue after resolving sync conflicts
+orchestrator finish --continue
 ```
+
+## Auto-Sync on Finish (CORE-031)
+
+When you run `orchestrator finish`, the orchestrator automatically syncs with the remote:
+
+1. **Fetches from remote** to check for divergence
+2. **Rebases if needed** (if remote has new commits)
+3. **Pushes to remote** after successful merge
+4. **Reports what was pushed** in the completion summary
+
+**Flags:**
+- `--no-push` - Skip auto-sync entirely (for local-only workflows)
+- `--continue` - Resume push after manually resolving conflicts
+
+**If conflicts are detected:**
+```
+orchestrator resolve --apply  # Resolve conflicts
+orchestrator finish --continue  # Continue the sync
+```
+
+**For --isolated worktrees:**
+The merged result is automatically pushed to remote after the worktree merge.
 
 ## Key Commands
 

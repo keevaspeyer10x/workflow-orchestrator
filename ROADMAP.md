@@ -371,7 +371,7 @@ This is a blocker for zero-human-review workflows. Reviews silently failing defe
 ---
 
 #### CORE-031: Auto-Sync on Workflow Finish
-**Status:** Planned
+**Status:** Implemented (2026-01-13)
 **Complexity:** MEDIUM
 **Priority:** HIGH
 **Source:** User observation (2026-01-13) - "Shouldn't orchestrator finish handle the sync and merge - particularly if there are conflicts"
@@ -441,14 +441,14 @@ The existing `merge_and_cleanup()` merges worktree → original branch, but:
 - **Risk:** LOW - --no-push provides escape hatch
 
 **Tasks:**
-- [ ] Add `--no-push` flag to `orchestrator finish`
-- [ ] Implement fetch + divergence detection
-- [ ] Integrate with `orchestrator resolve` for conflicts
-- [ ] Add `--continue` flag for post-resolution finish
-- [ ] Update --isolated flow to push after merge
-- [ ] Add clear feedback on what was pushed
-- [ ] Document in CLAUDE.md
-- [ ] Add tests for sync scenarios
+- [x] Add `--no-push` flag to `orchestrator finish`
+- [x] Implement fetch + divergence detection
+- [x] Integrate with `orchestrator resolve` for conflicts
+- [x] Add `--continue` flag for post-resolution finish
+- [x] Update --isolated flow to push after merge
+- [x] Add clear feedback on what was pushed
+- [x] Document in CLAUDE.md
+- [x] Add tests for sync scenarios (21 tests in tests/test_sync_manager.py)
 
 ---
 
