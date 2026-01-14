@@ -120,10 +120,11 @@ def validate_api_keys(
     Validate that API keys are available for the specified models.
 
     CORE-026: Proactive key validation before running reviews.
+    CORE-026-E2: Added ping validation to test keys with real API calls.
 
     Args:
         models: List of model names to validate (e.g., ["gemini", "openai"])
-        ping: If True, also ping the API to verify key is valid (not implemented yet)
+        ping: If True, also ping the API to verify key is valid
 
     Returns:
         Tuple of (all_valid, errors_dict) where errors_dict maps model -> error message
@@ -151,12 +152,85 @@ def validate_api_keys(
             errors[model_lower] = f"{key_name} appears invalid (too short)"
             continue
 
-        # TODO: If ping=True, make a lightweight API call to verify the key
-        # For now, just check presence
-        if ping:
-            logger.debug(f"Ping validation not yet implemented for {model}")
+        # CORE-026-E2: If ping=True, make a lightweight API call to verify the key
+        if ping and model_lower not in errors:
+            ping_error = _ping_api(model_lower, key_value)
+            if ping_error:
+                errors[model_lower] = ping_error
 
     return len(errors) == 0, errors
+
+
+def _ping_api(model: str, api_key: str) -> Optional[str]:
+    """
+    Test an API key by making a lightweight request.
+
+    CORE-026-E2: Ping validation for API keys.
+
+    Uses model list endpoints which are cheap and fast.
+
+    Args:
+        model: Model name (gemini, openai, openrouter, grok)
+        api_key: The API key to test
+
+    Returns:
+        None if successful, error message string if failed
+    """
+    import urllib.request
+    import urllib.error
+    import json
+
+    try:
+        if model in ("openrouter",):
+            # OpenRouter: GET /api/v1/models
+            req = urllib.request.Request(
+                "https://openrouter.ai/api/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+                method="GET",
+            )
+        elif model in ("openai", "codex"):
+            # OpenAI: GET /v1/models
+            req = urllib.request.Request(
+                "https://api.openai.com/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+                method="GET",
+            )
+        elif model in ("gemini",):
+            # Google AI: GET models with key parameter
+            req = urllib.request.Request(
+                f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}",
+                method="GET",
+            )
+        elif model in ("grok",):
+            # XAI: GET /v1/models (or use OpenRouter if available)
+            # Check if this looks like an OpenRouter key
+            if api_key.startswith("sk-or-"):
+                req = urllib.request.Request(
+                    "https://openrouter.ai/api/v1/models",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    method="GET",
+                )
+            else:
+                req = urllib.request.Request(
+                    "https://api.x.ai/v1/models",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    method="GET",
+                )
+        else:
+            # Unknown model, skip ping
+            logger.debug(f"No ping endpoint configured for model: {model}")
+            return None
+
+        with urllib.request.urlopen(req, timeout=10) as response:
+            # Success - key is valid
+            return None
+
+    except urllib.error.HTTPError as e:
+        return f"API returned HTTP {e.code}: {e.reason}"
+    except urllib.error.URLError as e:
+        return f"Network error: {e.reason}"
+    except Exception as e:
+        return f"Ping failed: {str(e)}"
 
 
 class ReviewMethod(Enum):

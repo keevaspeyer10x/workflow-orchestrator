@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 from .prompts import get_tool
-from .result import ReviewResult, parse_review_output
+from .result import ReviewResult, ReviewErrorType, parse_review_output
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +115,7 @@ class CLIExecutor:
                 model_used=tool,
                 method_used="cli",
                 error=f"Review timed out after {self.timeout} seconds",
+                error_type=ReviewErrorType.TIMEOUT,  # CORE-026-E1
                 duration_seconds=self.timeout,
             )
 
@@ -125,16 +126,20 @@ class CLIExecutor:
                 model_used=tool,
                 method_used="cli",
                 error=f"CLI tool not found: {e}. Install with: npm install -g @openai/codex @google/gemini-cli",
+                error_type=ReviewErrorType.KEY_MISSING,  # CORE-026-E1: CLI tool not installed
             )
 
         except Exception as e:
             logger.exception(f"Error executing {review_type} review")
+            # CORE-026-E1: Classify the error type
+            error_type = self._classify_error(str(e))
             return ReviewResult(
                 review_type=review_type,
                 success=False,
                 model_used=tool,
                 method_used="cli",
                 error=str(e),
+                error_type=error_type,
                 duration_seconds=time.time() - start_time,
             )
 
@@ -350,3 +355,30 @@ Analyze the code changes and provide your review."""
                 os.environ.get("openrouter_api_key")
             ),
         }
+
+    def _classify_error(self, error_msg: str) -> ReviewErrorType:
+        """
+        Classify an error message into a ReviewErrorType.
+
+        CORE-026-E1: Wire error classification in executors.
+        """
+        error_lower = error_msg.lower()
+
+        # Check for HTTP status codes
+        if "401" in error_msg or "403" in error_msg:
+            return ReviewErrorType.KEY_INVALID
+        if "429" in error_msg:
+            return ReviewErrorType.RATE_LIMITED
+
+        # Check for common error patterns
+        if "unauthorized" in error_lower:
+            return ReviewErrorType.KEY_INVALID
+        if "rate limit" in error_lower or "ratelimit" in error_lower:
+            return ReviewErrorType.RATE_LIMITED
+        if "timeout" in error_lower:
+            return ReviewErrorType.TIMEOUT
+        if "connection" in error_lower or "network" in error_lower:
+            return ReviewErrorType.NETWORK_ERROR
+
+        # Default to generic failure
+        return ReviewErrorType.REVIEW_FAILED

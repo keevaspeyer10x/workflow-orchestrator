@@ -1,62 +1,53 @@
-# CORE-026: Risk Analysis
+# CORE-026-E1 & E2 Risk Analysis
 
 ## Risk Assessment
 
-### High Impact Risks
+### E1: Wire Error Classification in Executors
 
-| Risk | Likelihood | Impact | Mitigation |
-|------|------------|--------|------------|
-| **API ping adds latency** | High | Medium | Use lightweight endpoints (list models), 5s timeout, cache validation for session |
-| **False positives block valid reviews** | Medium | High | Validate key presence + format only, not full auth; keep `--skip-review-check` escape hatch |
-| **Breaking existing workflows** | Low | High | `required_reviews` defaults to empty list (backward compatible); existing workflows continue working |
+| Risk | Severity | Likelihood | Mitigation |
+|------|----------|------------|------------|
+| Breaking existing error handling | MEDIUM | LOW | Tests verify current behavior preserved |
+| Missing error patterns | LOW | MEDIUM | Start with common patterns, extend later |
+| Exception type detection | LOW | LOW | Use hasattr() checks for safe introspection |
 
-### Medium Impact Risks
+**Overall Risk: LOW** - Adding error_type is additive, default NONE maintains backward compat.
 
-| Risk | Likelihood | Impact | Mitigation |
-|------|------------|--------|------------|
-| **Over-blocking frustrated users** | Medium | Medium | Clear recovery instructions, `--skip-review-check --reason` escape hatch, `orchestrator review retry` command |
-| **Retry loops on permanent failures** | Low | Medium | Max 3 retries, classify errors (transient vs permanent), skip permanent failures |
-| **Schema migration complexity** | Low | Medium | `required_reviews` is additive field, no migration needed for existing state files |
+### E2: Ping Validation
 
-### Low Impact Risks
+| Risk | Severity | Likelihood | Mitigation |
+|------|----------|------------|------------|
+| Rate limiting on ping | LOW | MEDIUM | Use lightweight /models endpoint |
+| Increased latency | LOW | HIGH | ping=False by default, opt-in only |
+| API endpoint changes | LOW | LOW | Standard endpoints, well-documented |
+| Network errors on ping | LOW | MEDIUM | Catch exceptions, return clear error |
 
-| Risk | Likelihood | Impact | Mitigation |
-|------|------------|--------|------------|
-| **API changes break ping logic** | Low | Low | Abstract ping per provider, easy to update individual endpoints |
-| **Error classification wrong** | Medium | Low | Log all errors with full context, improve classification over time |
+**Overall Risk: LOW** - Opt-in feature with defensive error handling.
 
-## Backward Compatibility
+## Impact Assessment
 
-### What Changes
-- New `required_reviews` field in workflow.yaml phases
-- New `ReviewErrorType` enum in ReviewResult
-- New `orchestrator review retry` command
-- Updated error messages with recovery instructions
+### Positive Impacts
+- E1: Error_type field becomes useful for debugging and retry logic
+- E2: Can detect expired/revoked keys before running full review
 
-### What Stays Compatible
-- Existing workflow.yaml files work (required_reviews defaults to empty)
-- Existing `--skip-review-check` flag still works
-- Review completion events unchanged (REVIEW_COMPLETED)
-- State file format unchanged
+### Negative Impacts
+- E2: Slight latency increase when ping=True (mitigated by opt-in)
 
-## Rollback Plan
+## Rollback Strategy
 
-If issues arise after deployment:
+Both changes are additive:
+- E1: error_type defaults to NONE, existing code works unchanged
+- E2: ping defaults to False, existing behavior unchanged
 
-1. **Immediate**: Users can use `--skip-review-check --reason "..."` to bypass validation
-2. **Quick fix**: Remove validation calls, revert to current behavior
-3. **Full rollback**: Git revert the commits
-
-## Dependencies
-
-- No new external dependencies
-- Uses existing API clients (no new libraries)
-- No database changes
-- No state file format changes
+Rollback: Simply revert the commit. No data migration needed.
 
 ## Security Considerations
 
-- API keys never logged (existing sanitization continues)
-- Recovery instructions don't expose key values
-- Ping endpoints are read-only (list models, not create/modify)
-- No new attack surface introduced
+- E1: Error messages already sanitized (_sanitize_error)
+- E2: API keys not logged, only used in HTTP headers
+- Ping endpoints return model lists, no sensitive data exposed
+
+## Dependencies
+
+No new dependencies required. Uses existing:
+- requests (already used by api_executor)
+- urllib.request (already used by cli_executor for grok)

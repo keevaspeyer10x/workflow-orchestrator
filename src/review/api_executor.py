@@ -13,7 +13,7 @@ from typing import Optional
 
 from .context import ReviewContext, ReviewContextCollector
 from .prompts import get_prompt, get_tool
-from .result import ReviewResult, parse_review_output
+from .result import ReviewResult, ReviewErrorType, classify_http_error, parse_review_output
 from ..secrets import get_secret
 
 logger = logging.getLogger(__name__)
@@ -122,12 +122,17 @@ class APIExecutor:
             logger.exception(f"Error executing {review_type} review via API")
             # Sanitize error message to avoid leaking sensitive info
             error_msg = self._sanitize_error(str(e))
+
+            # CORE-026-E1: Classify the error type
+            error_type = self._classify_exception(e)
+
             return ReviewResult(
                 review_type=review_type,
                 success=False,
                 model_used="unknown",
                 method_used="api",
                 error=error_msg,
+                error_type=error_type,
                 duration_seconds=time.time() - start_time,
             )
 
@@ -143,6 +148,46 @@ class APIExecutor:
         if len(sanitized) > 500:
             sanitized = sanitized[:500] + "... (truncated)"
         return sanitized
+
+    def _classify_exception(self, exc: Exception) -> ReviewErrorType:
+        """
+        Classify an exception into a ReviewErrorType.
+
+        CORE-026-E1: Wire error classification in executors.
+        """
+        import requests
+
+        # Check for specific exception types first
+        if isinstance(exc, requests.exceptions.Timeout):
+            return ReviewErrorType.TIMEOUT
+        if isinstance(exc, requests.exceptions.ConnectionError):
+            return ReviewErrorType.NETWORK_ERROR
+
+        # Check for HTTP status codes in the error message
+        error_str = str(exc).lower()
+        error_full = str(exc)
+
+        # Try to extract HTTP status code from RuntimeError message
+        # Format: "OpenRouter API error: 401 - ..."
+        if "401" in error_full or "403" in error_full:
+            return ReviewErrorType.KEY_INVALID
+        if "429" in error_full:
+            return ReviewErrorType.RATE_LIMITED
+        if "500" in error_full or "502" in error_full or "503" in error_full:
+            return ReviewErrorType.NETWORK_ERROR
+
+        # Check for keywords
+        if "timeout" in error_str:
+            return ReviewErrorType.TIMEOUT
+        if "connection" in error_str or "network" in error_str:
+            return ReviewErrorType.NETWORK_ERROR
+        if "unauthorized" in error_str or "invalid" in error_str and "key" in error_str:
+            return ReviewErrorType.KEY_INVALID
+        if "rate" in error_str and "limit" in error_str:
+            return ReviewErrorType.RATE_LIMITED
+
+        # Default to generic failure
+        return ReviewErrorType.REVIEW_FAILED
 
     def _build_prompt(self, review_type: str, context: ReviewContext) -> str:
         """Build the full prompt with context."""
