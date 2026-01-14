@@ -2048,3 +2048,72 @@ All 5 reviews passed with no findings:
 ---
 
 *Generated: 2026-01-14*
+
+---
+
+# Learnings: CORE-026-E1 & E2 - Executor Wiring & Ping Validation
+
+## Task Summary
+Follow-up to CORE-026: Wire error classification in API/CLI executors and add ping validation.
+
+## What Was Built
+
+### E1: Error Classification in Executors
+
+| Component | Implementation |
+|-----------|---------------|
+| `_classify_exception()` in api_executor.py | Classifies requests exceptions (Timeout, ConnectionError) and parses HTTP status codes from error messages |
+| `_classify_error()` in cli_executor.py | Classifies CLI error messages by checking for status codes (401/403/429) and keywords (rate limit, timeout, unauthorized) |
+| error_type in ReviewResult | Now populated correctly by both executors |
+
+### E2: Ping Validation
+
+| Component | Implementation |
+|-----------|---------------|
+| `_ping_api()` in router.py | Lightweight /models endpoint tests for OpenRouter, OpenAI, Gemini, and Grok |
+| `ping=True` option | Optional flag on validate_api_keys() to test keys with real API calls |
+
+## Key Design Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| Parse error messages for HTTP codes | RuntimeError from _call_openrouter contains "401", "429", etc. - simpler than wrapping every API call |
+| Use urllib.request for ping | Avoids adding requests dependency to router.py |
+| 10-second timeout for ping | Fast enough for validation, prevents hanging |
+
+## Test Coverage
+
+15 new tests added:
+- 6 API executor tests (401/403/429/500/timeout/connection)
+- 4 CLI executor tests (timeout/not_found/401/rate_limit)
+- 5 ping validation tests (no_call/valid/invalid/missing/network)
+
+## External Model Reviews
+
+All 5 reviews passed with no findings.
+
+## AI Critique Recommendation
+
+> Standardize HTTP: Switch `_ping_api` to use `requests` if available to simplify the code.
+
+Noted for future - current urllib.request approach works and avoids adding dependency to router.py.
+
+## Metrics
+
+| Metric | Value |
+|--------|-------|
+| New tests | 15 |
+| Tests passing | 95/95 (related) |
+| External reviews | 5/5 passed |
+| Implementation time | ~45 minutes |
+
+## Files Modified
+
+- `src/review/api_executor.py` - Added _classify_exception()
+- `src/review/cli_executor.py` - Added _classify_error()
+- `src/review/router.py` - Added _ping_api(), updated validate_api_keys()
+- `tests/test_review_resilience.py` - Added 15 tests
+
+---
+
+*Generated: 2026-01-14*

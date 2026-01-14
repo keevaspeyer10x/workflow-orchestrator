@@ -2,6 +2,16 @@
 
 All notable changes to the workflow-orchestrator.
 
+## [2.10.1] - 2026-01-14
+
+### Added
+- **CORE-026-E1 & E2: Complete Error Classification**
+  - `_classify_exception()` in api_executor.py - classifies HTTP status codes and request exceptions
+  - `_classify_error()` in cli_executor.py - classifies CLI error messages
+  - `_ping_api()` in router.py - lightweight /models endpoint tests for API key validation
+  - `ping=True` option on `validate_api_keys()` to test keys with real API calls
+  - 15 new tests (10 executor classification, 5 ping validation)
+
 ## [2.10.0] - 2026-01-14
 
 ### Added

@@ -315,67 +315,31 @@ Premature. PRD multi-agent spawning is not yet battle-tested. We don't know if c
 ---
 
 #### CORE-026-E1: Wire Error Classification in Executors
-**Status:** Planned
+**Status:** ✅ **COMPLETED** (2026-01-14)
 **Complexity:** LOW
 **Priority:** MEDIUM
 **Source:** AI critique during CORE-026 implementation
 
-**Problem:**
-ReviewErrorType and classify_http_error() are implemented, but API/CLI executors don't catch HTTP errors and populate the error_type field on ReviewResult. The infrastructure exists but isn't wired up.
-
-**Implementation:**
-```python
-# In api_executor.py execute():
-try:
-    response = client.chat.completions.create(...)
-except OpenAIError as e:
-    if hasattr(e, 'status_code'):
-        error_type = classify_http_error(e.status_code, str(e))
-    else:
-        error_type = ReviewErrorType.NETWORK_ERROR
-    return ReviewResult(
-        success=False,
-        error=str(e),
-        error_type=error_type,
-        ...
-    )
-```
-
-**Files Affected:**
-- `src/review/api_executor.py` - Catch HTTP errors, call classify_http_error()
-- `src/review/cli_executor.py` - Parse CLI error output, classify
-
-**Complexity vs Benefit Tradeoff:**
-- LOW effort (error handling already exists, just need to classify)
-- HIGH benefit (makes error_type field actually useful)
-
-**Recommendation:** ✅ RECOMMEND - Completes the CORE-026 feature
+**Implemented:**
+- Added `_classify_exception()` to api_executor.py - classifies requests exceptions and HTTP status codes
+- Added `_classify_error()` to cli_executor.py - classifies CLI error messages
+- Updated exception handlers to populate error_type field
+- 10 new tests (6 API executor, 4 CLI executor)
 
 ---
 
 #### CORE-026-E2: Ping Validation for API Keys
-**Status:** Planned
+**Status:** ✅ **COMPLETED** (2026-01-14)
 **Complexity:** LOW
 **Priority:** LOW
 **Source:** CORE-026 implementation
 
-**Problem:**
-Current `validate_api_keys()` only checks key presence (is it set?) and format (is it >10 chars?). It doesn't verify the key actually works by making a test API call.
-
-**Implementation:**
-Add `ping=True` option to `validate_api_keys()` that makes a lightweight API call (e.g., list models) to verify the key is valid before running full reviews.
-
-**Complexity vs Benefit Tradeoff:**
-- LOW effort (simple API call per provider)
-- MEDIUM benefit (catches expired/revoked keys early)
-- RISK: Adds latency, may hit rate limits
-
-**YAGNI Check:**
-- Current presence check catches most issues
-- Ping would only help for expired/revoked keys
-- Can defer until evidence of need
-
-**Recommendation:** ⚠️ DEFER - Current validation sufficient for now
+**Implemented:**
+- Added `_ping_api()` function to router.py
+- Added `ping=True` option to `validate_api_keys()`
+- Supports OpenRouter, OpenAI, Gemini, and Grok endpoints
+- Uses lightweight /models endpoint for validation
+- 5 new tests for ping validation
 
 ---
 
