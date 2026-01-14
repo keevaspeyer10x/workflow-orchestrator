@@ -525,6 +525,43 @@ The merged result is automatically pushed to remote after the worktree merge.
 | `orchestrator workflow switch <id>` | Switch to a different workflow session |
 | `orchestrator workflow info [id]` | Show details about a session |
 | `orchestrator workflow cleanup` | Remove old/abandoned sessions |
+| `orchestrator task add <title>` | Quick add a task to local backend |
+| `orchestrator task list` | List tasks with optional filters |
+| `orchestrator task next` | Show highest priority open task |
+| `orchestrator task show <id>` | Show task details |
+| `orchestrator task close <id>` | Close a task |
+
+## Task Management (Issue #56)
+
+Manage tasks/issues with pluggable backends. Default backend stores tasks locally.
+
+```bash
+# Quick add a task
+orchestrator task add "Implement feature X" --priority P1
+
+# List all tasks
+orchestrator task list
+orchestrator task list --status open --priority P0
+
+# Get next task to work on (highest priority open)
+orchestrator task next
+
+# View task details
+orchestrator task show 1
+
+# Close a task
+orchestrator task close 1 --comment "Completed"
+```
+
+**Backends:**
+- `local` (default): Stores tasks in `~/.config/orchestrator/tasks.json`
+- `github`: Uses GitHub Issues via `gh` CLI (auto-detects repo)
+
+```bash
+# Use GitHub backend
+orchestrator task list --provider github
+orchestrator task add "Bug fix" --provider github
+```
 
 ## Workflow Rules
 

@@ -79,6 +79,12 @@ from src.adherence_validator import (
 )
 from src.path_resolver import OrchestratorPaths
 from src.session_manager import SessionManager
+from src.task_provider import (
+    get_task_provider,
+    TaskTemplate,
+    TaskPriority,
+    TaskStatus,
+)
 
 VERSION = "2.0.0"
 
@@ -5718,6 +5724,148 @@ def cmd_feedback_sync(args):
         sys.exit(1)
 
 
+# =============================================================================
+# Task Commands (Issue #56)
+# =============================================================================
+
+
+def cmd_task_list(args):
+    """List tasks from configured backend."""
+    try:
+        # Get provider (default to local)
+        provider_name = getattr(args, 'provider', None) or 'local'
+        provider = get_task_provider(provider_name)
+
+        # Build filters
+        status = TaskStatus(args.status) if args.status else None
+        priority = TaskPriority(args.priority) if args.priority else None
+
+        tasks = provider.list_tasks(status=status, priority=priority)
+
+        if not tasks:
+            print("No tasks found.")
+            return
+
+        # Display tasks
+        print(f"{'ID':<6} {'Priority':<10} {'Status':<12} {'Title'}")
+        print("-" * 60)
+        for task in tasks:
+            priority_str = task.priority.value if task.priority else "---"
+            print(f"{task.id:<6} {priority_str:<10} {task.status.value:<12} {task.title[:40]}")
+
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+
+def cmd_task_next(args):
+    """Show the highest priority open task."""
+    try:
+        provider_name = getattr(args, 'provider', None) or 'local'
+        provider = get_task_provider(provider_name)
+
+        task = provider.get_next_task()
+
+        if not task:
+            print("No open tasks.")
+            return
+
+        print(f"Next task (ID: {task.id}):")
+        print(f"  Title: {task.title}")
+        print(f"  Priority: {task.priority.value if task.priority else 'N/A'}")
+        print(f"  Status: {task.status.value}")
+        if task.url:
+            print(f"  URL: {task.url}")
+
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+
+def cmd_task_add(args):
+    """Quick add a task with minimal prompts."""
+    try:
+        provider_name = getattr(args, 'provider', None) or 'local'
+        provider = get_task_provider(provider_name)
+
+        # Map priority string to enum
+        priority_map = {
+            'P0': TaskPriority.CRITICAL,
+            'P1': TaskPriority.HIGH,
+            'P2': TaskPriority.MEDIUM,
+            'P3': TaskPriority.LOW,
+        }
+        priority = priority_map.get(args.priority, TaskPriority.MEDIUM)
+
+        template = TaskTemplate(
+            title=args.title,
+            description=args.description or args.title,
+            problem_solved=args.description or "Task to be completed",
+            priority=priority,
+            labels=args.labels.split(',') if args.labels else [],
+        )
+
+        task = provider.create_task(template)
+
+        print(f"✓ Task created (ID: {task.id})")
+        print(f"  Title: {task.title}")
+        print(f"  Priority: {task.priority.value if task.priority else 'N/A'}")
+        if task.url:
+            print(f"  URL: {task.url}")
+
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+
+def cmd_task_close(args):
+    """Close a task by ID."""
+    try:
+        provider_name = getattr(args, 'provider', None) or 'local'
+        provider = get_task_provider(provider_name)
+
+        task = provider.close_task(args.task_id, comment=args.comment)
+
+        print(f"✓ Task {task.id} closed")
+        print(f"  Title: {task.title}")
+
+    except KeyError:
+        print(f"Error: Task {args.task_id} not found")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+
+def cmd_task_show(args):
+    """Show details of a specific task."""
+    try:
+        provider_name = getattr(args, 'provider', None) or 'local'
+        provider = get_task_provider(provider_name)
+
+        task = provider.get_task(args.task_id)
+
+        if not task:
+            print(f"Error: Task {args.task_id} not found")
+            sys.exit(1)
+
+        print(f"Task {task.id}:")
+        print(f"  Title: {task.title}")
+        print(f"  Status: {task.status.value}")
+        print(f"  Priority: {task.priority.value if task.priority else 'N/A'}")
+        if task.labels:
+            print(f"  Labels: {', '.join(task.labels)}")
+        if task.url:
+            print(f"  URL: {task.url}")
+        print()
+        print("Description:")
+        print(task.body[:500] if task.body else "(no description)")
+
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="AI Workflow Orchestrator - Enforce multi-phase workflows with active verification",
@@ -6235,6 +6383,54 @@ Examples:
 
     # Default to capture if no subcommand
     feedback_parser.set_defaults(func=lambda args: cmd_feedback_capture(args) if not args.feedback_command else None)
+
+    # Task command (Issue #56)
+    task_parser = subparsers.add_parser('task', help='Manage tasks/issues (Issue #56)')
+    task_subparsers = task_parser.add_subparsers(dest='task_command', help='Task subcommands')
+
+    # task list
+    task_list = task_subparsers.add_parser('list', help='List tasks')
+    task_list.add_argument('--status', '-s', choices=['open', 'in_progress', 'blocked', 'closed'],
+                           help='Filter by status')
+    task_list.add_argument('--priority', '-p', choices=['P0', 'P1', 'P2', 'P3'],
+                           help='Filter by priority')
+    task_list.add_argument('--provider', choices=['local', 'github'],
+                           help='Task provider (default: local)')
+    task_list.set_defaults(func=cmd_task_list)
+
+    # task next
+    task_next = task_subparsers.add_parser('next', help='Show highest priority open task')
+    task_next.add_argument('--provider', choices=['local', 'github'],
+                           help='Task provider (default: local)')
+    task_next.set_defaults(func=cmd_task_next)
+
+    # task add (quick add)
+    task_add = task_subparsers.add_parser('add', help='Quick add a task')
+    task_add.add_argument('title', help='Task title')
+    task_add.add_argument('--description', '-d', help='Task description')
+    task_add.add_argument('--priority', '-p', choices=['P0', 'P1', 'P2', 'P3'],
+                          default='P2', help='Priority (default: P2)')
+    task_add.add_argument('--labels', '-l', help='Comma-separated labels')
+    task_add.add_argument('--provider', choices=['local', 'github'],
+                          help='Task provider (default: local)')
+    task_add.set_defaults(func=cmd_task_add)
+
+    # task close
+    task_close = task_subparsers.add_parser('close', help='Close a task')
+    task_close.add_argument('task_id', help='Task ID to close')
+    task_close.add_argument('--comment', '-c', help='Completion comment')
+    task_close.add_argument('--provider', choices=['local', 'github'],
+                            help='Task provider (default: local)')
+    task_close.set_defaults(func=cmd_task_close)
+
+    # task show
+    task_show = task_subparsers.add_parser('show', help='Show task details')
+    task_show.add_argument('task_id', help='Task ID to show')
+    task_show.add_argument('--provider', choices=['local', 'github'],
+                           help='Task provider (default: local)')
+    task_show.set_defaults(func=cmd_task_show)
+
+    task_parser.set_defaults(func=lambda args: task_parser.print_help() if not args.task_command else None)
 
     args = parser.parse_args()
     
