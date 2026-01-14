@@ -568,7 +568,8 @@ phases:
           type: "manual_gate"
           description: "User confirms ready to finish workflow."
         notes:
-          - "[action] Run: orchestrator finish"
+          - "[action] Run: orchestrator finish (NOT --no-push)"
           - "[auto] This command: commits changes, syncs to remote, generates summary"
+          - "[default] Push is DEFAULT - only use --no-push if user explicitly requests it"
           - "[important] Do NOT skip this step or leave workflow incomplete - always run 'orchestrator finish'"
           - "[caution] Exclude from commit: .env, .workflow_state.json, .workflow_log.jsonl, secrets, credentials"

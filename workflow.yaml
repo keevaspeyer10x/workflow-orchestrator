@@ -505,6 +505,9 @@ phases:
         required: true
         skippable: true
         skip_conditions: ["no_changes_to_commit", "user_will_commit_manually"]
+        hints:
+          - "[finish] Use 'orchestrator finish' (NOT --no-push) - push is the default"
+          - "[why] Auto-sync ensures remote stays current; --no-push is opt-out, not default"
         verification:
           type: "manual_gate"
           description: "User confirms ready to commit and sync changes to main."
