@@ -1721,6 +1721,35 @@ def cmd_finish(args):
                 output(f"  ⚠️  {sync_result.message}")
             output()
 
+        # Issue #62: Auto-close GitHub issues referenced in task description
+        import re as regex
+        issue_pattern = regex.compile(r'#(\d+)')
+        issue_matches = issue_pattern.findall(task_description)
+        if issue_matches and not getattr(args, 'no_close_issues', False):
+            output("GITHUB ISSUES")
+            output("-" * 60)
+            for issue_num in issue_matches:
+                try:
+                    result = subprocess.run(
+                        ['gh', 'issue', 'close', issue_num, '--comment',
+                         f'Closed automatically by orchestrator finish.\n\nTask: {task_description}'],
+                        capture_output=True, text=True, timeout=30
+                    )
+                    if result.returncode == 0:
+                        output(f"  ✓ Closed issue #{issue_num}")
+                    else:
+                        # Issue might already be closed or not exist
+                        if 'already closed' in result.stderr.lower():
+                            output(f"  ○ Issue #{issue_num} already closed")
+                        else:
+                            output(f"  ⚠️  Could not close #{issue_num}: {result.stderr.strip()}")
+                except FileNotFoundError:
+                    output(f"  ⚠️  gh CLI not found - cannot auto-close #{issue_num}")
+                    break
+                except subprocess.TimeoutExpired:
+                    output(f"  ⚠️  Timeout closing #{issue_num}")
+            output()
+
         # WF-027: Save summary to archive file
         working_dir = Path(args.dir or '.')
         archive_dir = working_dir / 'docs' / 'archive'
@@ -6076,6 +6105,8 @@ Examples:
                               help='Skip auto-push to remote (CORE-031)')
     finish_parser.add_argument('--continue', action='store_true', dest='continue_sync',
                               help='Continue after resolving sync conflicts (CORE-031)')
+    finish_parser.add_argument('--no-close-issues', action='store_true', dest='no_close_issues',
+                              help='Skip auto-closing GitHub issues referenced in task description')
     finish_parser.set_defaults(func=cmd_finish)
     
     # Analyze command
