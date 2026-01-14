@@ -140,13 +140,26 @@ class TestCliIsolated:
         args = MagicMock()
         args.dir = str(git_repo)
         args.notes = "Completed feature"
-        
+        args.abandon = False  # Explicitly set to avoid MagicMock truthy behavior
+        args.reason = "Test bypass"  # Required when skip_review_check=True
+        args.skip_learn = True
+        args.skip_review_check = True  # Skip review validation for test
+        args.force = True  # Skip item completion check
+        args.no_push = True  # Don't try to push
+        args.continue_sync = False
+
         # Mock engine to avoid full workflow execution
         with patch('src.cli.get_engine') as mock_get_engine:
             mock_engine = MagicMock()
             mock_engine.state.completed_at = "timestamp"
+            mock_engine.state.task_description = "Test Task"  # Required for archive filename
+            mock_engine.state.workflow_id = "wf_test123"
+            mock_engine.can_advance_phase.return_value = (True, [], [])  # No blockers
+            mock_engine.validate_reviews_completed.return_value = (True, [])
+            mock_engine.get_workflow_summary.return_value = {}
+            mock_engine.get_all_skipped_items.return_value = []
             mock_get_engine.return_value = mock_engine
-            
+
             cmd_finish(args)
 
         # 4. Verify merge
@@ -197,12 +210,15 @@ class TestCliIsolated:
         args.dir = str(git_repo)
         args.cleanup = True
         args.fix = False
-        
+        args.older_than = 0  # Explicitly set to avoid MagicMock comparison error
+
         cmd_doctor(args)
         
         captured = capsys.readouterr()
-        assert f"Removed orphaned worktree: {session_id}" in captured.out
-        
+        # Check for removal message - uses human-readable name, not session_id
+        assert "Removed orphaned worktree:" in captured.out
+        assert session_id in captured.out  # Session ID appears in the worktree name
+
         # Verify gone
         path = wt_manager.get_worktree_path(session_id)
         assert path is None
