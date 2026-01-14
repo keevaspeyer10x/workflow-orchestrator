@@ -37,7 +37,7 @@ Potential approaches:
 
 
 #### WF-030: Session Isolation for Multi-Workflow Support
-**Status:** Planned
+**Status:** ✅ COMPLETED (2026-01-14) - All phases complete
 **Complexity:** MEDIUM (requires state file refactoring + locking)
 **Priority:** HIGH - Blocks parallel multi-session workflows
 **Source:** User observation (2026-01-11) - "It will break the process if I run 2 at once won't it?"
@@ -124,7 +124,7 @@ Low-medium effort, high value for users who want to multitask. Option A provides
 - [x] Update CLAUDE.md with session management usage
 - [ ] Add `--workflow` flag to all orchestrator commands (deferred - lower priority)
 
-**Phase 4: Git Worktree Isolation (Planned)**
+**Phase 4: Git Worktree Isolation ✅ COMPLETED (2026-01-14)**
 
 For truly parallel Claude Code sessions (two terminals, two Happy chats simultaneously):
 
@@ -138,19 +138,19 @@ For truly parallel Claude Code sessions (two terminals, two Happy chats simultan
     - `machineBash()` accepts basePath parameter for cwd
   - **BLOCKER CLEARED** - Proceed with Phase 4 implementation when ready
 
-**MVP Tasks (v1):**
-- [ ] Add `WorktreeManager` class (create/list/cleanup)
-- [ ] Copy `.env*` files to worktrees on creation
-- [ ] Handle dirty main branch gracefully (stash or error)
-- [ ] Modify `cmd_start --isolated` to create worktree
-- [ ] Modify `cmd_finish` to merge + cleanup worktree
-- [ ] Add `orchestrator doctor` for worktree reconciliation
-- [ ] Print worktree path (don't cd for user)
-- [ ] Document port conflict strategy
+**MVP Tasks (v1):** ✅ ALL COMPLETE
+- [x] Add `WorktreeManager` class (create/list/cleanup) - `src/worktree_manager.py`
+- [x] Copy `.env*` files to worktrees on creation - `worktree_manager.py:201-210`
+- [x] Handle dirty main branch gracefully (stash or error) - `DirtyWorkingDirectoryError`
+- [x] Modify `cmd_start --isolated` to create worktree - `cli.py:cmd_start()`
+- [x] Modify `cmd_finish` to merge + cleanup worktree - `cli.py:cmd_finish()`
+- [x] Add `orchestrator doctor` for worktree reconciliation - `cli.py:cmd_doctor()`
+- [x] Print worktree path (don't cd for user) - Output shows path
+- [x] Document port conflict strategy - CLAUDE.md
 
 **v2 Tasks (Defer):**
-- [ ] Human-readable naming (task-slug-sessionid)
-- [ ] Auto-cleanup timers (7d prune, 24h conflict preserve)
+- [x] Human-readable naming (task-slug-sessionid) - `YYYYMMDD-adjective-noun-sessionid` format
+- [x] Auto-cleanup timers (7d prune, 24h conflict preserve) - Session-start hook
 - [ ] Max concurrent worktrees limit
 - [ ] Pre-warmed worktree templates
 - [ ] Symlinked node_modules/venv

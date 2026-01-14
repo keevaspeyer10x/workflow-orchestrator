@@ -2,6 +2,14 @@
 
 All notable changes to the workflow-orchestrator.
 
+## [2.10.2] - 2026-01-14
+
+### Changed
+- **WF-030 Phase 4: Git Worktree Isolation marked COMPLETED**
+  - Updated ROADMAP.md to reflect full implementation status
+  - All MVP tasks verified: WorktreeManager, --isolated flag, worktree merge/cleanup, orchestrator doctor
+  - V2 features also complete: Human-readable naming (YYYYMMDD-adjective-noun-sessionid), auto-cleanup (7d)
+
 ## [2.10.1] - 2026-01-14
 
 ### Added
