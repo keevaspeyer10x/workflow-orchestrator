@@ -2,6 +2,19 @@
 
 All notable changes to the workflow-orchestrator.
 
+## [Unreleased]
+
+### Fixed
+- **Issue #61: CLI Hanging in Non-Interactive Mode**
+  - Added `is_interactive()` helper function to detect non-TTY environments
+  - Added `confirm()` helper for prompts with fail-fast in non-interactive mode
+  - Fixed `orchestrator advance` - uses `--yes` flag instead of hanging on critique prompt
+  - Fixed `orchestrator init` - uses `--force` flag instead of hanging on overwrite prompt
+  - Fixed `orchestrator resolve` - exits with suggestion to use `--strategy` instead of hanging
+  - Fixed `orchestrator workflow cleanup` - uses `--yes` flag instead of hanging on confirmation
+  - Fixed `orchestrator feedback review --suggest` - gracefully skips ROADMAP prompt in non-interactive mode
+  - Added 14 new tests in `tests/test_cli_noninteractive.py`
+
 ## [2.10.2] - 2026-01-14
 
 ### Changed
