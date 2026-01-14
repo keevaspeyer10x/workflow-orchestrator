@@ -1007,18 +1007,31 @@ orchestrator config set feedback_sync false
 
 - Run `orchestrator --help` for command help
 - Read `docs/SETUP_GUIDE.md` for setup instructions
-- Check `ROADMAP.md` for planned features
+- Check [GitHub Issues](https://github.com/keevaspeyer10x/workflow-orchestrator/issues) for planned features and bugs
 - Review `LEARNINGS.md` for lessons learned
 
+## Issue and Changelog Tracking
 
-- The orchestrator creates `.workflow_state.json` to track progress
-- Workflow logs are stored in `.workflow_log.jsonl`
-- Checkpoints are stored in `.workflow_checkpoints/`
-- These files should be gitignored for most projects
+**GitHub Issues are the source of truth** for all planned work, bugs, and feature requests.
 
-## Getting Help
+Historical planning documents (ROADMAP.md, PRD files) have been archived to `docs/archive/planning/` for reference.
 
-- Run `orchestrator --help` for command help
-- Read `docs/SETUP_GUIDE.md` for setup instructions
-- Check `ROADMAP.md` for planned features
-- Review `LEARNINGS.md` for lessons learned
+### Changelog Update Process
+
+When closing issues, document significant changes in `CHANGELOG.md`:
+
+1. Add entry under the appropriate version heading (or create `[Unreleased]` section)
+2. Categorize as: Added, Changed, Fixed, Removed, Deprecated, Security
+3. Reference the issue number: `- Feature description (#123)`
+4. Keep entries concise but descriptive
+
+Example:
+```markdown
+## [Unreleased]
+
+### Added
+- Model fallback execution chain (#58)
+
+### Fixed
+- Review timeout handling (#34)
+```
