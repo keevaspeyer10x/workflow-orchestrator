@@ -48,6 +48,9 @@ FUNCTION_CALLING_MODELS = {
     "openai/gpt-5.1",
     "openai/gpt-5.1-codex",
     "openai/gpt-5.1-codex-max",
+    "openai/gpt-5.2",
+    "openai/gpt-5.2-codex",
+    "openai/gpt-5.2-codex-max",
     "openai/codex",  # Codex family prefix
     # Anthropic models
     "anthropic/claude-3-opus",

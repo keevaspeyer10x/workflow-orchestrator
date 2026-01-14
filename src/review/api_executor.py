@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 # Model mapping for OpenRouter
 # Use latest available models for best review quality
 OPENROUTER_MODELS = {
-    "codex": "openai/gpt-5.1",  # Latest OpenAI model via OpenRouter
+    "codex": "openai/gpt-5.2",  # Latest OpenAI model via OpenRouter (Dec 2025)
     "gemini": "google/gemini-3-pro-preview",  # Latest Gemini model via OpenRouter (1M context)
 }
 

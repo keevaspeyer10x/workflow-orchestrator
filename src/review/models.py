@@ -371,7 +371,10 @@ class LiteLLMReviewer(BaseReviewer):
 
         # OpenAI Codex (code-specialized) via OpenRouter
         # NOTE: Codex models don't support temperature parameter
-        "openai/codex": "openrouter/openai/gpt-5.1-codex-max",
+        # Updated Dec 2025: GPT-5.2-Codex is now available
+        "openai/codex": "openrouter/openai/gpt-5.2-codex-max",
+        "openai/gpt-5.2-codex-max": "openrouter/openai/gpt-5.2-codex-max",
+        "openai/gpt-5.2-codex": "openrouter/openai/gpt-5.2-codex",
         "openai/gpt-5.1-codex-max": "openrouter/openai/gpt-5.1-codex-max",
 
         # OpenAI legacy via OpenRouter (for fallback)
@@ -405,6 +408,8 @@ class LiteLLMReviewer(BaseReviewer):
 
     # Models that don't support temperature parameter
     NO_TEMPERATURE_MODELS = {
+        "openrouter/openai/gpt-5.2-codex-max",
+        "openrouter/openai/gpt-5.2-codex",
         "openrouter/openai/gpt-5.1-codex-max",
         "openrouter/openai/gpt-5.1-codex",
         "openrouter/openai/codex-mini",

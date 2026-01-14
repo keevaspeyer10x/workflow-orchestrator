@@ -53,6 +53,9 @@ STATIC_FUNCTION_CALLING_MODELS = {
     "openai/gpt-5.1",
     "openai/gpt-5.1-codex",
     "openai/gpt-5.1-codex-max",
+    "openai/gpt-5.2",
+    "openai/gpt-5.2-codex",
+    "openai/gpt-5.2-codex-max",
     "openai/codex",
     # Anthropic models
     "anthropic/claude-3-opus",
@@ -360,7 +363,7 @@ class ModelRegistry:
         # Default recommendations
         defaults = {
             "general": "anthropic/claude-sonnet-4",
-            "code": "openai/gpt-5.1-codex",
+            "code": "openai/gpt-5.2-codex",  # Updated Dec 2025
             "long_context": "google/gemini-2.5-pro",
         }
 
@@ -398,6 +401,9 @@ class ModelRegistry:
         # NOTE: Keep these updated! Check provider docs for latest versions.
         latest_models = {
             "codex": [
+                "openai/gpt-5.2-codex-max",  # Latest as of Dec 2025
+                "openai/gpt-5.2-codex",
+                "openai/gpt-5.2",
                 "openai/gpt-5.1-codex-max",
                 "openai/gpt-5.1-codex",
                 "openai/gpt-5.1",

@@ -4,6 +4,16 @@ All notable changes to the workflow-orchestrator.
 
 ## [Unreleased]
 
+### Changed
+- **Upgraded to GPT-5.2-Codex** (released December 2025)
+  - Updated model_registry.py: 5.2-codex-max now preferred for code reviews
+  - Updated workflow.yaml and src/default_workflow.yaml: CLI and API model references
+  - Updated src/review/models.py: Added 5.2-codex model mappings and NO_TEMPERATURE_MODELS
+  - Updated src/review/api_executor.py: Default codex model now openai/gpt-5.2
+  - Updated src/providers/openrouter.py: Added 5.2 models to FUNCTION_CALLING_MODELS
+  - Updated src/schema.py: Default fallback chain now uses 5.2
+  - Maintains backward compatibility with 5.1 models as fallback
+
 ### Fixed
 - **Issue #61: CLI Hanging in Non-Interactive Mode**
   - Added `is_interactive()` helper function to detect non-TTY environments

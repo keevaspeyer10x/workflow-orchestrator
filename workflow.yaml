@@ -93,11 +93,11 @@ settings:
     # NOTE: Use model_registry.get_latest_model() to get current versions dynamically
     models:
       cli:
-        codex: "gpt-5.1-codex-max"       # Latest Codex model
+        codex: "gpt-5.2-codex-max"       # Latest Codex model (Dec 2025)
         gemini: "gemini-3-pro-preview"   # Latest Gemini model (preview)
         grok: "grok-4.1-fast"  # Latest Grok model (Jan 2026)
       api:
-        codex: "openai/gpt-5.1"          # OpenRouter model ID
+        codex: "openai/gpt-5.2"          # OpenRouter model ID
         gemini: "google/gemini-3-pro-preview"  # OpenRouter model ID
         grok: "x-ai/grok-4.1-fast"   # OpenRouter model ID
 
@@ -116,7 +116,7 @@ settings:
     # Uses OpenRouter as universal fallback, then Claude Opus as final fallback
     fallbacks:
       codex:
-        - "openai/gpt-5.1"           # OpenRouter fallback
+        - "openai/gpt-5.2"           # OpenRouter fallback
         - "anthropic/claude-opus-4"  # Final fallback
       gemini:
         - "google/gemini-3-pro"      # OpenRouter fallback
@@ -282,20 +282,20 @@ phases:
     items:
       - id: "security_review"
         name: "Security Review [Codex]"
-        description: "MANDATORY. Uses Codex/GPT-5.1 to check for OWASP Top 10, injection attacks, auth issues, SSRF, hardcoded secrets. Run in BACKGROUND."
+        description: "MANDATORY. Uses Codex/GPT-5.2 to check for OWASP Top 10, injection attacks, auth issues, SSRF, hardcoded secrets. Run in BACKGROUND."
         step_type: "gate"
         skip_conditions: ["documentation_only"]
         notes:
-          - "[model] Codex (gpt-5.1-codex-max) - code-specialized security analysis"
+          - "[model] Codex (gpt-5.2-codex-max) - code-specialized security analysis"
           - "[background] Start this review in background, don't wait for completion"
 
       - id: "quality_review"
         name: "Code Quality Review [Codex]"
-        description: "MANDATORY. Uses Codex/GPT-5.1 to check for code smells, edge cases, error handling, test coverage gaps. Run in BACKGROUND."
+        description: "MANDATORY. Uses Codex/GPT-5.2 to check for code smells, edge cases, error handling, test coverage gaps. Run in BACKGROUND."
         step_type: "gate"
         skip_conditions: ["documentation_only"]
         notes:
-          - "[model] Codex (gpt-5.1-codex-max) - code-specialized quality analysis"
+          - "[model] Codex (gpt-5.2-codex-max) - code-specialized quality analysis"
           - "[background] Start this review in background, don't wait for completion"
 
       - id: "consistency_review"

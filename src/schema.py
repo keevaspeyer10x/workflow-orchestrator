@@ -180,7 +180,7 @@ class ReviewSettings(BaseModel):
     enabled: bool = True
     minimum_required: int = Field(default=3, ge=1, le=5)  # At least 3 of 5 models
     fallbacks: dict[str, list[str]] = Field(default_factory=lambda: {
-        "codex": ["openai/gpt-5.1", "anthropic/claude-opus-4"],
+        "codex": ["openai/gpt-5.2", "anthropic/claude-opus-4"],
         "gemini": ["google/gemini-3-pro", "anthropic/claude-opus-4"],
         "grok": ["x-ai/grok-4.1", "anthropic/claude-opus-4"]
     })
