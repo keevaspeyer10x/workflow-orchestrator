@@ -1699,13 +1699,13 @@ Critical Issue: I Didn't Actually Use Multi-Agents Properly
    - Synthesis improvements
 2. I assumed work was done without verification
 3. No parallel execution - I should have sent a single message with 3 Task tool calls
-4. No Third-Party Model Reviews - I did NOT use /review or /minds to get external
+4. No Third-Party Model Reviews - I did NOT use /minds-review or /minds to get external
    AI perspectives on the implementations
 
 What Could Be Improved:
 1. Use Plan Agent First - Should have started with subagent_type="Plan"
 2. Launch Agents in Parallel - Send multiple Task calls in a single message
-3. Use /review on Completed Work - Run /review to get multi-model code review
+3. Use /minds-review on Completed Work - Run /minds-review to get multi-model code review
 4. Verify Agent Output - Don't trust summaries, read the actual files
 5. Background Agents - Could have used run_in_background=true
 ```
@@ -1750,7 +1750,7 @@ Add to LEARN phase in workflow.yaml:
     - "[check] If parallel: Did you launch them in SINGLE message with MULTIPLE Task calls?"
     - "[check] Did you use Plan agent before complex implementations?"
     - "[check] Did you verify agent output by reading files (not trusting summaries)?"
-    - "[check] Did you run all 5 third-party model reviews (/review or /minds)?"
+    - "[check] Did you run all 5 third-party model reviews (/minds-review or /minds)?"
     - "[check] Did you use 'orchestrator status' before each action?"
     - "[check] Did you complete all required items (no skips without justification)?"
     - "[check] Did you document learnings and propose roadmap items?"
