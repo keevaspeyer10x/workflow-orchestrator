@@ -1,79 +1,69 @@
-# CORE-026-E1 & E2 Test Cases
+# Test Cases: Issue #61 - CLI Non-Interactive Mode Fix
 
-## E1: Error Classification in Executors
+## Unit Tests
 
-### API Executor Tests
+### TC-001: `is_interactive()` returns True in terminal
+- **Setup**: Mock `sys.stdin.isatty()` = True, `sys.stdout.isatty()` = True, no CI env
+- **Expected**: Returns `True`
 
-| ID | Test | Expected | Priority |
-|----|------|----------|----------|
-| E1-API-01 | HTTP 401 error during review | error_type = KEY_INVALID | HIGH |
-| E1-API-02 | HTTP 403 error during review | error_type = KEY_INVALID | HIGH |
-| E1-API-03 | HTTP 429 error during review | error_type = RATE_LIMITED | HIGH |
-| E1-API-04 | HTTP 500 error during review | error_type = NETWORK_ERROR | MEDIUM |
-| E1-API-05 | Connection timeout | error_type = TIMEOUT | HIGH |
-| E1-API-06 | Network error (no connection) | error_type = NETWORK_ERROR | MEDIUM |
-| E1-API-07 | Parse error (invalid JSON response) | error_type = PARSE_ERROR | LOW |
-| E1-API-08 | Generic exception | error_type = REVIEW_FAILED | MEDIUM |
+### TC-002: `is_interactive()` returns False without tty
+- **Setup**: Mock `sys.stdin.isatty()` = False
+- **Expected**: Returns `False`
 
-### CLI Executor Tests
+### TC-003: `is_interactive()` returns False with CI env
+- **Setup**: Set `CI=true` environment variable
+- **Expected**: Returns `False`
 
-| ID | Test | Expected | Priority |
-|----|------|----------|----------|
-| E1-CLI-01 | TimeoutExpired exception | error_type = TIMEOUT | HIGH |
-| E1-CLI-02 | FileNotFoundError (CLI not found) | error_type = KEY_MISSING | HIGH |
-| E1-CLI-03 | Error output contains "401" | error_type = KEY_INVALID | MEDIUM |
-| E1-CLI-04 | Error output contains "rate limit" | error_type = RATE_LIMITED | MEDIUM |
-| E1-CLI-05 | Generic subprocess error | error_type = REVIEW_FAILED | MEDIUM |
+### TC-004: `confirm()` with `yes_flag=True` skips prompt
+- **Setup**: Call `confirm("Question?", yes_flag=True)`
+- **Expected**: Returns `True` without calling `input()`
 
-## E2: Ping Validation Tests
+### TC-005: `confirm()` exits in non-interactive mode
+- **Setup**: Mock non-interactive, call `confirm("Question?")`
+- **Expected**: Calls `sys.exit(1)` with error message
 
-### validate_api_keys() with ping=True
+### TC-006: `confirm()` prompts in interactive mode
+- **Setup**: Mock interactive, mock `input()` returning "y"
+- **Expected**: Returns `True`
 
-| ID | Test | Expected | Priority |
-|----|------|----------|----------|
-| E2-PING-01 | ping=True with valid OpenRouter key | returns (True, {}) | HIGH |
-| E2-PING-02 | ping=True with invalid key | returns (False, {model: error}) | HIGH |
-| E2-PING-03 | ping=True with missing key | returns (False, {model: "not set"}) | HIGH |
-| E2-PING-04 | ping=False (default) | no API calls made | HIGH |
-| E2-PING-05 | ping=True with network error | returns (False, {model: error}) | MEDIUM |
-| E2-PING-06 | ping=True with rate limited | returns (False, {model: error}) | MEDIUM |
+## Integration Tests
 
-### Ping Helper Tests
+### TC-007: `orchestrator advance --yes` in non-interactive mode
+- **Setup**: Create workflow at blocking phase, simulate non-interactive
+- **Command**: `orchestrator advance --yes`
+- **Expected**: Advances without hanging
 
-| ID | Test | Expected | Priority |
-|----|------|----------|----------|
-| E2-HELPER-01 | _ping_openai with valid key | PingResult(success=True) | MEDIUM |
-| E2-HELPER-02 | _ping_openrouter with valid key | PingResult(success=True) | MEDIUM |
-| E2-HELPER-03 | _ping_google with valid key | PingResult(success=True) | MEDIUM |
-| E2-HELPER-04 | _ping_xai_or_openrouter with valid key | PingResult(success=True) | MEDIUM |
+### TC-008: `orchestrator advance` without `--yes` in non-interactive mode
+- **Setup**: Workflow at blocking phase with critique issues, non-interactive
+- **Command**: `orchestrator advance`
+- **Expected**: Exit code 1, error message about non-interactive mode
 
-## Test Implementation Notes
+### TC-009: `orchestrator init --force` in non-interactive mode
+- **Setup**: Existing `workflow.yaml`, non-interactive
+- **Command**: `orchestrator init --force`
+- **Expected**: Overwrites without prompting
 
-### Mocking Strategy
+### TC-010: `orchestrator init` without `--force` in non-interactive mode
+- **Setup**: Existing `workflow.yaml`, non-interactive
+- **Command**: `orchestrator init`
+- **Expected**: Exit code 1, error message suggesting `--force`
 
-- **E1 Tests**: Mock HTTP responses using `responses` or `unittest.mock.patch`
-- **E2 Tests**: Mock API endpoints, verify no real API calls for ping=False
+### TC-011: `orchestrator resolve` in non-interactive mode
+- **Setup**: Git repo with merge conflicts, non-interactive
+- **Command**: `orchestrator resolve --apply`
+- **Expected**: Exit code 1, error suggesting `--strategy ours/theirs`
 
-### Existing Test File
+### TC-012: `orchestrator workflow cleanup --yes` in non-interactive mode
+- **Setup**: Multiple old sessions, non-interactive
+- **Command**: `orchestrator workflow cleanup --older-than 30 --yes`
+- **Expected**: Removes sessions without prompting
 
-Add to existing `tests/test_review_resilience.py` which already has:
-- TestReviewErrorType
-- TestAPIKeyValidation
-- TestRequiredReviewsFromWorkflow
-- TestRecoveryInstructions
-- TestRetryCommand
-- TestBackwardCompatibility
-- TestErrorTypeInEvents
+## Edge Cases
 
-### New Test Classes
+### TC-013: Interactive mode still works normally
+- **Setup**: Real terminal session
+- **Expected**: Prompts appear and accept input
 
-```python
-class TestAPIExecutorErrorClassification:
-    """E1: API executor populates error_type correctly."""
-
-class TestCLIExecutorErrorClassification:
-    """E1: CLI executor populates error_type correctly."""
-
-class TestPingValidation:
-    """E2: ping=True tests API keys with real requests."""
-```
+### TC-014: CI environment detection
+- **Setup**: Various CI env vars (CI, GITHUB_ACTIONS, GITLAB_CI)
+- **Expected**: All detected as non-interactive

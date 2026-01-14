@@ -37,6 +37,9 @@ dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
 ]
+nl = [
+    "ai-tool-bridge>=0.1.0",
+]
 
 [project.scripts]
 orchestrator = "src.cli:main"

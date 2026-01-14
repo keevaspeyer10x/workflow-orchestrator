@@ -1,53 +1,45 @@
-# CORE-026-E1 & E2 Risk Analysis
+# Risk Analysis: Issue #61 - CLI Non-Interactive Mode Fix
 
 ## Risk Assessment
 
-### E1: Wire Error Classification in Executors
-
 | Risk | Severity | Likelihood | Mitigation |
 |------|----------|------------|------------|
-| Breaking existing error handling | MEDIUM | LOW | Tests verify current behavior preserved |
-| Missing error patterns | LOW | MEDIUM | Start with common patterns, extend later |
-| Exception type detection | LOW | LOW | Use hasattr() checks for safe introspection |
+| Breaking existing interactive behavior | Medium | Low | Test both modes explicitly |
+| `CI` env var false positives | Low | Low | CI is standard; document behavior |
+| Missing `input()` locations | Medium | Low | Grep for all `input(` in cli.py |
+| Regression in `--yes` flag handling | Medium | Low | Existing tests should catch |
 
-**Overall Risk: LOW** - Adding error_type is additive, default NONE maintains backward compat.
+## Impact Analysis
 
-### E2: Ping Validation
+### Files Changed
+- `src/cli.py` - Add helpers, modify 4 functions
 
-| Risk | Severity | Likelihood | Mitigation |
-|------|----------|------------|------------|
-| Rate limiting on ping | LOW | MEDIUM | Use lightweight /models endpoint |
-| Increased latency | LOW | HIGH | ping=False by default, opt-in only |
-| API endpoint changes | LOW | LOW | Standard endpoints, well-documented |
-| Network errors on ping | LOW | MEDIUM | Catch exceptions, return clear error |
+### Functions Modified
+1. `cmd_advance()` - Critical path for workflow advancement
+2. `cmd_init()` - Used once per project setup
+3. `cmd_resolve()` - Conflict resolution (less frequent)
+4. `cmd_workflow_cleanup()` - Maintenance command
 
-**Overall Risk: LOW** - Opt-in feature with defensive error handling.
+### Backward Compatibility
+- **Preserved**: All existing flags (`--yes`, `--force`) continue to work
+- **New behavior**: Non-interactive mode now fails fast instead of hanging
+- **Breaking**: Scripts relying on stdin input will fail (expected - this is the fix)
 
-## Impact Assessment
+## Rollback Plan
 
-### Positive Impacts
-- E1: Error_type field becomes useful for debugging and retry logic
-- E2: Can detect expired/revoked keys before running full review
-
-### Negative Impacts
-- E2: Slight latency increase when ping=True (mitigated by opt-in)
-
-## Rollback Strategy
-
-Both changes are additive:
-- E1: error_type defaults to NONE, existing code works unchanged
-- E2: ping defaults to False, existing behavior unchanged
-
-Rollback: Simply revert the commit. No data migration needed.
+If issues arise:
+1. Revert the commit
+2. All changes are in a single file (`src/cli.py`)
+3. No database or state changes
 
 ## Security Considerations
 
-- E1: Error messages already sanitized (_sanitize_error)
-- E2: API keys not logged, only used in HTTP headers
-- Ping endpoints return model lists, no sensitive data exposed
+- **No new attack surface**: Changes are defensive (fail-fast)
+- **No secrets handling changes**: N/A
+- **No network calls added**: N/A
 
-## Dependencies
+## Testing Requirements
 
-No new dependencies required. Uses existing:
-- requests (already used by api_executor)
-- urllib.request (already used by cli_executor for grok)
+- Must test both interactive and non-interactive modes
+- Must verify `--yes` flag works in non-interactive mode
+- Must verify graceful error messages

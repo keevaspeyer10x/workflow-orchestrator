@@ -86,7 +86,64 @@ from src.task_provider import (
     TaskStatus,
 )
 
+# Natural language command support (Issue #60)
+NL_AVAILABLE = False
+try:
+    from src.nl_commands import register_nl_commands
+    from ai_tool_bridge.argparse_adapter import add_nl_subcommand
+    NL_AVAILABLE = True
+except ImportError:
+    pass  # ai-tool-bridge not installed
+
 VERSION = "2.0.0"
+
+
+# ============================================================================
+# Non-Interactive Mode Detection (Issue #61)
+# ============================================================================
+def is_interactive() -> bool:
+    """Check if running in an interactive terminal.
+
+    Returns False if:
+    - stdin is not a TTY (e.g., piped input, Claude Code subprocess)
+    - stdout is not a TTY (e.g., output redirected)
+    - CI environment variable is set
+    - GITHUB_ACTIONS environment variable is set
+    """
+    if not sys.stdin.isatty():
+        return False
+    if not sys.stdout.isatty():
+        return False
+    if os.environ.get('CI'):
+        return False
+    if os.environ.get('GITHUB_ACTIONS'):
+        return False
+    return True
+
+
+def confirm(prompt: str, yes_flag: bool = False) -> bool:
+    """Prompt user for confirmation with non-interactive fail-fast.
+
+    Args:
+        prompt: The question to ask (should include [y/N] hint)
+        yes_flag: If True, skip prompt and return True (--yes flag)
+
+    Returns:
+        True if confirmed, False otherwise
+
+    Raises:
+        SystemExit: If non-interactive mode and yes_flag is False
+    """
+    if yes_flag:
+        return True
+    if not is_interactive():
+        # Extract the question part for the error message
+        question = prompt.split('[')[0].strip() if '[' in prompt else prompt.rstrip(': ')
+        print(f"ERROR: {question} - Cannot prompt in non-interactive mode.")
+        print("Use --yes flag to auto-confirm, or run interactively.")
+        sys.exit(1)
+    response = input(prompt)
+    return response.lower() in ['y', 'yes']
 
 
 # ============================================================================
@@ -484,9 +541,13 @@ def cmd_init(args):
     working_dir = Path(args.dir or '.')
     workflow_path = working_dir / 'workflow.yaml'
 
-    # Check if workflow.yaml already exists
+    # Check if workflow.yaml already exists (Issue #61: fail-fast in non-interactive)
     if workflow_path.exists() and not args.force:
         print(f"workflow.yaml already exists at {workflow_path}")
+        if not is_interactive():
+            print("ERROR: Cannot prompt in non-interactive mode.")
+            print("Use --force to overwrite: orchestrator init --force")
+            sys.exit(1)
         response = input("Overwrite? This will backup the existing file. [y/N] ").strip().lower()
         if response != 'y':
             print("Aborted.")
@@ -805,6 +866,12 @@ def cmd_resolve(args):
                     print("  [D] Open in editor")
                     print()
 
+                    # Issue #61: fail-fast in non-interactive mode
+                    if not is_interactive():
+                        print("ERROR: Cannot prompt for conflict resolution in non-interactive mode.")
+                        print("Use explicit strategy: orchestrator resolve --apply --strategy ours")
+                        print("  or: orchestrator resolve --apply --strategy theirs")
+                        sys.exit(1)
                     choice = input("Enter choice [A/B/C/D] (default: A): ").strip().upper() or "A"
 
                     if choice == "A":
@@ -827,7 +894,12 @@ def cmd_resolve(args):
             print(format_escalation_for_user(result))
             print()
 
-            # Get user choice
+            # Get user choice (Issue #61: fail-fast in non-interactive mode)
+            if not is_interactive():
+                print("ERROR: Cannot prompt for conflict resolution in non-interactive mode.")
+                print("Use explicit strategy: orchestrator resolve --apply --strategy ours")
+                print("  or: orchestrator resolve --apply --strategy theirs")
+                sys.exit(1)
             choice = input("Enter choice [A/B/C/D] (default: A): ").strip().upper() or "A"
 
             if choice == "A":
@@ -1260,10 +1332,10 @@ def cmd_advance(args):
                 print(format_critique_result(result, previous_phase_id, next_phase_id))
                 print()
 
-                # If critical issues, prompt user
-                if result.should_block and not getattr(args, 'yes', False):
-                    response = input("Critical issues found. Continue anyway? [y/N]: ")
-                    if response.lower() not in ['y', 'yes']:
+                # If critical issues, prompt user (Issue #61: fail-fast in non-interactive)
+                if result.should_block:
+                    if not confirm("Critical issues found. Continue anyway? [y/N]: ",
+                                   yes_flag=getattr(args, 'yes', False)):
                         print("Advance cancelled. Address issues before proceeding.")
                         sys.exit(1)
         except ImportError:
@@ -5047,16 +5119,14 @@ def cmd_workflow_cleanup(args):
         print("(dry-run mode - no sessions removed)")
         return
 
-    # Confirm
-    if not skip_confirm:
-        try:
-            response = input("Remove these sessions? [y/N]: ")
-            if response.lower() != 'y':
-                print("Cancelled.")
-                return
-        except (EOFError, KeyboardInterrupt):
-            print("\nCancelled.")
+    # Confirm (Issue #61: fail-fast in non-interactive mode)
+    try:
+        if not confirm("Remove these sessions? [y/N]: ", yes_flag=skip_confirm):
+            print("Cancelled.")
             return
+    except (EOFError, KeyboardInterrupt):
+        print("\nCancelled.")
+        return
 
     # Remove sessions
     removed = 0
@@ -5511,6 +5581,11 @@ def cmd_feedback_review(args):
                 print(f"   Complexity: {sugg['complexity']}")
                 print()
 
+            # Issue #61: fail-fast in non-interactive mode
+            if not is_interactive():
+                print("\nSkipping ROADMAP update in non-interactive mode.")
+                print("Run interactively to add suggestions, or add manually.")
+                return
             response = input(f"Add {len(suggestions)} suggestions to ROADMAP.md? (y/n): ").strip().lower()
             if response == 'y':
                 roadmap_file = working_dir / 'ROADMAP.md'
@@ -6431,6 +6506,10 @@ Examples:
     task_show.set_defaults(func=cmd_task_show)
 
     task_parser.set_defaults(func=lambda args: task_parser.print_help() if not args.task_command else None)
+
+    # Natural language command (Issue #60)
+    if NL_AVAILABLE:
+        add_nl_subcommand(subparsers, "orchestrator")
 
     args = parser.parse_args()
     

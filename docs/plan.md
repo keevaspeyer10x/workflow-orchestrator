@@ -1,178 +1,83 @@
-# CORE-026-E1 & E2 Implementation Plan
+# Issue #61: Fix CLI Hanging in Non-Interactive Mode
 
-## Overview
+## Problem Statement
 
-Complete the CORE-026 feature by wiring error classification in executors and adding ping validation.
+Orchestrator CLI commands (`orchestrator advance`, `orchestrator complete`) hang indefinitely when run from non-interactive shells (Claude Code, CI/CD, scripts) because `input()` blocks waiting for stdin that never comes.
 
-## E1: Wire Error Classification in Executors
+## Root Cause
 
-### Goal
-Make the `error_type` field on `ReviewResult` actually populated when errors occur.
+`input()` calls in `src/cli.py` block in non-interactive mode. When stdin is not connected to a terminal (e.g., when spawned by Claude Code or running in CI), `input()` waits forever.
 
-### Changes
+## Solution Design
 
-#### 1. `src/review/api_executor.py`
-
-Update the exception handler to classify HTTP errors:
+### Pattern: Detect and Fail-Fast
 
 ```python
-# In execute() method, update the except block:
-from .result import ReviewErrorType, classify_http_error
+def is_interactive():
+    """Check if running in an interactive terminal."""
+    return sys.stdin.isatty() and sys.stdout.isatty() and not os.environ.get('CI')
 
-except Exception as e:
-    error_type = ReviewErrorType.REVIEW_FAILED
+def confirm(prompt: str, default: bool = False, yes_flag: bool = False) -> bool:
+    """Prompt user for confirmation with non-interactive fallback.
 
-    # Try to extract HTTP status from exception
-    if hasattr(e, 'response') and hasattr(e.response, 'status_code'):
-        error_type = classify_http_error(e.response.status_code, str(e))
-    elif 'timeout' in str(e).lower():
-        error_type = ReviewErrorType.TIMEOUT
-    elif 'connection' in str(e).lower() or 'network' in str(e).lower():
-        error_type = ReviewErrorType.NETWORK_ERROR
+    Args:
+        prompt: The question to ask
+        default: Default answer if non-interactive
+        yes_flag: If True, skip prompt and return True (--yes flag)
 
-    return ReviewResult(
-        ...,
-        error_type=error_type,
-    )
-```
-
-Also update `_call_openrouter()` to raise specific exceptions with status codes.
-
-#### 2. `src/review/cli_executor.py`
-
-Update exception handlers:
-
-```python
-# TimeoutExpired -> TIMEOUT
-except subprocess.TimeoutExpired:
-    return ReviewResult(
-        ...,
-        error_type=ReviewErrorType.TIMEOUT,
-    )
-
-# FileNotFoundError (CLI not found) -> KEY_MISSING (tool not available)
-except FileNotFoundError as e:
-    return ReviewResult(
-        ...,
-        error_type=ReviewErrorType.KEY_MISSING,  # CLI tool not installed
-    )
-
-# General exception -> REVIEW_FAILED
-except Exception as e:
-    error_type = ReviewErrorType.REVIEW_FAILED
-    error_str = str(e).lower()
-
-    # Parse common error patterns
-    if '401' in str(e) or '403' in str(e) or 'unauthorized' in error_str:
-        error_type = ReviewErrorType.KEY_INVALID
-    elif '429' in str(e) or 'rate limit' in error_str:
-        error_type = ReviewErrorType.RATE_LIMITED
-    elif 'timeout' in error_str:
-        error_type = ReviewErrorType.TIMEOUT
-
-    return ReviewResult(
-        ...,
-        error_type=error_type,
-    )
-```
-
-## E2: Ping Validation for API Keys
-
-### Goal
-Add `ping=True` option to `validate_api_keys()` that actually tests the API key works.
-
-### Changes
-
-#### 1. `src/review/router.py`
-
-Update `validate_api_keys()`:
-
-```python
-def validate_api_keys(
-    models: list[str],
-    ping: bool = False
-) -> tuple[bool, dict[str, str]]:
-    # ... existing presence checks ...
-
-    if ping:
-        # Actually test the keys with lightweight API calls
-        for model in models:
-            if model.lower() not in errors:
-                ping_result = _ping_api(model.lower())
-                if not ping_result.success:
-                    errors[model.lower()] = ping_result.error
-
-    return len(errors) == 0, errors
-```
-
-Add new helper function:
-
-```python
-def _ping_api(model: str) -> "PingResult":
+    Returns:
+        True if confirmed, False otherwise
     """
-    Test an API key by making a lightweight request.
-
-    Uses model list endpoints which are cheap and fast.
-    """
-    from dataclasses import dataclass
-
-    @dataclass
-    class PingResult:
-        success: bool
-        error: str = ""
-        latency_ms: float = 0
-
-    key_name = MODEL_TO_API_KEY.get(model)
-    key_value = os.environ.get(key_name)
-
-    try:
-        if model in ("gemini",):
-            # Google AI: list models
-            _ping_google(key_value)
-        elif model in ("openai", "codex"):
-            # OpenAI: list models
-            _ping_openai(key_value)
-        elif model in ("grok",):
-            # XAI or OpenRouter: simple request
-            _ping_xai_or_openrouter(key_value)
-        elif model in ("openrouter",):
-            # OpenRouter: list models
-            _ping_openrouter(key_value)
-        return PingResult(success=True)
-    except Exception as e:
-        return PingResult(success=False, error=str(e))
+    if yes_flag:
+        return True
+    if not is_interactive():
+        hint = prompt.split('[')[0].strip()  # Extract question part
+        print(f"ERROR: {hint} - Cannot prompt in non-interactive mode.")
+        print("Use --yes flag to auto-confirm, or run interactively.")
+        sys.exit(1)
+    response = input(prompt)
+    return response.lower() in ['y', 'yes']
 ```
 
-### Ping Implementations
+### Locations to Fix
 
-- **OpenAI**: `GET https://api.openai.com/v1/models` with Bearer token
-- **Google AI**: `GET https://generativelanguage.googleapis.com/v1beta/models?key=<key>`
-- **OpenRouter**: `GET https://openrouter.ai/api/v1/models` with Bearer token
-- **XAI**: `GET https://api.x.ai/v1/models` with Bearer token
+| Location | Function | Line | Current Behavior | Fix |
+|----------|----------|------|------------------|-----|
+| **PRIORITY** | `cmd_advance` | ~1265 | `input("Critical issues found...")` | Use `confirm()` |
+| Medium | `cmd_init` | ~490 | `input("Overwrite?...")` | Use `confirm()` with `--force` flag |
+| Medium | `cmd_resolve` | ~808, ~831 | `input("Enter choice...")` | Fail-fast with strategy suggestion |
+| Low | `cmd_workflow_cleanup` | ~5053 | `input("Remove these?...")` | Use `confirm()` with `--yes` flag |
+| N/A | `cmd_feedback_capture` | ~5129-5146 | Already gated by `is_interactive` flag | No change needed |
 
-## Test Plan
+## Implementation Steps
 
-1. **E1 Tests** (in `tests/test_review_resilience.py`):
-   - Test API executor returns correct error_type on HTTP 401/403/429/500
-   - Test CLI executor returns TIMEOUT on TimeoutExpired
-   - Test CLI executor returns KEY_MISSING on FileNotFoundError
+1. **Add helper functions** near top of `cli.py` (after imports, ~line 100):
+   - `is_interactive()` - detect terminal mode
+   - `confirm()` - reusable confirmation with fail-fast
 
-2. **E2 Tests**:
-   - Test ping with valid key succeeds
-   - Test ping with invalid key returns error
-   - Test ping with missing key returns error
-   - Test ping=False (default) doesn't make API calls
+2. **Fix `cmd_advance`** (line ~1265):
+   - Replace direct `input()` with `confirm()`
+   - Leverage existing `--yes` flag
 
-## Files Changed
+3. **Fix `cmd_init`** (line ~490):
+   - Use `confirm()` with existing `--force` flag
+   - `--force` bypasses confirmation
 
-- `src/review/api_executor.py` - Add error_type classification
-- `src/review/cli_executor.py` - Add error_type classification
-- `src/review/router.py` - Add ping validation
-- `tests/test_review_resilience.py` - Add tests for E1 and E2
+4. **Fix `cmd_resolve`** (lines ~808, ~831):
+   - In non-interactive mode, fail with clear error
+   - Suggest: "Use `--strategy ours` or `--strategy theirs`"
 
-## Estimated Effort
+5. **Fix `cmd_workflow_cleanup`** (line ~5053):
+   - Use `confirm()` with existing `--yes`/`-y` flag
+   - Already has `skip_confirm` parameter
 
-- E1: ~30 minutes (straightforward error classification)
-- E2: ~30 minutes (4 simple HTTP calls)
-- Tests: ~20 minutes
-- Total: ~1.5 hours
+## Parallel Execution Decision
+
+**Sequential execution** - This is a single-file fix with interdependent changes. Each fix uses the same helper functions added in step 1. No benefit from parallelization.
+
+## Testing Strategy
+
+1. Unit tests for `is_interactive()` helper
+2. Unit tests for `confirm()` helper
+3. Integration tests simulating non-interactive mode
+4. Verify existing `--yes` flags work correctly
