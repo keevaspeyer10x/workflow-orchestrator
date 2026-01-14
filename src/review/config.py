@@ -276,3 +276,68 @@ def get_available_review_types() -> list[str]:
     """
     config = get_review_config()
     return config.get_available_types()
+
+
+# =============================================================================
+# MODEL ID CONFIGURATION
+# =============================================================================
+# Model IDs for CLI tools - read from workflow.yaml settings.models.cli
+# This avoids hardcoding model versions in executor code.
+
+# Default model IDs if not specified in workflow.yaml
+DEFAULT_CLI_MODELS = {
+    "codex": "gpt-5.2-codex-max",
+    "gemini": "gemini-3-pro-preview",
+    "grok": "grok-4.1-fast",
+}
+
+DEFAULT_API_MODELS = {
+    "codex": "openai/gpt-5.2",
+    "gemini": "google/gemini-3-pro-preview",
+    "grok": "x-ai/grok-4.1-fast",
+}
+
+
+def get_model_id(tool: str, method: str = "cli") -> str:
+    """
+    Get the model ID for a tool.
+
+    Reads from workflow.yaml settings.models.cli or settings.models.api,
+    falling back to defaults if not configured.
+
+    Args:
+        tool: Tool name (codex, gemini, grok)
+        method: Execution method ("cli" or "api")
+
+    Returns:
+        Model ID string (e.g., "gpt-5.2-codex-max" for CLI,
+        "openai/gpt-5.2" for API)
+    """
+    settings = _load_workflow_settings()
+    models_config = settings.get("models", {})
+
+    # Get the appropriate model mapping
+    if method == "cli":
+        models = models_config.get("cli", {})
+        defaults = DEFAULT_CLI_MODELS
+    else:
+        models = models_config.get("api", {})
+        defaults = DEFAULT_API_MODELS
+
+    # Return configured model or default
+    return models.get(tool, defaults.get(tool, f"{tool}/unknown"))
+
+
+def get_model_display_name(tool: str, method: str = "cli") -> str:
+    """
+    Get a display name for the model (for logging/reporting).
+
+    Args:
+        tool: Tool name (codex, gemini, grok)
+        method: Execution method ("cli" or "api")
+
+    Returns:
+        Display name like "codex/gpt-5.2-codex-max"
+    """
+    model_id = get_model_id(tool, method)
+    return f"{tool}/{model_id}"

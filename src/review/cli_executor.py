@@ -13,6 +13,7 @@ from typing import Optional
 
 from .prompts import get_tool
 from .result import ReviewResult, ReviewErrorType, parse_review_output
+from .config import get_model_display_name
 
 logger = logging.getLogger(__name__)
 
@@ -170,7 +171,7 @@ class CLIExecutor:
                 logger.warning(f"Codex returned non-zero: {stderr}")
 
             output = stdout or stderr
-            return output, "codex/gpt-5.1-codex-max"
+            return output, get_model_display_name("codex", "cli")
 
         except subprocess.TimeoutExpired:
             if process:
@@ -221,7 +222,7 @@ Analyze the git diff and changed files to provide your review. Output your findi
                 logger.warning(f"Gemini returned non-zero: {stderr}")
 
             output = stdout or stderr
-            return output, "gemini/gemini-3-pro-preview"
+            return output, get_model_display_name("gemini", "cli")
 
         except subprocess.TimeoutExpired:
             if process:

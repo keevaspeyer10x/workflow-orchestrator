@@ -1722,32 +1722,50 @@ def cmd_finish(args):
             output()
 
         # Issue #62: Auto-close GitHub issues referenced in task description
+        # Supports: #123, repo-name#123, owner/repo#123
         import re as regex
-        issue_pattern = regex.compile(r'#(\d+)')
+
+        # Pattern matches: owner/repo#num, repo#num, or just #num
+        # Groups: (owner/, repo, num) where owner/ and repo are optional
+        issue_pattern = regex.compile(r'(?:([a-zA-Z0-9_-]+)/)?([a-zA-Z0-9_-]+)?#(\d+)')
         issue_matches = issue_pattern.findall(task_description)
+
         if issue_matches and not getattr(args, 'no_close_issues', False):
             output("GITHUB ISSUES")
             output("-" * 60)
-            for issue_num in issue_matches:
+
+            for owner, repo, issue_num in issue_matches:
+                # Build the issue reference and gh command
+                if owner and repo:
+                    # Full reference: owner/repo#num
+                    issue_ref = f"{owner}/{repo}#{issue_num}"
+                    gh_cmd = ['gh', 'issue', 'close', issue_num, '--repo', f'{owner}/{repo}']
+                elif repo:
+                    # Repo-only reference: repo#num (assumes current owner)
+                    issue_ref = f"{repo}#{issue_num}"
+                    gh_cmd = ['gh', 'issue', 'close', issue_num, '--repo', repo]
+                else:
+                    # Local reference: #num (uses current repo)
+                    issue_ref = f"#{issue_num}"
+                    gh_cmd = ['gh', 'issue', 'close', issue_num]
+
+                gh_cmd.extend(['--comment', f'Closed automatically by orchestrator finish.\n\nTask: {task_description}'])
+
                 try:
-                    result = subprocess.run(
-                        ['gh', 'issue', 'close', issue_num, '--comment',
-                         f'Closed automatically by orchestrator finish.\n\nTask: {task_description}'],
-                        capture_output=True, text=True, timeout=30
-                    )
+                    result = subprocess.run(gh_cmd, capture_output=True, text=True, timeout=30)
                     if result.returncode == 0:
-                        output(f"  ✓ Closed issue #{issue_num}")
+                        output(f"  ✓ Closed issue {issue_ref}")
                     else:
                         # Issue might already be closed or not exist
                         if 'already closed' in result.stderr.lower():
-                            output(f"  ○ Issue #{issue_num} already closed")
+                            output(f"  ○ Issue {issue_ref} already closed")
                         else:
-                            output(f"  ⚠️  Could not close #{issue_num}: {result.stderr.strip()}")
+                            output(f"  ⚠️  Could not close {issue_ref}: {result.stderr.strip()}")
                 except FileNotFoundError:
-                    output(f"  ⚠️  gh CLI not found - cannot auto-close #{issue_num}")
+                    output(f"  ⚠️  gh CLI not found - cannot auto-close {issue_ref}")
                     break
                 except subprocess.TimeoutExpired:
-                    output(f"  ⚠️  Timeout closing #{issue_num}")
+                    output(f"  ⚠️  Timeout closing {issue_ref}")
             output()
 
         # WF-027: Save summary to archive file

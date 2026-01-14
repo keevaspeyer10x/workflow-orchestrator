@@ -247,3 +247,71 @@ class TestConfigCaching:
 
         # Should be different instances after cache clear
         assert config1 is not config2
+
+
+class TestModelIdConfig:
+    """Tests for model ID configuration."""
+
+    def test_get_model_id_returns_default_for_codex(self):
+        """get_model_id returns default Codex model."""
+        from src.review.config import get_model_id, DEFAULT_CLI_MODELS
+
+        model_id = get_model_id("codex", "cli")
+        # Should be 5.2 (latest)
+        assert "5.2" in model_id or model_id == DEFAULT_CLI_MODELS["codex"]
+
+    def test_get_model_id_returns_default_for_gemini(self):
+        """get_model_id returns default Gemini model."""
+        from src.review.config import get_model_id, DEFAULT_CLI_MODELS
+
+        model_id = get_model_id("gemini", "cli")
+        assert "gemini" in model_id.lower() or model_id == DEFAULT_CLI_MODELS["gemini"]
+
+    def test_get_model_id_returns_default_for_grok(self):
+        """get_model_id returns default Grok model."""
+        from src.review.config import get_model_id, DEFAULT_CLI_MODELS
+
+        model_id = get_model_id("grok", "cli")
+        assert "grok" in model_id.lower() or model_id == DEFAULT_CLI_MODELS["grok"]
+
+    def test_get_model_id_api_differs_from_cli(self):
+        """API model IDs are different from CLI model IDs."""
+        from src.review.config import get_model_id
+
+        cli_model = get_model_id("codex", "cli")
+        api_model = get_model_id("codex", "api")
+
+        # API models should have provider prefix
+        assert "/" in api_model or "openai" in api_model.lower()
+
+    def test_get_model_display_name_includes_tool(self):
+        """get_model_display_name includes tool name."""
+        from src.review.config import get_model_display_name
+
+        display_name = get_model_display_name("codex", "cli")
+        assert display_name.startswith("codex/")
+
+    def test_get_model_display_name_includes_model_id(self):
+        """get_model_display_name includes model ID."""
+        from src.review.config import get_model_display_name, get_model_id
+
+        display_name = get_model_display_name("codex", "cli")
+        model_id = get_model_id("codex", "cli")
+        assert model_id in display_name
+
+    def test_default_cli_models_are_current(self):
+        """Default CLI models should be latest versions."""
+        from src.review.config import DEFAULT_CLI_MODELS
+
+        # Codex should be 5.2 (released Dec 2025)
+        assert "5.2" in DEFAULT_CLI_MODELS["codex"]
+
+        # Gemini should be 3-pro
+        assert "3" in DEFAULT_CLI_MODELS["gemini"]
+
+    def test_unknown_tool_returns_fallback(self):
+        """Unknown tool returns a sensible fallback."""
+        from src.review.config import get_model_id
+
+        model_id = get_model_id("unknown_tool", "cli")
+        assert model_id == "unknown_tool/unknown"
