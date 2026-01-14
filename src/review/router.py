@@ -20,6 +20,7 @@ from .result import ReviewResult
 from .prompts import get_prompt, get_tool, REVIEW_PROMPTS
 from .setup import ReviewSetup, check_review_setup as _check_setup
 from .registry import get_all_review_types
+from .constants import MODEL_TO_API_KEY
 from ..secrets import get_secret
 
 logger = logging.getLogger(__name__)
@@ -109,6 +110,53 @@ def ensure_api_keys_loaded() -> dict[str, bool]:
             loaded[key_name] = False
 
     return loaded
+
+
+def validate_api_keys(
+    models: list[str],
+    ping: bool = False
+) -> tuple[bool, dict[str, str]]:
+    """
+    Validate that API keys are available for the specified models.
+
+    CORE-026: Proactive key validation before running reviews.
+
+    Args:
+        models: List of model names to validate (e.g., ["gemini", "openai"])
+        ping: If True, also ping the API to verify key is valid (not implemented yet)
+
+    Returns:
+        Tuple of (all_valid, errors_dict) where errors_dict maps model -> error message
+    """
+    # First ensure keys are loaded from secrets
+    ensure_api_keys_loaded()
+
+    errors = {}
+    for model in models:
+        model_lower = model.lower()
+        key_name = MODEL_TO_API_KEY.get(model_lower)
+
+        if not key_name:
+            # Unknown model, skip validation
+            logger.warning(f"Unknown model for validation: {model}")
+            continue
+
+        key_value = os.environ.get(key_name)
+        if not key_value:
+            errors[model_lower] = f"{key_name} not set in environment"
+            continue
+
+        # Basic format validation (keys should be non-empty strings)
+        if len(key_value.strip()) < 10:
+            errors[model_lower] = f"{key_name} appears invalid (too short)"
+            continue
+
+        # TODO: If ping=True, make a lightweight API call to verify the key
+        # For now, just check presence
+        if ping:
+            logger.debug(f"Ping validation not yet implemented for {model}")
+
+    return len(errors) == 0, errors
 
 
 class ReviewMethod(Enum):
