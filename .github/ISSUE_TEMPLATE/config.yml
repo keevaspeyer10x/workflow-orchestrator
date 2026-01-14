@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://github.com/keevaspeyer10x/keeva-devtools/blob/main/README.md
+    about: Check the README for usage instructions
