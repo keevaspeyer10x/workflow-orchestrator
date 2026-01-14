@@ -47,6 +47,9 @@ phases:
         name: Verify Imports
   - id: REVIEW
     name: Review
+    required_reviews:
+      - security
+      - quality
     items:
       - id: security_review
         name: Security Review
@@ -415,14 +418,21 @@ class TestCLICommands:
     def test_finish_blocked_without_reviews(self, temp_workflow_dir):
         """TC-CLI-001: orchestrator finish blocks without completed reviews.
 
-        This is tested via unit tests on the engine. The full CLI integration
-        would require running through all phases which is better tested manually.
+        CORE-026: Required reviews are now defined in workflow.yaml.
+        With no workflow loaded, no reviews are required (backward compatible).
         """
-        # The review validation is tested in TestReviewValidation
-        # Here we just verify the engine method exists and works
+        # With no workflow, no reviews are required (CORE-026 change)
         engine = WorkflowEngine(str(temp_workflow_dir))
         is_valid, missing = engine.validate_reviews_completed()
-        # With no workflow, should report missing reviews
+        # With no workflow, should pass (no required reviews defined)
+        assert is_valid is True
+        assert len(missing) == 0
+
+        # Create workflow with required_reviews to test blocking
+        workflow_file = create_workflow_file(temp_workflow_dir)
+        engine.start_workflow(str(workflow_file), "Test")
+        is_valid, missing = engine.validate_reviews_completed()
+        # Now should fail - workflow requires security and quality reviews
         assert is_valid is False
         assert "security" in missing
         assert "quality" in missing

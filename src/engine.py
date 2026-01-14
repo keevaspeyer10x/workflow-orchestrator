@@ -1539,14 +1539,68 @@ class WorkflowEngine:
                     completed.add(review_type)
         return completed
 
+    def get_required_reviews(self) -> set[str]:
+        """
+        Get required review types from workflow definition.
+
+        CORE-026: Reads required_reviews from workflow.yaml instead of hardcoding.
+
+        Returns:
+            Set of required review type strings (e.g., {"security", "quality"})
+        """
+        if not self.workflow_def:
+            return set()
+
+        # Look for required_reviews in REVIEW phase
+        for phase in self.workflow_def.phases:
+            if phase.id == "REVIEW":
+                required = getattr(phase, "required_reviews", None) or []
+                return set(required)
+
+        return set()
+
+    def get_failed_reviews(self) -> dict[str, dict]:
+        """
+        Get reviews that failed and need retry.
+
+        CORE-026: Tracks failed reviews for retry command.
+
+        Returns:
+            Dict of review_type -> {error_type, error, timestamp}
+        """
+        failed = {}
+        completed = self.get_completed_reviews()
+
+        for event in self.get_events():
+            if event.event_type == EventType.REVIEW_FAILED:
+                review_type = event.details.get("review_type") if event.details else None
+                if not review_type and event.item_id and event.item_id.endswith("_review"):
+                    review_type = event.item_id.rsplit("_review", 1)[0]
+
+                if review_type and review_type not in completed:
+                    # This review failed and hasn't been completed since
+                    failed[review_type] = {
+                        "error_type": event.details.get("error_type", "unknown") if event.details else "unknown",
+                        "error": event.details.get("error", event.message) if event.details else event.message,
+                        "timestamp": event.timestamp.isoformat() if event.timestamp else None,
+                    }
+
+        return failed
+
     def validate_reviews_completed(self) -> tuple[bool, list[str]]:
         """
         Check if required reviews were completed.
 
+        CORE-026: Now reads required reviews from workflow definition.
+
         Returns:
             Tuple of (is_valid, list_of_missing_review_types)
         """
-        required = {"security", "quality"}  # Minimum required reviews
+        required = self.get_required_reviews()
+        if not required:
+            # No required reviews defined - pass by default (backward compatible)
+            return True, []
+
         completed = self.get_completed_reviews()
         missing = required - completed
         return len(missing) == 0, list(missing)

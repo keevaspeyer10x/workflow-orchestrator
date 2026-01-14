@@ -2607,6 +2607,93 @@ def cmd_review_results(args):
         print()
 
 
+def cmd_review_retry(args):
+    """Retry failed reviews after fixing issues (CORE-026)."""
+    engine = get_engine(args)
+
+    if not engine.state:
+        print("Error: No active workflow")
+        sys.exit(1)
+
+    # Get failed reviews
+    failed = engine.get_failed_reviews()
+
+    if not failed:
+        print("No failed reviews to retry.")
+        print("All reviews either passed or haven't been run yet.")
+        print("\nTo run reviews: orchestrator review all")
+        return
+
+    print(f"Found {len(failed)} failed review(s) to retry:\n")
+
+    working_dir = Path(args.dir or '.')
+
+    for review_type, failure_info in failed.items():
+        print(f"Retrying {review_type}...")
+        print(f"  Previous error: {failure_info.get('error', 'Unknown')}")
+        print(f"  Error type: {failure_info.get('error_type', 'unknown')}")
+
+        # Validate API keys before retry
+        from .review.router import validate_api_keys
+        from .review.registry import get_model_for_review
+        try:
+            model = get_model_for_review(review_type)
+            if model:
+                valid, errors = validate_api_keys([model], ping=False)
+                if not valid:
+                    from .review.recovery import get_recovery_instructions
+                    print(f"  Still failing: {errors.get(model.lower(), 'Unknown key error')}")
+                    print(get_recovery_instructions(model))
+                    continue
+        except Exception as e:
+            print(f"  Warning: Could not validate keys: {e}")
+
+        # Run the review
+        try:
+            router = ReviewRouter(
+                working_dir=working_dir,
+                method=args.method if hasattr(args, 'method') and args.method != 'auto' else None
+            )
+            result = router.execute_review(review_type)
+
+            if result.success and not result.has_blocking_findings():
+                print(f"  ✓ {review_type} review passed!")
+                # Log success
+                engine.log_event(WorkflowEvent(
+                    event_type=EventType.REVIEW_COMPLETED,
+                    workflow_id=engine.state.workflow_id,
+                    phase_id=engine.state.current_phase_id,
+                    message=f"Review {review_type}: passed (retry)",
+                    details={
+                        "review_type": review_type,
+                        "model": result.model_used,
+                        "method": result.method_used,
+                        "success": result.success,
+                        "was_retry": True,
+                    }
+                ))
+                engine.save_state()
+            else:
+                print(f"  ✗ {review_type} review still has issues")
+                if result.error:
+                    print(f"    Error: {result.error}")
+                if result.findings:
+                    print(f"    Blocking findings: {result.blocking_count}")
+
+        except Exception as e:
+            print(f"  ✗ Failed to run review: {e}")
+
+        print()
+
+    # Show summary
+    remaining = engine.get_failed_reviews()
+    if remaining:
+        print(f"\n{len(remaining)} review(s) still need attention.")
+        print("Fix the issues and run: orchestrator review retry")
+    else:
+        print("\nAll reviews passed!")
+
+
 def cmd_validate_adherence(args):
     """Validate workflow adherence (WF-034 Phase 2)."""
     engine = get_engine(args)
@@ -5890,6 +5977,12 @@ Examples:
     review_results_parser = subparsers.add_parser('review-results', help='Show results of completed reviews')
     review_results_parser.add_argument('--json', action='store_true', help='Output as JSON')
     review_results_parser.set_defaults(func=cmd_review_results)
+
+    # Review-retry command (CORE-026)
+    review_retry_parser = subparsers.add_parser('review-retry', help='Retry failed reviews after fixing API keys')
+    review_retry_parser.add_argument('--method', '-m', choices=['auto', 'cli', 'aider', 'api'],
+                                     default='auto', help='Execution method (default: auto-detect)')
+    review_retry_parser.set_defaults(func=cmd_review_retry)
 
     # Setup-reviews command
     setup_reviews_parser = subparsers.add_parser('setup-reviews', help='Set up review infrastructure in a repository')

@@ -2,6 +2,23 @@
 
 All notable changes to the workflow-orchestrator.
 
+## [2.10.0] - 2026-01-14
+
+### Added
+- **CORE-026: Review Failure Resilience & API Key Recovery**
+  - **ReviewErrorType enum**: Typed error classification (KEY_MISSING, KEY_INVALID, RATE_LIMITED, NETWORK_ERROR, TIMEOUT, PARSE_ERROR, REVIEW_FAILED)
+  - **classify_http_error()**: Maps HTTP status codes to error types (401/403 → KEY_INVALID, 429 → RATE_LIMITED, 500+ → NETWORK_ERROR)
+  - **validate_api_keys()**: Proactive API key validation before running reviews
+  - **recovery.py module**: Model-specific recovery instructions with SOPS reload guidance
+  - **required_reviews in workflow.yaml**: Configurable required reviews per workflow (not hardcoded)
+  - **get_required_reviews()**: Engine method to read required reviews from workflow definition
+  - **get_failed_reviews()**: Engine method returning failed reviews with error type for targeted retry
+  - **review-retry command**: CLI command to retry failed reviews after fixing API keys
+  - **30 new tests**: Comprehensive coverage in `tests/test_review_resilience.py`
+
+### Changed
+- **PhaseDef schema**: Added `required_reviews: list[str]` field for workflow-level review requirements
+
 ## [2.9.0] - 2026-01-13
 
 ### Added

@@ -141,6 +141,13 @@ phases:
   - id: "REVIEW"
     name: "Multi-Model Code Review"
     description: "MANDATORY: Run ALL third-party model reviews. Orchestrator changes require external validation."
+    # CORE-026: Define required reviews at workflow level (not hardcoded)
+    required_reviews:
+      - security
+      - quality
+      - consistency
+      - holistic
+      - vibe_coding
     items:
       - id: "third_party_reviews"
         name: "Run multi-model code reviews"

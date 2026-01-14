@@ -11,6 +11,71 @@ from enum import Enum
 from typing import Optional
 
 
+class ReviewErrorType(Enum):
+    """
+    Types of review errors for classification and recovery guidance.
+
+    CORE-026: Enables specific error handling and recovery instructions.
+    """
+    NONE = "none"                    # No error
+    KEY_MISSING = "key_missing"      # API key not found in environment
+    KEY_INVALID = "key_invalid"      # API returned 401/403 (auth failed)
+    RATE_LIMITED = "rate_limited"    # API returned 429 (too many requests)
+    NETWORK_ERROR = "network_error"  # Connection failed, timeout, 5xx errors
+    TIMEOUT = "timeout"              # Review exceeded time limit
+    PARSE_ERROR = "parse_error"      # Output couldn't be parsed
+    REVIEW_FAILED = "review_failed"  # Review ran but found blocking issues
+
+    @classmethod
+    def from_string(cls, s: str) -> "ReviewErrorType":
+        """Parse error type from string, case-insensitive."""
+        if not s:
+            return cls.NONE
+        s = s.lower().strip()
+        mapping = {
+            "none": cls.NONE,
+            "key_missing": cls.KEY_MISSING,
+            "key_invalid": cls.KEY_INVALID,
+            "rate_limited": cls.RATE_LIMITED,
+            "network_error": cls.NETWORK_ERROR,
+            "timeout": cls.TIMEOUT,
+            "parse_error": cls.PARSE_ERROR,
+            "review_failed": cls.REVIEW_FAILED,
+        }
+        return mapping.get(s, cls.NONE)
+
+    def is_recoverable(self) -> bool:
+        """Whether this error type can be recovered by reloading keys."""
+        return self in (ReviewErrorType.KEY_MISSING, ReviewErrorType.KEY_INVALID)
+
+    def is_transient(self) -> bool:
+        """Whether this error type might resolve on retry."""
+        return self in (ReviewErrorType.RATE_LIMITED, ReviewErrorType.NETWORK_ERROR, ReviewErrorType.TIMEOUT)
+
+
+def classify_http_error(status_code: int, message: str = "") -> ReviewErrorType:
+    """
+    Classify an HTTP error status code into a ReviewErrorType.
+
+    Args:
+        status_code: HTTP status code
+        message: Optional error message for context
+
+    Returns:
+        ReviewErrorType classification
+    """
+    if status_code == 401 or status_code == 403:
+        return ReviewErrorType.KEY_INVALID
+    elif status_code == 429:
+        return ReviewErrorType.RATE_LIMITED
+    elif status_code >= 500:
+        return ReviewErrorType.NETWORK_ERROR
+    elif status_code >= 400:
+        # Other 4xx errors - treat as review failed
+        return ReviewErrorType.REVIEW_FAILED
+    return ReviewErrorType.NONE
+
+
 class Severity(Enum):
     """Severity levels for review findings."""
     CRITICAL = "critical"
@@ -88,6 +153,8 @@ class ReviewResult:
     # WF-035 Phase 4: Fallback tracking
     was_fallback: bool = False  # True if a fallback model was used instead of primary
     fallback_reason: Optional[str] = None  # Why fallback was needed (e.g., "Primary rate limited")
+    # CORE-026: Error type classification for recovery guidance
+    error_type: ReviewErrorType = ReviewErrorType.NONE
 
     def has_blocking_findings(self) -> bool:
         """Check if any findings should block the workflow."""
@@ -116,6 +183,8 @@ class ReviewResult:
             # WF-035 Phase 4: Fallback tracking
             "was_fallback": self.was_fallback,
             "fallback_reason": self.fallback_reason,
+            # CORE-026: Error type classification
+            "error_type": self.error_type.value,
         }
 
     @classmethod
@@ -143,6 +212,8 @@ class ReviewResult:
             # WF-035 Phase 4: Fallback tracking
             was_fallback=data.get("was_fallback", False),
             fallback_reason=data.get("fallback_reason"),
+            # CORE-026: Error type classification
+            error_type=ReviewErrorType.from_string(data.get("error_type", "")),
         )
 
 

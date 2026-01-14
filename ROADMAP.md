@@ -289,84 +289,93 @@ Premature. PRD multi-agent spawning is not yet battle-tested. We don't know if c
 ---
 
 #### CORE-026: Review Failure Resilience & API Key Recovery
-**Status:** ✅ **CRITICAL** - Reviews failing silently is unacceptable
+**Status:** ✅ **COMPLETED** (2026-01-14)
 **Complexity:** MEDIUM
 **Priority:** HIGH
 **Source:** CORE-023 implementation - Reviews silently failed after context compaction lost API keys
 
+**Implemented:**
+- ReviewErrorType enum for typed error classification (KEY_MISSING, KEY_INVALID, RATE_LIMITED, NETWORK_ERROR, TIMEOUT, PARSE_ERROR, REVIEW_FAILED)
+- `validate_api_keys()` function for proactive key validation before reviews
+- `required_reviews` field in workflow.yaml REVIEW phase
+- `get_required_reviews()` and `get_failed_reviews()` methods in engine
+- `review-retry` CLI command for retrying failed reviews
+- Recovery instructions with model-specific key reload guidance
+- 30 tests in tests/test_review_resilience.py
+
+**Success Criteria (all met):**
+- [x] Reviews that fail block workflow advancement
+- [x] Clear error messages guide user to fix
+- [x] After key reload, reviews can be retried
+- [x] `orchestrator finish` verifies all required reviews passed
+- [x] API key loss is detected and communicated
+
+**Follow-up items:** See CORE-026-E1 and CORE-026-E2 below
+
+---
+
+#### CORE-026-E1: Wire Error Classification in Executors
+**Status:** Planned
+**Complexity:** LOW
+**Priority:** MEDIUM
+**Source:** AI critique during CORE-026 implementation
+
 **Problem:**
-During CORE-023-P1 implementation, context compaction occurred mid-session. This caused:
-1. API keys (GEMINI_API_KEY, OPENAI_API_KEY, XAI_API_KEY) to be lost from environment
-2. Reviews to fail with `ReviewRouter.execute_review() got an unexpected keyword argument 'context_override'`
-3. Agent proceeded without noticing reviews were broken
-4. Only 1 of 4 required external reviews actually ran
-5. Workflow completed with incomplete review coverage
-
-**Current Behavior (Broken):**
-- Review failures logged but not acted upon
-- No attempt to recover or reload keys
-- Agent doesn't detect that reviews are broken
-- `orchestrator finish` shows incomplete reviews but doesn't block
-
-**Desired Behavior:**
-1. **Detect API key loss:** After compaction, check if required keys are still available
-2. **Fail loudly:** If reviews fail, block workflow advancement with clear error
-3. **Prompt for recovery:** "API keys missing. Run: `eval \"$(sops -d secrets.enc.yaml ...)\"` then retry"
-4. **Retry mechanism:** After keys reloaded, retry failed reviews automatically
-5. **Block finish:** `orchestrator finish` should FAIL if required reviews didn't complete
+ReviewErrorType and classify_http_error() are implemented, but API/CLI executors don't catch HTTP errors and populate the error_type field on ReviewResult. The infrastructure exists but isn't wired up.
 
 **Implementation:**
 ```python
-# In cmd_complete for review items:
-def complete_review_item(item_id):
-    result = run_auto_review(review_type)
-    if not result.success:
-        if "API" in result.error or "key" in result.error.lower():
-            print("ERROR: API keys may be missing after context compaction")
-            print("Run: eval \"$(sops -d secrets.enc.yaml | sed 's/: /=/' | sed 's/^/export /')\"")
-            print("Then retry: orchestrator complete " + item_id)
-            sys.exit(1)
-        # Don't silently continue - block and require fix
-        print(f"ERROR: Review failed: {result.error}")
-        sys.exit(1)
+# In api_executor.py execute():
+try:
+    response = client.chat.completions.create(...)
+except OpenAIError as e:
+    if hasattr(e, 'status_code'):
+        error_type = classify_http_error(e.status_code, str(e))
+    else:
+        error_type = ReviewErrorType.NETWORK_ERROR
+    return ReviewResult(
+        success=False,
+        error=str(e),
+        error_type=error_type,
+        ...
+    )
 ```
 
 **Files Affected:**
-- `src/cli.py` - Review item completion logic
-- `src/review/router.py` - Fix the `context_override` argument error
-- `src/engine.py` - Add review completion validation to finish
+- `src/review/api_executor.py` - Catch HTTP errors, call classify_http_error()
+- `src/review/cli_executor.py` - Parse CLI error output, classify
 
 **Complexity vs Benefit Tradeoff:**
+- LOW effort (error handling already exists, just need to classify)
+- HIGH benefit (makes error_type field actually useful)
 
-| Factor | Current (Silent Failures) | With Resilience |
-|--------|--------------------------|-----------------|
-| Complexity | None (broken) | MEDIUM - error detection, retry logic |
-| Risk | HIGH - incomplete reviews unnoticed | LOW - failures block progression |
-| User Experience | Terrible - silent failure | Good - clear errors, recovery path |
-| Workflow Integrity | Broken | Enforced |
+**Recommendation:** ✅ RECOMMEND - Completes the CORE-026 feature
 
-**Current Evidence:**
-- ✅ Actual production incident (CORE-023 implementation)
-- ✅ Reviews silently failed, workflow proceeded with gaps
-- ✅ Context compaction is a known issue (happens regularly)
-- ✅ API keys lost after compaction is reproducible
+---
+
+#### CORE-026-E2: Ping Validation for API Keys
+**Status:** Planned
+**Complexity:** LOW
+**Priority:** LOW
+**Source:** CORE-026 implementation
+
+**Problem:**
+Current `validate_api_keys()` only checks key presence (is it set?) and format (is it >10 chars?). It doesn't verify the key actually works by making a test API call.
+
+**Implementation:**
+Add `ping=True` option to `validate_api_keys()` that makes a lightweight API call (e.g., list models) to verify the key is valid before running full reviews.
+
+**Complexity vs Benefit Tradeoff:**
+- LOW effort (simple API call per provider)
+- MEDIUM benefit (catches expired/revoked keys early)
+- RISK: Adds latency, may hit rate limits
 
 **YAGNI Check:**
-- Solving a problem we **actually have** (observed in production)
-- Would **NOT** be okay without this for even 1 month (reviews are critical)
-- Current solution **fails catastrophically** in practice
+- Current presence check catches most issues
+- Ping would only help for expired/revoked keys
+- Can defer until evidence of need
 
-**Recommendation:** ✅ **IMPLEMENT IMMEDIATELY** - Critical quality gate
-
-**Reasoning:**
-This is a blocker for zero-human-review workflows. Reviews silently failing defeats the entire purpose of the orchestrator. Medium implementation effort but absolutely necessary for production use.
-
-**Success Criteria:**
-- [ ] Reviews that fail block workflow advancement
-- [ ] Clear error messages guide user to fix
-- [ ] After key reload, reviews can be retried
-- [ ] `orchestrator finish` verifies all required reviews passed
-- [ ] API key loss is detected and communicated
+**Recommendation:** ⚠️ DEFER - Current validation sufficient for now
 
 ---
 

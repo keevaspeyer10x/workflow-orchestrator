@@ -157,6 +157,8 @@ class PhaseDef(BaseModel):
     items: list[ChecklistItemDef] = Field(default_factory=list)
     exit_gate: Optional[str] = None  # e.g., "human_approval", "all_tests_pass"
     notes: list[str] = Field(default_factory=list)  # Operating notes for this phase
+    # CORE-026: Required reviews for REVIEW phase (validated at finish)
+    required_reviews: list[str] = Field(default_factory=list)
     
     @field_validator('id')
     @classmethod
