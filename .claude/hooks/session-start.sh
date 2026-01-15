@@ -17,17 +17,20 @@ if command -v orchestrator &> /dev/null; then
     orchestrator doctor --cleanup --older-than 7 2>/dev/null || true
 fi
 
-# 2. Update orchestrator
+# 2. Update orchestrator and ai-tool-bridge
 echo "Checking workflow orchestrator..."
 pip install -q --upgrade git+https://github.com/keevaspeyer10x/workflow-orchestrator.git 2>/dev/null || true
 
-# 2. Install aider if not available (for Gemini reviews with repo context)
+echo "Checking ai-tool-bridge..."
+pip install -q --upgrade git+https://github.com/keevaspeyer10x/ai-tool-bridge.git 2>/dev/null || true
+
+# 3. Install aider if not available (for Gemini reviews with repo context)
 if ! command -v aider &> /dev/null; then
     echo "Installing aider-chat for reviews..."
     pip install -q aider-chat 2>/dev/null || echo "Note: aider-chat install skipped"
 fi
 
-# 3. Load secrets from simple encrypted file (preferred method)
+# 4. Load secrets from simple encrypted file (preferred method)
 SECRETS_FILE=".secrets.enc"
 
 if [ -f "$SECRETS_FILE" ]; then
@@ -71,7 +74,7 @@ else
     echo "      Run 'orchestrator secrets init' to set up secrets"
 fi
 
-# 4. Load password-encrypted SOPS AGE key (global first, then local)
+# 5. Load password-encrypted SOPS AGE key (global first, then local)
 if [ -n "$SOPS_KEY_PASSWORD" ] && [ -z "$SOPS_AGE_KEY" ]; then
     # Try global encrypted key first
     GLOBAL_KEY="$HOME/.config/workflow-orchestrator/keys/age.key.enc"
@@ -91,7 +94,7 @@ if [ -n "$SOPS_KEY_PASSWORD" ] && [ -z "$SOPS_AGE_KEY" ]; then
     fi
 fi
 
-# 5. Check for unencrypted key (global first, then local - for desktop use)
+# 6. Check for unencrypted key (global first, then local - for desktop use)
 if [ -z "$SOPS_AGE_KEY" ]; then
     # Try global unencrypted key first
     GLOBAL_PLAIN="$HOME/.config/workflow-orchestrator/keys/age.key"
@@ -105,7 +108,7 @@ if [ -z "$SOPS_AGE_KEY" ]; then
     fi
 fi
 
-# 6. Load secrets from SOPS file if available (skip ANTHROPIC_API_KEY if Claude is authenticated)
+# 7. Load secrets from SOPS file if available (skip ANTHROPIC_API_KEY if Claude is authenticated)
 if [ -n "$SOPS_AGE_KEY" ] && [ -f "secrets.enc.yaml" ] && command -v sops &> /dev/null; then
     # Check if Claude is authenticated (claude.ai token exists)
     CLAUDE_AUTHENTICATED=false
