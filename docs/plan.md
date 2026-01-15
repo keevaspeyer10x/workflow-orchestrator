@@ -1,83 +1,74 @@
-# Issue #61: Fix CLI Hanging in Non-Interactive Mode
+# Issues #63 and #64: Quick Fix Implementation Plan
 
-## Problem Statement
+## Overview
 
-Orchestrator CLI commands (`orchestrator advance`, `orchestrator complete`) hang indefinitely when run from non-interactive shells (Claude Code, CI/CD, scripts) because `input()` blocks waiting for stdin that never comes.
+Two UX quick fixes for the workflow orchestrator:
+1. **#64**: Default task_provider to 'github' when gh CLI available
+2. **#63**: Fix commit_and_sync showing "Skipped" when auto-sync actually pushes
 
-## Root Cause
+## Issue #64: Default task_provider to 'github'
 
-`input()` calls in `src/cli.py` block in non-interactive mode. When stdin is not connected to a terminal (e.g., when spawned by Claude Code or running in CI), `input()` waits forever.
+### Problem
+- `orchestrator task add` stores tasks locally by default (~/.config/orchestrator/tasks.json)
+- Users expect GitHub Issues when working in a GitHub repo
+- Current explicit `--provider local` default causes task confusion
 
-## Solution Design
+### Solution
+Change the default provider resolution in CLI task commands from hardcoded `'local'` to use `get_task_provider()` auto-detection, which already tries GitHub first.
 
-### Pattern: Detect and Fail-Fast
+### Files to Modify
+- `src/cli.py` - Lines 5886, 5910, 5946, 5965 in task command handlers
 
-```python
-def is_interactive():
-    """Check if running in an interactive terminal."""
-    return sys.stdin.isatty() and sys.stdout.isatty() and not os.environ.get('CI')
+### Implementation Steps
+1. In `cmd_task_list()`, `cmd_task_add()`, `cmd_task_next()`, `cmd_task_close()`, `cmd_task_show()`:
+   - Change from: `provider_name = getattr(args, 'provider', None) or 'local'`
+   - To: `provider_name = getattr(args, 'provider', None)` (let get_task_provider auto-detect)
+2. The existing `get_task_provider(None)` already:
+   - Tries GitHub first (checks gh CLI + authentication + git remote)
+   - Falls back to local if GitHub unavailable
+3. Update help text to indicate auto-detection
 
-def confirm(prompt: str, default: bool = False, yes_flag: bool = False) -> bool:
-    """Prompt user for confirmation with non-interactive fallback.
+---
 
-    Args:
-        prompt: The question to ask
-        default: Default answer if non-interactive
-        yes_flag: If True, skip prompt and return True (--yes flag)
+## Issue #63: commit_and_sync UX in zero_human mode
 
-    Returns:
-        True if confirmed, False otherwise
-    """
-    if yes_flag:
-        return True
-    if not is_interactive():
-        hint = prompt.split('[')[0].strip()  # Extract question part
-        print(f"ERROR: {hint} - Cannot prompt in non-interactive mode.")
-        print("Use --yes flag to auto-confirm, or run interactively.")
-        sys.exit(1)
-    response = input(prompt)
-    return response.lower() in ['y', 'yes']
-```
+### Problem
+- In zero_human mode, `commit_and_sync` manual gate is auto-skipped
+- Shows "Skipped: Auto-skipped (zero_human mode)" in summary
+- But `orchestrator finish` still pushes via CORE-031 auto-sync
+- Users think their work wasn't committed/pushed
 
-### Locations to Fix
+### Solution
+**Option B (recommended)**: Mark `commit_and_sync` as "completed" (not "skipped") when auto-sync succeeds in zero_human mode.
 
-| Location | Function | Line | Current Behavior | Fix |
-|----------|----------|------|------------------|-----|
-| **PRIORITY** | `cmd_advance` | ~1265 | `input("Critical issues found...")` | Use `confirm()` |
-| Medium | `cmd_init` | ~490 | `input("Overwrite?...")` | Use `confirm()` with `--force` flag |
-| Medium | `cmd_resolve` | ~808, ~831 | `input("Enter choice...")` | Fail-fast with strategy suggestion |
-| Low | `cmd_workflow_cleanup` | ~5053 | `input("Remove these?...")` | Use `confirm()` with `--yes` flag |
-| N/A | `cmd_feedback_capture` | ~5129-5146 | Already gated by `is_interactive` flag | No change needed |
+### Files to Modify
+- `src/cli.py` - `cmd_finish()` function (lines ~1511-1552)
 
-## Implementation Steps
+### Implementation Steps
+1. After successful auto-sync in `cmd_finish()`:
+   - Load the workflow engine
+   - Find the `commit_and_sync` item
+   - If status is "skipped" and auto-sync succeeded:
+     - Update status to "completed"
+     - Set notes to "Auto-completed via CORE-031 sync"
+   - Save state
+2. The finish summary will now show "Completed" instead of "Skipped"
 
-1. **Add helper functions** near top of `cli.py` (after imports, ~line 100):
-   - `is_interactive()` - detect terminal mode
-   - `confirm()` - reusable confirmation with fail-fast
-
-2. **Fix `cmd_advance`** (line ~1265):
-   - Replace direct `input()` with `confirm()`
-   - Leverage existing `--yes` flag
-
-3. **Fix `cmd_init`** (line ~490):
-   - Use `confirm()` with existing `--force` flag
-   - `--force` bypasses confirmation
-
-4. **Fix `cmd_resolve`** (lines ~808, ~831):
-   - In non-interactive mode, fail with clear error
-   - Suggest: "Use `--strategy ours` or `--strategy theirs`"
-
-5. **Fix `cmd_workflow_cleanup`** (line ~5053):
-   - Use `confirm()` with existing `--yes`/`-y` flag
-   - Already has `skip_confirm` parameter
+---
 
 ## Parallel Execution Decision
 
-**Sequential execution** - This is a single-file fix with interdependent changes. Each fix uses the same helper functions added in step 1. No benefit from parallelization.
+**Will use SEQUENTIAL execution** because:
+- Both fixes are small (~10-20 lines each)
+- They're in the same file (src/cli.py)
+- Changes don't conflict but testing is easier sequentially
+- Total implementation time is minimal
 
-## Testing Strategy
+---
 
-1. Unit tests for `is_interactive()` helper
-2. Unit tests for `confirm()` helper
-3. Integration tests simulating non-interactive mode
-4. Verify existing `--yes` flags work correctly
+## Implementation Order
+
+1. **#64 first** - Simpler, isolated change to task commands
+2. **#63 second** - Requires understanding of engine state updates
+3. **Tests** - Run existing test suite + manual verification
+4. **Commit** - Single commit for both fixes

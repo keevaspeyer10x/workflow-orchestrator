@@ -17,7 +17,7 @@ from src.engine import WorkflowEngine
 from src.analytics import WorkflowAnalytics
 from src.learning_engine import LearningEngine
 from src.dashboard import start_dashboard, generate_static_dashboard
-from src.schema import WorkflowDef, WorkflowEvent, EventType
+from src.schema import WorkflowDef, WorkflowEvent, EventType, ItemStatus
 from src.claude_integration import ClaudeCodeIntegration
 from src.providers import get_provider, list_providers, AgentProvider
 from src.environment import detect_environment, get_environment_info, Environment
@@ -1551,6 +1551,34 @@ def cmd_finish(args):
                 else:
                     print(f"⚠️  Sync failed: {sync_result.message}")
 
+        # Issue #63: Update commit_and_sync item status after successful auto-sync
+        # In zero_human mode, commit_and_sync is auto-skipped but sync still happens
+        # Mark it as "completed" instead of "skipped" when sync succeeds
+        if sync_result and sync_result.success:
+            try:
+                # Find commit_and_sync in LEARN phase
+                learn_phase = engine.state.phases.get("LEARN")
+                if learn_phase and "commit_and_sync" in learn_phase.items:
+                    item_state = learn_phase.items["commit_and_sync"]
+                    if item_state.status == ItemStatus.SKIPPED:
+                        item_state.status = ItemStatus.COMPLETED
+                        item_state.completed_at = datetime.now(timezone.utc)
+                        item_state.notes = "Auto-completed via CORE-031 sync"
+                        engine.save_state()
+                        # Also update the cached summary data for correct output
+                        if "LEARN" in all_skipped:
+                            all_skipped["LEARN"] = [
+                                item for item in all_skipped["LEARN"]
+                                if not item.startswith("commit_and_sync:")
+                            ]
+                            if not all_skipped["LEARN"]:
+                                del all_skipped["LEARN"]
+                        if "LEARN" in summary:
+                            summary["LEARN"]["skipped"] -= 1
+                            summary["LEARN"]["completed"] += 1
+            except Exception:
+                pass  # Silently ignore - git sync already succeeded
+
         # WF-027: Capture summary to buffer for saving to file
         from io import StringIO
         summary_buffer = StringIO()
@@ -1774,7 +1802,6 @@ def cmd_finish(args):
         archive_dir.mkdir(parents=True, exist_ok=True)
 
         # Generate filename from date and task slug
-        from datetime import datetime
         import re
         date_str = datetime.now().strftime("%Y-%m-%d")
         task_slug = re.sub(r'[^a-z0-9]+', '-', task_description.lower())[:40].strip('-')
@@ -5854,8 +5881,8 @@ def cmd_feedback_sync(args):
 def cmd_task_list(args):
     """List tasks from configured backend."""
     try:
-        # Get provider (default to local)
-        provider_name = getattr(args, 'provider', None) or 'local'
+        # Get provider (auto-detect if not specified - #64)
+        provider_name = getattr(args, 'provider', None)
         provider = get_task_provider(provider_name)
 
         # Build filters
@@ -5883,7 +5910,8 @@ def cmd_task_list(args):
 def cmd_task_next(args):
     """Show the highest priority open task."""
     try:
-        provider_name = getattr(args, 'provider', None) or 'local'
+        # Auto-detect provider if not specified (#64)
+        provider_name = getattr(args, 'provider', None)
         provider = get_task_provider(provider_name)
 
         task = provider.get_next_task()
@@ -5907,7 +5935,8 @@ def cmd_task_next(args):
 def cmd_task_add(args):
     """Quick add a task with minimal prompts."""
     try:
-        provider_name = getattr(args, 'provider', None) or 'local'
+        # Auto-detect provider if not specified (#64)
+        provider_name = getattr(args, 'provider', None)
         provider = get_task_provider(provider_name)
 
         # Map priority string to enum
@@ -5943,7 +5972,8 @@ def cmd_task_add(args):
 def cmd_task_close(args):
     """Close a task by ID."""
     try:
-        provider_name = getattr(args, 'provider', None) or 'local'
+        # Auto-detect provider if not specified (#64)
+        provider_name = getattr(args, 'provider', None)
         provider = get_task_provider(provider_name)
 
         task = provider.close_task(args.task_id, comment=args.comment)
@@ -5962,7 +5992,8 @@ def cmd_task_close(args):
 def cmd_task_show(args):
     """Show details of a specific task."""
     try:
-        provider_name = getattr(args, 'provider', None) or 'local'
+        # Auto-detect provider if not specified (#64)
+        provider_name = getattr(args, 'provider', None)
         provider = get_task_provider(provider_name)
 
         task = provider.get_task(args.task_id)

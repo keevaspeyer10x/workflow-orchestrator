@@ -1,53 +1,93 @@
-# Issues #65 and #66: CLI Review Choices + Model DRY Refactor - Risk Analysis
+# Issues #63 and #64: Risk Analysis
 
-## Issue #65: CLI Review Type Choices
+## Overall Risk: LOW
+
+Both fixes are small, additive changes with clear fallback behavior.
+
+---
+
+## Issue #64: Default task_provider to 'github'
 
 ### Risk Level: LOW
 
-**Risks:**
-1. **Import Error**: If `get_all_review_types()` fails to import at CLI startup
-   - Mitigation: The function already exists and is tested
-   - Fallback: Keep hardcoded list as fallback (not recommended, defeats purpose)
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| gh CLI not installed | Medium | Low | Falls back to local (existing behavior) |
+| gh CLI not authenticated | Medium | Low | Falls back to local (existing behavior) |
+| Not in git repo | Medium | Low | Falls back to local (existing behavior) |
+| GitHub API rate limits | Low | Low | Only affects listing, not storage |
+| Breaking existing workflows | Very Low | Medium | Explicit --provider still works |
 
-2. **Empty List**: If registry returns empty list
-   - Mitigation: Registry always has 5 defined types (static, not API-dependent)
-   - Impact: Low - this would be a bug in the registry itself
+### Detailed Analysis
 
-**Impact Assessment:**
-- Breaking change: No (additive - adds `vibe_coding` option)
-- Backwards compatible: Yes (existing review types still work)
-- Recovery: Trivial (revert 1 line)
+**Change is safe because:**
+1. `get_task_provider(None)` already implements auto-detection
+2. GitHub provider has robust `is_available()` check
+3. Local provider is always available as fallback
+4. Users can override with `--provider local` if needed
 
-## Issue #66: Model Version DRY Refactor
+**Behavioral Change:**
+- Before: Tasks always go to local JSON file
+- After: Tasks go to GitHub Issues if available, else local
+- This is the **expected** behavior per issue description
 
-### Risk Level: MEDIUM
+---
 
-**Risks:**
-1. **Circular Import**: `model_registry.py` imports from `review.config`, and vice versa
-   - Mitigation: Use lazy imports or move model resolution to a single module
-   - Already addressed: `model_registry._resolve_category()` handles this
+## Issue #63: commit_and_sync UX Fix
 
-2. **Model ID Format Mismatch**: CLI vs API use different formats
-   - CLI: `gpt-5.2-codex-max` (bare)
-   - API: `openai/gpt-5.2-codex-max` (prefixed)
-   - Mitigation: Registry already handles both via `get_latest_model()`
+### Risk Level: LOW
 
-3. **Runtime vs Import-time Resolution**: Moving from static dict to function calls
-   - Risk: Performance impact if called frequently
-   - Mitigation: Low frequency (once per review run)
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| State corruption | Very Low | High | Only updates status field, doesn't touch other state |
+| Item not found | Low | Low | Check existence before update, log warning |
+| Double completion | Very Low | Low | Check current status before updating |
+| Sync succeeded but update fails | Very Low | Low | Log error, doesn't affect actual git state |
 
-4. **Test Breakage**: Tests may mock hardcoded values
-   - Mitigation: Update tests to use registry or mock registry
+### Detailed Analysis
 
-**Impact Assessment:**
-- Breaking change: No (external API unchanged)
-- Backwards compatible: Yes (same model IDs returned)
-- Recovery: Medium (multiple files, but straightforward revert)
+**Change is safe because:**
+1. Only modifies item status after sync is already complete
+2. Git operations are independent of workflow state
+3. If update fails, git push has already succeeded
+4. Worst case: user sees "Skipped" but code is pushed (current behavior)
 
-## Overall Risk: LOW-MEDIUM
+**Edge Cases:**
+- `commit_and_sync` item doesn't exist in workflow → log warning, skip update
+- Item already marked "completed" → no change needed
+- Auto-sync failed → keep "skipped" status (correct)
 
-The changes are:
-- Well-isolated (specific files, specific functions)
-- Additive (#65) or internal refactor (#66)
-- Easy to verify (run `orchestrator review vibe_coding`)
-- Easy to revert if needed
+---
+
+## Security Considerations
+
+### Issue #64
+- No new permissions required
+- gh CLI already handles authentication
+- No secrets exposed
+
+### Issue #63
+- No external API calls
+- Only modifies local workflow state file
+- No user input directly used
+
+---
+
+## Rollback Plan
+
+Both changes are easily reversible:
+1. **#64**: Revert to `provider_name = ... or 'local'` pattern
+2. **#63**: Remove the post-sync state update block
+
+No database migrations or schema changes required.
+
+---
+
+## Conclusion
+
+**Recommendation: PROCEED**
+
+- Risk is very low for both fixes
+- Both are pure behavior improvements (no breaking changes)
+- Explicit flags preserve old behavior if needed
+- Easy rollback if issues arise

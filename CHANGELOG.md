@@ -5,6 +5,17 @@ All notable changes to the workflow-orchestrator.
 ## [Unreleased]
 
 ### Fixed
+- **Issue #64: Default task_provider to 'github' when gh CLI available**
+  - Task commands (list, add, next, close, show) now auto-detect provider instead of defaulting to 'local'
+  - If gh CLI is installed and authenticated, GitHub Issues backend is used automatically
+  - Falls back to local JSON storage when gh CLI unavailable
+  - Explicit `--provider local` flag still overrides auto-detection
+
+- **Issue #63: commit_and_sync shows "Skipped" when auto-sync actually pushes**
+  - In zero_human mode, commit_and_sync item now shows "Completed" after successful auto-sync
+  - Previously showed misleading "Skipped" even though CORE-031 auto-sync pushed changes
+  - Notes indicate "Auto-completed via CORE-031 sync" for clarity
+
 - **Issue #65: vibe_coding review type not exposed in CLI choices**
   - CLI `review` command now dynamically uses `get_all_review_types()` from registry
   - Previously hardcoded list `['security', 'consistency', 'quality', 'holistic', 'all']` missing `vibe_coding`

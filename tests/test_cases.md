@@ -1,84 +1,150 @@
-# Issues #65 and #66: CLI Review Choices + Model DRY Refactor - Test Cases
+# Issues #63 and #64: Test Cases
 
-## Issue #65: CLI Review Type Choices
+## Issue #64: Default task_provider to 'github'
 
-### TC-65-1: CLI Accepts vibe_coding Review Type
-**Input**: `orchestrator review vibe_coding --help`
-**Expected**: Command parses successfully (no argparse error)
+### TC-64-1: Auto-detect GitHub when Available
+**Setup**: In a git repo with gh CLI installed and authenticated
+**Input**: `orchestrator task list` (no --provider flag)
+**Expected**: Uses GitHub provider (lists issues from repo)
+**Verification**: Output shows GitHub issues, not local JSON
 
-### TC-65-2: CLI Choices Match Registry
-**Input**: Parse CLI choices from argparse
-**Expected**: Choices include all items from `get_all_review_types()` plus 'all'
-**Verification**:
-```python
-from src.review.registry import get_all_review_types
-expected = set(get_all_review_types()) | {'all'}
-# Verify CLI choices == expected
-```
+### TC-64-2: Fallback to Local when gh Unavailable
+**Setup**: gh CLI not installed OR not authenticated
+**Input**: `orchestrator task list` (no --provider flag)
+**Expected**: Falls back to local provider
+**Verification**: Output shows tasks from ~/.config/orchestrator/tasks.json
 
-### TC-65-3: All Review Types Executable
-**Input**: Run each review type individually
-**Expected**: Each type starts execution (may fail due to missing API keys, but no argparse error)
-```bash
-for type in security quality consistency holistic vibe_coding; do
-  orchestrator review $type --help
-done
-```
+### TC-64-3: Explicit --provider Overrides Auto-detect
+**Setup**: In a git repo with gh CLI available
+**Input**: `orchestrator task list --provider local`
+**Expected**: Uses local provider despite GitHub being available
+**Verification**: Output shows local JSON tasks
 
-## Issue #66: Model Version DRY Refactor
+### TC-64-4: Task Add Uses Auto-detect
+**Setup**: In a git repo with gh CLI available
+**Input**: `orchestrator task add "Test task"`
+**Expected**: Creates GitHub issue (not local task)
+**Verification**: `gh issue list` shows new issue
 
-### TC-66-1: get_latest_model Returns Valid IDs
-**Input**: Call `get_latest_model()` for each category
-**Expected**: Returns non-empty string with valid model ID format
-```python
-from src.model_registry import get_latest_model
-for category in ['codex', 'gemini', 'grok', 'claude']:
-    model = get_latest_model(category)
-    assert model is not None
-    assert '/' in model  # Has provider prefix
-```
+### TC-64-5: Task Add Fallback to Local
+**Setup**: gh CLI not authenticated
+**Input**: `orchestrator task add "Test task"`
+**Expected**: Creates local task
+**Verification**: ~/.config/orchestrator/tasks.json contains new task
 
-### TC-66-2: Review Type to Model Resolution
-**Input**: Call `get_latest_model()` with review type names
-**Expected**: Resolves correctly via `_resolve_category()`
-```python
-from src.model_registry import get_latest_model
-# Review types should resolve to their tool categories
-assert 'gpt' in get_latest_model('security').lower() or 'codex' in get_latest_model('security').lower()
-assert 'gemini' in get_latest_model('consistency').lower()
-assert 'grok' in get_latest_model('vibe_coding').lower()
-```
+---
 
-### TC-66-3: API Executor Uses Registry
-**Input**: Check that `api_executor.py` calls registry instead of hardcoded dict
-**Expected**: No hardcoded `OPENROUTER_MODELS` dict with version strings
-**Verification**: Grep for hardcoded model versions after refactor
+## Issue #63: commit_and_sync UX in zero_human Mode
 
-### TC-66-4: Config Module Uses Registry
-**Input**: Check `config.py` for hardcoded model versions
-**Expected**: Uses `get_latest_model()` instead of static dicts
-**Verification**: Grep for hardcoded model versions after refactor
+### TC-63-1: commit_and_sync Marked Completed After Auto-sync
+**Setup**:
+- Workflow in LEARN phase with commit_and_sync item "skipped"
+- Zero_human mode enabled
+- Uncommitted changes exist
+**Input**: `orchestrator finish`
+**Expected**:
+- Auto-sync pushes changes
+- commit_and_sync status changes from "skipped" to "completed"
+- Notes show "Auto-completed via CORE-031 sync"
+**Verification**: `orchestrator status` shows item as completed
 
-### TC-66-5: Integration Test - Full Review Run
-**Input**: `orchestrator review all` (with valid API keys)
-**Expected**: All 5 review types execute using correct models from registry
-**Note**: Requires API keys to be configured
+### TC-63-2: commit_and_sync Stays Skipped if Sync Fails
+**Setup**:
+- Workflow with commit_and_sync "skipped"
+- Network unavailable or push rejected
+**Input**: `orchestrator finish`
+**Expected**:
+- Sync fails with error
+- commit_and_sync remains "skipped"
+**Verification**: Status shows "Skipped" (not incorrectly completed)
+
+### TC-63-3: commit_and_sync Stays Skipped with --no-push
+**Setup**:
+- Workflow with commit_and_sync "skipped"
+**Input**: `orchestrator finish --no-push`
+**Expected**:
+- No sync attempted
+- commit_and_sync remains "skipped" (correct - no sync happened)
+**Verification**: Status shows "Skipped"
+
+### TC-63-4: Already Completed commit_and_sync Unchanged
+**Setup**:
+- Workflow with commit_and_sync already "completed" (not skipped)
+**Input**: `orchestrator finish`
+**Expected**:
+- Item remains "completed"
+- No duplicate completion or status change
+**Verification**: Status unchanged, no errors
+
+### TC-63-5: commit_and_sync Not in Workflow (Edge Case)
+**Setup**: Custom workflow.yaml without commit_and_sync item
+**Input**: `orchestrator finish`
+**Expected**:
+- No errors (graceful handling)
+- Finish completes normally
+**Verification**: Command succeeds, no exceptions
+
+---
 
 ## Regression Tests
 
-### RT-1: Existing Review Types Still Work
-**Input**: Run `orchestrator review security`
-**Expected**: Executes security review as before
+### RT-1: Existing task list Works
+**Input**: `orchestrator task list --provider local`
+**Expected**: Lists tasks from local JSON file (existing behavior)
 
-### RT-2: CLI Help Shows All Options
-**Input**: `orchestrator review --help`
-**Expected**: Help text shows all review types including vibe_coding
+### RT-2: Existing task list --provider github Works
+**Input**: `orchestrator task list --provider github`
+**Expected**: Lists GitHub issues (existing behavior)
 
-## Acceptance Criteria
+### RT-3: orchestrator finish Without Changes
+**Setup**: No uncommitted changes
+**Input**: `orchestrator finish`
+**Expected**: "Already in sync" message, no errors
 
-- [ ] `orchestrator review vibe_coding` no longer fails with argparse error
-- [ ] All 5 review types available in CLI choices
-- [ ] `get_latest_model()` used instead of hardcoded strings in api_executor.py
-- [ ] `get_latest_model()` used instead of hardcoded strings in config.py
-- [ ] Existing test suite passes
-- [ ] New tests added to prevent regression
+### RT-4: Full Workflow Lifecycle
+**Input**: Start workflow → complete items → finish
+**Expected**: All phases complete correctly, summary accurate
+
+---
+
+## Automated Test Coverage
+
+### Unit Tests to Add
+
+```python
+# test_task_provider_autodetect.py
+def test_task_list_auto_detects_github():
+    """When gh CLI available, task list uses GitHub by default."""
+    pass
+
+def test_task_list_falls_back_to_local():
+    """When gh CLI unavailable, task list uses local."""
+    pass
+
+def test_task_add_respects_auto_detect():
+    """Task add uses auto-detected provider."""
+    pass
+
+# test_finish_commit_sync_ux.py
+def test_finish_updates_skipped_commit_sync_on_success():
+    """commit_and_sync marked completed after successful auto-sync."""
+    pass
+
+def test_finish_keeps_skipped_on_sync_failure():
+    """commit_and_sync stays skipped if auto-sync fails."""
+    pass
+
+def test_finish_no_push_keeps_skipped():
+    """--no-push keeps commit_and_sync as skipped."""
+    pass
+```
+
+---
+
+## Manual Verification Checklist
+
+- [ ] `orchestrator task list` auto-detects GitHub in this repo
+- [ ] `orchestrator task add "Test" --provider local` uses local
+- [ ] `orchestrator finish` shows "Completed" for commit_and_sync after push
+- [ ] `orchestrator finish --no-push` shows "Skipped" for commit_and_sync
+- [ ] All existing tests pass (`pytest tests/`)
