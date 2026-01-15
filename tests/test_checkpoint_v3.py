@@ -196,13 +196,20 @@ class TestLockManager:
 
     def test_stale_lock_detection(self, tmp_path):
         """Stale locks are detected and cleaned up."""
-        from src.checkpoint import LockManager
+        from src.checkpoint import LockManager, _process_exists
 
         manager = LockManager(lock_dir=tmp_path, stale_timeout=0.1)
 
-        # Create a stale lock file manually
+        # Find a PID that definitely doesn't exist
+        # Use a very large PID that's beyond typical max_pid (usually 32768 or 4194304)
+        # and verify it doesn't exist before using it
+        non_existent_pid = 99999999
+        while _process_exists(non_existent_pid) and non_existent_pid > 0:
+            non_existent_pid -= 1000000
+
+        # Create a stale lock file manually with verified non-existent PID
         lock_file = tmp_path / "stale_resource.lock"
-        lock_file.write_text(str(os.getpid() + 99999))  # Non-existent PID
+        lock_file.write_text(str(non_existent_pid))
 
         # Should be able to acquire despite stale lock
         with manager.acquire("stale_resource"):

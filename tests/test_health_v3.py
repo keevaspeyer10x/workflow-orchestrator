@@ -18,12 +18,16 @@ class TestHealthChecker:
     def test_state_file_healthy(self, tmp_path):
         """State file passes health check when valid."""
         from src.health import HealthChecker
+        from src.state_version import save_state_with_integrity
 
-        # Create valid state file
+        # Create valid state file using save_state_with_integrity
         state_dir = tmp_path / ".orchestrator" / "v3"
         state_dir.mkdir(parents=True)
         state_file = state_dir / "state.json"
-        state_file.write_text('{"_version": "3.0", "_checksum": "abc123"}')
+
+        # Use proper state creation with valid checksum
+        state_data = {"workflow_id": "test", "phase": "PLAN"}
+        save_state_with_integrity(state_file, state_data)
 
         checker = HealthChecker(working_dir=tmp_path)
         report = checker.check_state()

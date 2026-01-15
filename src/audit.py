@@ -82,11 +82,15 @@ class AuditLogger:
             logger.warning(f"Could not load last audit hash: {e}")
 
     def _compute_hash(self, content: str, prev_hash: Optional[str] = None) -> str:
-        """Compute hash for entry including previous hash."""
+        """Compute hash for entry including previous hash.
+
+        Uses SHA-256 with 32-char truncation (128 bits) for tamper-evident logging.
+        This provides sufficient collision resistance for audit trail integrity.
+        """
         to_hash = content
         if prev_hash:
             to_hash = f"{prev_hash}:{content}"
-        return hashlib.sha256(to_hash.encode()).hexdigest()[:16]
+        return hashlib.sha256(to_hash.encode()).hexdigest()[:32]
 
     def _sanitize_path(self, path: str) -> str:
         """Sanitize sensitive paths from logs."""

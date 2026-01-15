@@ -12,11 +12,45 @@ Features:
 
 import json
 import logging
+import sys
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import List, Optional, Literal
 
+# Try to import psutil for cross-platform PID checking
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    psutil = None
+    HAS_PSUTIL = False
+
+WINDOWS = sys.platform == 'win32'
+
 logger = logging.getLogger(__name__)
+
+
+def _process_exists(pid: int) -> bool:
+    """
+    Check if a process with the given PID exists.
+
+    Cross-platform: Uses psutil if available, falls back to os.kill on Unix.
+    """
+    if HAS_PSUTIL:
+        return psutil.pid_exists(pid)
+
+    if WINDOWS:
+        # On Windows without psutil, we can't reliably check
+        # Assume process exists to be safe
+        return True
+
+    # Unix fallback: use signal 0
+    import os
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
 
 StatusType = Literal["ok", "warning", "error"]
 
@@ -105,19 +139,34 @@ class HealthChecker:
 
             # Verify version
             version = state.get('_version')
-            if version != '3.0':
+            if version is None or not version.startswith('3.'):
                 return ComponentHealth(
                     name="state_file",
                     status="warning",
-                    message=f"State version mismatch: expected 3.0, got {version}"
+                    message=f"State version mismatch: expected 3.x, got {version}"
                 )
 
             # Verify checksum exists
-            if '_checksum' not in state:
+            stored_checksum = state.get('_checksum')
+            if not stored_checksum:
                 return ComponentHealth(
                     name="state_file",
                     status="warning",
                     message="State file missing checksum"
+                )
+
+            # Verify checksum integrity
+            from .state_version import compute_state_checksum
+            computed_checksum = compute_state_checksum(state)
+            if stored_checksum != computed_checksum:
+                return ComponentHealth(
+                    name="state_file",
+                    status="error",
+                    message="State file integrity check failed (checksum mismatch)",
+                    details={
+                        "stored_checksum": stored_checksum,
+                        "computed_checksum": computed_checksum
+                    }
                 )
 
             return ComponentHealth(
@@ -159,11 +208,8 @@ class HealthChecker:
                 content = lock_file.read_text().strip()
                 if content:
                     pid = int(content)
-                    # Check if process exists
-                    import os
-                    try:
-                        os.kill(pid, 0)
-                    except OSError:
+                    # Check if process exists (cross-platform)
+                    if not _process_exists(pid):
                         stale_locks.append(lock_file.name)
             except (ValueError, FileNotFoundError):
                 pass

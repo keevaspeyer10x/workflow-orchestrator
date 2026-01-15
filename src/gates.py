@@ -20,7 +20,7 @@ import json
 import shlex
 import subprocess
 from pathlib import Path
-from typing import Optional, List, Literal
+from typing import Optional, List, Literal, Union, Protocol, runtime_checkable
 from dataclasses import dataclass, field
 
 
@@ -48,6 +48,23 @@ def _is_valid_yaml(path: Path) -> bool:
         return True
     except Exception:
         return False
+
+
+@runtime_checkable
+class GateProtocol(Protocol):
+    """Protocol for gate validation.
+
+    All gate types must implement this protocol to be used in CompositeGate.
+    """
+    error: Optional[str]
+
+    def validate(self, base_path: Path) -> bool:
+        """Validate the gate condition."""
+        ...
+
+
+# Type alias for all gate types (used for type hints and validation)
+GateType = Union["ArtifactGate", "CommandGate", "HumanApprovalGate", "CompositeGate"]
 
 
 # Validator functions
@@ -251,10 +268,28 @@ class CompositeGate:
 
     AND: All gates must pass
     OR: At least one gate must pass
+
+    Type Safety:
+    - gates must be a list of objects implementing GateProtocol
+    - Validates gate types at runtime to prevent crashes from malformed YAML/JSON
     """
     operator: Literal["and", "or"]
-    gates: List = field(default_factory=list)
+    gates: List[GateType] = field(default_factory=list)
     error: Optional[str] = None
+
+    def __post_init__(self):
+        """Validate gate types after initialization."""
+        self._validate_gates()
+
+    def _validate_gates(self) -> None:
+        """Validate that all gates implement GateProtocol."""
+        for i, gate in enumerate(self.gates):
+            if not isinstance(gate, GateProtocol):
+                raise TypeError(
+                    f"Gate at index {i} must implement GateProtocol, "
+                    f"got {type(gate).__name__}. "
+                    f"Use gate factory functions to create gates from YAML/dict."
+                )
 
     def validate(self, base_path: Path) -> bool:
         """

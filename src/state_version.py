@@ -32,13 +32,13 @@ def compute_state_checksum(state_data: dict) -> str:
     Compute checksum for state integrity verification.
 
     The checksum excludes metadata fields (_checksum, _updated_at) to allow
-    verification. Uses SHA256 truncated to 16 chars for readability.
+    verification. Uses SHA256 truncated to 32 chars (128 bits) for security.
     """
     # Exclude metadata fields from hash
     excluded = {'_checksum', '_updated_at'}
     data_copy = {k: v for k, v in state_data.items() if k not in excluded}
     content = json.dumps(data_copy, sort_keys=True)
-    return hashlib.sha256(content.encode()).hexdigest()[:16]
+    return hashlib.sha256(content.encode()).hexdigest()[:32]
 
 
 def save_state_with_integrity(state_path: Path, state_data: dict):
