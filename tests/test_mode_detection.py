@@ -187,7 +187,7 @@ class TestStateIntegrity:
 
         Test case SI-02: Modifying state without updating checksum should fail.
         """
-        from src.state_version import save_state_with_integrity, load_state_with_verification
+        from src.state_version import save_state_with_integrity, load_state_with_verification, StateIntegrityError
 
         state_path = tmp_path / "state.json"
         save_state_with_integrity(state_path, {"phase": "PLAN"})
@@ -199,7 +199,7 @@ class TestStateIntegrity:
         with open(state_path, 'w') as f:
             json.dump(data, f)
 
-        with pytest.raises(ValueError, match="integrity"):
+        with pytest.raises(StateIntegrityError, match="integrity"):
             load_state_with_verification(state_path)
 
     def test_wrong_version_rejected(self, tmp_path):
@@ -207,13 +207,13 @@ class TestStateIntegrity:
 
         Test case SI-03: v2 state should not be loaded by v3 code.
         """
-        from src.state_version import load_state_with_verification
+        from src.state_version import load_state_with_verification, StateIntegrityError
 
         state_path = tmp_path / "state.json"
         with open(state_path, 'w') as f:
             json.dump({"_version": "2.0", "_checksum": "fake", "phase": "PLAN"}, f)
 
-        with pytest.raises(ValueError, match="incompatible"):
+        with pytest.raises(StateIntegrityError, match="incompatible"):
             load_state_with_verification(state_path)
 
     def test_missing_checksum_handled(self, tmp_path):
@@ -221,14 +221,14 @@ class TestStateIntegrity:
 
         Test case SI-04: Missing checksum should raise error.
         """
-        from src.state_version import load_state_with_verification
+        from src.state_version import load_state_with_verification, StateIntegrityError
 
         state_path = tmp_path / "state.json"
         with open(state_path, 'w') as f:
             json.dump({"_version": "3.0", "phase": "PLAN"}, f)  # No _checksum
 
-        # Should raise ValueError for missing checksum
-        with pytest.raises(ValueError):
+        # Should raise StateIntegrityError for missing checksum
+        with pytest.raises(StateIntegrityError):
             load_state_with_verification(state_path)
 
     def test_empty_state_handled(self, tmp_path):

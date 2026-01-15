@@ -11,17 +11,34 @@ V3 additions:
 """
 
 import atexit
-import fcntl
 import json
 import logging
 import hashlib
 import os
+import sys
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List, TYPE_CHECKING
 from dataclasses import dataclass, field, asdict
+
+# Platform-specific imports for file locking
+WINDOWS = sys.platform == 'win32'
+if WINDOWS:
+    import msvcrt
+    fcntl = None  # Not available on Windows
+else:
+    import fcntl
+    msvcrt = None  # Not available on Unix
+
+# Try to import psutil for cross-platform PID checking
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    psutil = None
+    HAS_PSUTIL = False
 
 if TYPE_CHECKING:
     from .path_resolver import OrchestratorPaths
@@ -42,9 +59,16 @@ class FileLock:
     """
     File-based locking for concurrent access control.
 
-    Uses fcntl.flock() for UNIX/Linux systems.
+    Cross-platform support:
+    - Unix/Linux: Uses fcntl.flock()
+    - Windows: Uses msvcrt.locking()
+
     Supports both shared (read) and exclusive (write) locks.
     """
+
+    # Lock type constants (cross-platform)
+    LOCK_EX = 1  # Exclusive lock
+    LOCK_SH = 2  # Shared lock
 
     def __init__(self, lock_path: Path):
         """
@@ -68,7 +92,7 @@ class FileLock:
         Raises:
             LockTimeoutError: If lock cannot be acquired within timeout
         """
-        self._acquire(fcntl.LOCK_EX, timeout)
+        self._acquire(self.LOCK_EX, timeout)
 
     def acquire_shared(self, timeout: float = 10.0) -> None:
         """
@@ -80,47 +104,74 @@ class FileLock:
         Raises:
             LockTimeoutError: If lock cannot be acquired within timeout
         """
-        self._acquire(fcntl.LOCK_SH, timeout)
+        self._acquire(self.LOCK_SH, timeout)
 
     def _acquire(self, lock_type: int, timeout: float) -> None:
         """Internal method to acquire lock with timeout."""
+        import time
+
         # Ensure parent directory exists
         self.lock_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Open/create lock file
-        self._fd = os.open(str(self.lock_path), os.O_RDWR | os.O_CREAT)
+        # Open/create lock file with close-on-exec flag
+        flags = os.O_RDWR | os.O_CREAT
+        if hasattr(os, 'O_CLOEXEC'):
+            flags |= os.O_CLOEXEC
 
-        # Try non-blocking first
+        fd = None
         try:
-            fcntl.flock(self._fd, lock_type | fcntl.LOCK_NB)
-            self._locked = True
-            self._lock_type = lock_type
-            return
-        except BlockingIOError:
-            pass  # Lock held by another process
+            fd = os.open(str(self.lock_path), flags, 0o644)
 
-        # Retry with timeout
-        import time
-        start = time.monotonic()
-        while time.monotonic() - start < timeout:
-            try:
-                fcntl.flock(self._fd, lock_type | fcntl.LOCK_NB)
-                self._locked = True
-                self._lock_type = lock_type
-                return
-            except BlockingIOError:
-                time.sleep(0.05)
+            start = time.monotonic()
+            while True:
+                try:
+                    if WINDOWS:
+                        # Windows: msvcrt.locking
+                        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                    else:
+                        # Unix: fcntl.flock
+                        flock_type = fcntl.LOCK_EX if lock_type == self.LOCK_EX else fcntl.LOCK_SH
+                        fcntl.flock(fd, flock_type | fcntl.LOCK_NB)
 
-        # Timeout - clean up and raise
-        os.close(self._fd)
-        self._fd = None
-        raise LockTimeoutError(f"Could not acquire lock on {self.lock_path} within {timeout}s")
+                    # Lock acquired successfully
+                    self._fd = fd
+                    self._locked = True
+                    self._lock_type = lock_type
+                    return
+
+                except (BlockingIOError, OSError):
+                    # Lock held by another process - check timeout
+                    if time.monotonic() - start >= timeout:
+                        raise LockTimeoutError(
+                            f"Could not acquire lock on {self.lock_path} within {timeout}s"
+                        )
+                    time.sleep(0.05)
+
+        except LockTimeoutError:
+            # Clean up fd on timeout
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except Exception:
+                    pass
+            raise
+        except Exception:
+            # Clean up fd on any other exception
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except Exception:
+                    pass
+            raise
 
     def release(self) -> None:
         """Release the lock."""
         if self._fd is not None:
             try:
-                fcntl.flock(self._fd, fcntl.LOCK_UN)
+                if WINDOWS:
+                    msvcrt.locking(self._fd, msvcrt.LK_UNLCK, 1)
+                else:
+                    fcntl.flock(self._fd, fcntl.LOCK_UN)
             except Exception:
                 pass  # Ignore errors during unlock
             try:
@@ -158,6 +209,28 @@ class FileLock:
         self.release()
 
 
+def _process_exists(pid: int) -> bool:
+    """
+    Check if a process with the given PID exists.
+
+    Cross-platform: Uses psutil if available, falls back to os.kill on Unix.
+    """
+    if HAS_PSUTIL:
+        return psutil.pid_exists(pid)
+
+    if WINDOWS:
+        # On Windows without psutil, we can't reliably check
+        # Assume process exists to be safe
+        return True
+
+    # Unix fallback: use signal 0
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
 class LockManager:
     """
     Manages locks for orchestrator resources.
@@ -166,6 +239,7 @@ class LockManager:
     - Named resource locking
     - Reentrant locks (same thread can acquire multiple times)
     - Stale lock detection and cleanup
+    - Cross-platform support (Unix/Windows)
     """
 
     def __init__(self, lock_dir: Path, stale_timeout: float = 300.0):
@@ -176,12 +250,13 @@ class LockManager:
             lock_dir: Directory to store lock files
             stale_timeout: Time after which locks are considered stale (seconds)
         """
-        self.lock_dir = Path(lock_dir)
+        self.lock_dir = Path(lock_dir).resolve()  # Resolve to prevent symlink attacks
         self.lock_dir.mkdir(parents=True, exist_ok=True)
         self.stale_timeout = stale_timeout
         self._locks: dict[str, FileLock] = {}
         self._lock_counts: dict[str, int] = {}
         self._thread_lock = threading.Lock()
+        self._thread_ids: dict[str, int] = {}  # Track which thread holds each lock
 
         # Register cleanup on exit
         atexit.register(self._cleanup_all)
@@ -197,55 +272,87 @@ class LockManager:
 
         Yields:
             None (lock is held while in context)
+
+        Note:
+            This implementation carefully avoids holding the thread lock while
+            yielding, to prevent deadlocks. The pattern is:
+            1. Hold thread lock to check/update state
+            2. Release thread lock before yielding
+            3. Re-acquire thread lock in finally to cleanup
         """
+        current_thread = threading.current_thread().ident
         lock_path = self.lock_dir / f"{resource_name}.lock"
+        is_reentrant = False
+        lock = None
 
+        # Phase 1: Check state and prepare (under thread lock)
         with self._thread_lock:
-            # Check for reentrant acquisition
-            if resource_name in self._locks and self._lock_counts.get(resource_name, 0) > 0:
-                self._lock_counts[resource_name] += 1
-                try:
-                    yield
-                finally:
+            # Check for reentrant acquisition (same thread re-acquiring)
+            if resource_name in self._locks:
+                if self._thread_ids.get(resource_name) == current_thread:
+                    self._lock_counts[resource_name] += 1
+                    is_reentrant = True
+
+            if not is_reentrant:
+                # Clean stale lock if needed
+                self._clean_stale_lock(lock_path)
+
+                # Create new lock
+                lock = FileLock(lock_path)
+                self._locks[resource_name] = lock
+                self._lock_counts[resource_name] = 1
+                self._thread_ids[resource_name] = current_thread
+
+        # Phase 2: Acquire file lock (outside thread lock to prevent deadlock)
+        if is_reentrant:
+            try:
+                yield
+            finally:
+                with self._thread_lock:
                     self._lock_counts[resource_name] -= 1
-                return
-
-            # Clean stale lock if needed
-            self._clean_stale_lock(lock_path)
-
-            # Create new lock
-            lock = FileLock(lock_path)
-            self._locks[resource_name] = lock
-            self._lock_counts[resource_name] = 1
+            return
 
         try:
             lock.acquire_exclusive(timeout)
-            # Write PID to lock file
-            with open(lock_path, 'w') as f:
-                f.write(str(os.getpid()))
+            # Write PID to lock file (atomically using the fd we already have)
+            try:
+                with open(lock_path, 'w') as f:
+                    f.write(str(os.getpid()))
+            except Exception:
+                pass  # Non-critical if we can't write PID
+
             yield
+
         finally:
+            # Phase 3: Cleanup (under thread lock)
             with self._thread_lock:
                 self._lock_counts[resource_name] -= 1
                 if self._lock_counts[resource_name] == 0:
                     lock.release()
-                    del self._locks[resource_name]
-                    del self._lock_counts[resource_name]
+                    self._locks.pop(resource_name, None)
+                    self._lock_counts.pop(resource_name, None)
+                    self._thread_ids.pop(resource_name, None)
 
     def _clean_stale_lock(self, lock_path: Path) -> None:
         """Remove stale lock if process is dead."""
         if not lock_path.exists():
             return
 
+        # Security: Verify lock_path is within lock_dir (prevent symlink attacks)
+        try:
+            resolved_path = lock_path.resolve()
+            if not str(resolved_path).startswith(str(self.lock_dir)):
+                logger.warning(f"Lock path outside lock_dir, ignoring: {lock_path}")
+                return
+        except (OSError, ValueError):
+            return
+
         try:
             content = lock_path.read_text().strip()
             if content:
                 pid = int(content)
-                # Check if process exists
-                try:
-                    os.kill(pid, 0)  # Signal 0 just checks existence
-                except OSError:
-                    # Process doesn't exist - stale lock
+                # Check if process exists using cross-platform function
+                if not _process_exists(pid):
                     logger.info(f"Removing stale lock: {lock_path} (PID {pid} not running)")
                     lock_path.unlink()
         except (ValueError, FileNotFoundError):
@@ -260,6 +367,7 @@ class LockManager:
                 pass
         self._locks.clear()
         self._lock_counts.clear()
+        self._thread_ids.clear()
 
 
 @dataclass
@@ -520,7 +628,7 @@ class CheckpointManager:
         checkpoints = self.list_checkpoints(workflow_id=workflow_id)
         return checkpoints[0] if checkpoints else None
 
-    def get_checkpoint_chain(self, checkpoint_id: str) -> List[CheckpointData]:
+    def get_checkpoint_chain(self, checkpoint_id: str, max_depth: int = 1000) -> List[CheckpointData]:
         """
         V3: Get the full checkpoint chain (lineage) from a checkpoint.
 
@@ -529,14 +637,22 @@ class CheckpointManager:
 
         Args:
             checkpoint_id: ID of the checkpoint to start from
+            max_depth: Maximum chain depth to prevent infinite loops (default 1000)
 
         Returns:
             List of checkpoints in the chain (newest first)
         """
         chain = []
         current_id = checkpoint_id
+        seen_ids = set()  # Cycle detection
 
-        while current_id:
+        while current_id and len(chain) < max_depth:
+            # Cycle detection
+            if current_id in seen_ids:
+                logger.warning(f"Cycle detected in checkpoint chain at {current_id}")
+                break
+            seen_ids.add(current_id)
+
             checkpoint = self.get_checkpoint(current_id)
             if checkpoint is None:
                 break

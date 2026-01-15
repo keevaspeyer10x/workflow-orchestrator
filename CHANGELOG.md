@@ -5,6 +5,42 @@ All notable changes to the workflow-orchestrator.
 ## [Unreleased]
 
 ### Added
+- **V3 Hybrid Orchestration Phase 4: Integration & Hardening**
+  - `src/audit.py`: Tamper-evident audit logging system
+    - `AuditLogger` class with chained SHA256 hashes for integrity
+    - Log operations: checkpoint create/restore, mode changes, workflow state changes
+    - Path sanitization to prevent sensitive data leakage
+    - `verify_integrity()` for tamper detection
+    - `AuditTamperError` exception for tamper alerts
+  - `src/health.py`: Health check system for orchestrator components
+    - `HealthChecker` class with component-level health reports
+    - Checks: state file integrity, lock state, checkpoint directory
+    - Structured JSON output for automation
+  - `StateIntegrityError` exception in `src/state_version.py`
+  - 25 new tests across 4 test files:
+    - `tests/test_audit_v3.py`: 6 audit logging tests
+    - `tests/test_health_v3.py`: 7 health check tests
+    - `tests/test_integration_v3.py`: 5 end-to-end tests
+    - `tests/test_adversarial_v3.py`: 6 adversarial tests (concurrency, malformed input, resource limits)
+
+### Security
+- **CommandGate**: Eliminated shell=True to prevent shell injection
+  - Shell builtins (true, false, exit) now emulated in Python
+  - Injection attempts like "true; rm -rf /" are now rejected
+- **ArtifactGate**: Fixed path traversal and symlink attacks
+  - Absolute paths now blocked with clear error
+  - Path resolution with containment check (resolve + relative_to)
+  - Symlink attacks through parent directories now caught
+- **FileLock**: Cross-platform support and fd leak prevention
+  - Windows support via msvcrt.locking (Unix uses fcntl)
+  - File descriptors properly cleaned up on all failure paths
+  - Close-on-exec flag for child process safety
+- **LockManager**: Fixed race conditions and symlink attacks
+  - Thread lock no longer held while yielding (prevents deadlock)
+  - Cross-platform PID checking via psutil
+  - Lock path validation prevents symlink attacks
+  - Cycle detection in checkpoint chain traversal
+
 - **V3 Hybrid Orchestration Phase 3: Checkpointing & Concurrency**
   - `FileLock` class: File-based locking using fcntl for concurrent access control
     - Exclusive (write) and shared (read) lock modes

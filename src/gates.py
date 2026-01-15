@@ -83,24 +83,40 @@ class ArtifactGate:
             True if artifact passes validation, False otherwise
 
         Raises:
-            ValueError: If path contains traversal attempts
+            ValueError: If path contains traversal attempts or absolute paths
         """
-        # Security: Block path traversal
-        if ".." in self.path:
+        # Handle empty path - cannot validate
+        if not self.path or not self.path.strip():
+            self.error = "Empty artifact path"
+            return False
+
+        # Security: Block absolute paths (prevent base_path bypass)
+        path_obj = Path(self.path)
+        if path_obj.is_absolute():
+            raise ValueError(f"Absolute paths not allowed: {self.path}")
+
+        # Security: Block path traversal components
+        if ".." in path_obj.parts:
             raise ValueError(f"Path traversal detected: {self.path}")
 
+        # Construct full path
         full_path = base_path / self.path
 
-        # Security: Block symlinks pointing outside base_path
-        if full_path.is_symlink():
+        # Security: Resolve the path and verify it stays within base_path
+        # This catches symlink attacks in any part of the path, not just the final component
+        try:
+            resolved_base = base_path.resolve()
+            resolved_full = full_path.resolve()
+
+            # Check containment using is_relative_to (Python 3.9+) or string comparison
             try:
-                resolved = full_path.resolve()
-                if not str(resolved).startswith(str(base_path.resolve())):
-                    self.error = "Symlink points outside base directory"
-                    return False
-            except (OSError, ValueError):
-                self.error = "Invalid symlink"
+                resolved_full.relative_to(resolved_base)
+            except ValueError:
+                self.error = "Path resolves outside base directory"
                 return False
+        except (OSError, ValueError) as e:
+            self.error = f"Invalid path: {e}"
+            return False
 
         # Get validator function
         validator_fn = VALIDATORS.get(self.validator)
@@ -109,7 +125,7 @@ class ArtifactGate:
             return False
 
         try:
-            return validator_fn(full_path)
+            return validator_fn(resolved_full)
         except Exception as e:
             self.error = str(e)
             return False
@@ -122,11 +138,20 @@ class CommandGate:
 
     Validates that a command exits with the expected exit code.
     Uses shlex for safe command parsing to prevent shell injection.
+
+    Security: NEVER uses shell=True. Shell builtins (true, false, exit)
+    are handled in Python directly without subprocess.
     """
     command: str
     timeout: int = 300  # Default 5 minutes
     success_exit_code: int = 0
     error: Optional[str] = None
+
+    # Shell builtins that are handled in Python (never executed via shell)
+    _BUILTIN_HANDLERS = {
+        'true': 0,   # Always exits 0
+        'false': 1,  # Always exits 1
+    }
 
     def validate(self, base_path: Optional[Path] = None) -> bool:
         """
@@ -137,33 +162,60 @@ class CommandGate:
 
         Returns:
             True if command exits with success code, False otherwise
+
+        Security:
+            - Never uses shell=True to prevent shell injection
+            - Shell builtins (true, false) are emulated in Python
+            - Commands are parsed with shlex.split() and executed as list
         """
         try:
             # Use shlex to safely parse command (prevents shell injection)
             args = shlex.split(self.command)
 
-            # Special case for shell builtins
-            if args[0] in ('exit', 'true', 'false'):
-                # Run via shell for builtins
-                result = subprocess.run(
-                    self.command,
-                    shell=True,
-                    timeout=self.timeout,
-                    cwd=base_path,
-                    capture_output=True
-                )
-            else:
-                result = subprocess.run(
-                    args,
-                    timeout=self.timeout,
-                    cwd=base_path,
-                    capture_output=True
-                )
+            if not args:
+                self.error = "Empty command"
+                return False
+
+            # Handle shell builtins in Python - never use shell=True
+            # This prevents injection like "true; rm -rf /"
+            if args[0] in self._BUILTIN_HANDLERS:
+                # Only accept the builtin itself, no additional arguments
+                if len(args) != 1:
+                    self.error = f"Builtin '{args[0]}' does not accept arguments for security reasons"
+                    return False
+                exit_code = self._BUILTIN_HANDLERS[args[0]]
+                return exit_code == self.success_exit_code
+
+            # Handle 'exit N' - also emulated in Python
+            if args[0] == 'exit':
+                if len(args) == 1:
+                    exit_code = 0
+                elif len(args) == 2:
+                    try:
+                        exit_code = int(args[1])
+                    except ValueError:
+                        self.error = f"Invalid exit code: {args[1]}"
+                        return False
+                else:
+                    self.error = "exit accepts only one argument"
+                    return False
+                return exit_code == self.success_exit_code
+
+            # Execute command without shell - safe from injection
+            result = subprocess.run(
+                args,
+                timeout=self.timeout,
+                cwd=base_path,
+                capture_output=True
+            )
 
             return result.returncode == self.success_exit_code
 
         except subprocess.TimeoutExpired:
             self.error = f"Command timeout after {self.timeout}s"
+            return False
+        except FileNotFoundError:
+            self.error = f"Command not found: {args[0]}"
             return False
         except Exception as e:
             self.error = str(e)
