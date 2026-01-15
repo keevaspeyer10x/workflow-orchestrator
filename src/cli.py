@@ -41,7 +41,7 @@ from src.review import (
     check_review_setup,
     setup_reviews,
 )
-from src.review.registry import get_review_item_mapping
+from src.review.registry import get_review_item_mapping, get_all_review_types
 from src.config import (
     find_workflow_path,
     get_default_workflow_content,
@@ -6232,9 +6232,11 @@ Examples:
     resume_parser.set_defaults(func=cmd_resume)
 
     # Review command (Multi-model reviews)
+    # Issue #65: Use registry as single source of truth for review type choices
+    review_choices = list(get_all_review_types()) + ['all']
     review_parser = subparsers.add_parser('review', help='Run AI code reviews')
     review_parser.add_argument('review_type', nargs='?',
-                               choices=['security', 'consistency', 'quality', 'holistic', 'all'],
+                               choices=review_choices,
                                default='all', help='Review type to run (default: all)')
     review_parser.add_argument('--method', '-m', choices=['auto', 'cli', 'aider', 'api'],
                                default='auto', help='Execution method (default: auto-detect)')

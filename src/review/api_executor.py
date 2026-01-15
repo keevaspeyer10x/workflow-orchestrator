@@ -15,16 +15,24 @@ from .context import ReviewContext, ReviewContextCollector
 from .prompts import get_prompt, get_tool
 from .result import ReviewResult, ReviewErrorType, classify_http_error, parse_review_output
 from ..secrets import get_secret
+from ..model_registry import get_latest_model
 
 logger = logging.getLogger(__name__)
 
 
-# Model mapping for OpenRouter
-# Use latest available models for best review quality
-OPENROUTER_MODELS = {
-    "codex": "openai/gpt-5.2",  # Latest OpenAI model via OpenRouter (Dec 2025)
-    "gemini": "google/gemini-3-pro-preview",  # Latest Gemini model via OpenRouter (1M context)
-}
+def get_openrouter_model(tool_category: str) -> str:
+    """
+    Get the OpenRouter model ID for a tool category.
+
+    Issue #66: Uses model_registry as single source of truth instead of hardcoded dict.
+
+    Args:
+        tool_category: Tool category (codex, gemini, grok)
+
+    Returns:
+        OpenRouter model ID string
+    """
+    return get_latest_model(tool_category)
 
 
 class APIExecutor:
@@ -87,9 +95,9 @@ class APIExecutor:
                 # Build prompt
                 prompt = self._build_prompt(review_type, context)
 
-            # Get model
+            # Get model (Issue #66: use model_registry as single source of truth)
             tool = get_tool(review_type)
-            model = OPENROUTER_MODELS.get(tool, OPENROUTER_MODELS["gemini"])
+            model = get_openrouter_model(tool)
 
             # Call OpenRouter
             output = self._call_openrouter(prompt, model)

@@ -4,7 +4,19 @@ All notable changes to the workflow-orchestrator.
 
 ## [Unreleased]
 
+### Fixed
+- **Issue #65: vibe_coding review type not exposed in CLI choices**
+  - CLI `review` command now dynamically uses `get_all_review_types()` from registry
+  - Previously hardcoded list `['security', 'consistency', 'quality', 'holistic', 'all']` missing `vibe_coding`
+  - Added regression tests in `tests/test_cli_reviews.py::TestCLIReviewChoices`
+
 ### Changed
+- **Issue #66: Model version DRY refactor (Phase 1)**
+  - `src/review/api_executor.py`: Now uses `model_registry.get_latest_model()` instead of hardcoded `OPENROUTER_MODELS` dict
+  - `src/review/config.py`: API model defaults now call `_get_default_api_model()` which uses registry
+  - CLI models remain tool-specific (different naming scheme) - deferred to future phase if needed
+  - Added regression tests in `tests/test_model_registry.py::TestModelRegistryIntegration`
+
 - **Upgraded to GPT-5.2-Codex** (released December 2025)
   - Updated model_registry.py: 5.2-codex-max now preferred for code reviews
   - Updated workflow.yaml and src/default_workflow.yaml: CLI and API model references

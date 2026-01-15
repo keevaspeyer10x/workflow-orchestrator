@@ -23,6 +23,8 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+from ..model_registry import get_latest_model
+
 logger = logging.getLogger(__name__)
 
 
@@ -285,17 +287,27 @@ def get_available_review_types() -> list[str]:
 # This avoids hardcoding model versions in executor code.
 
 # Default model IDs if not specified in workflow.yaml
+# Note: CLI tools use bare model names (tool-specific), different from OpenRouter API format
 DEFAULT_CLI_MODELS = {
     "codex": "gpt-5.2-codex-max",
     "gemini": "gemini-3-pro-preview",
     "grok": "grok-4.1-fast",
 }
 
-DEFAULT_API_MODELS = {
-    "codex": "openai/gpt-5.2",
-    "gemini": "google/gemini-3-pro-preview",
-    "grok": "x-ai/grok-4.1-fast",
-}
+
+def _get_default_api_model(tool: str) -> str:
+    """
+    Get the default API model for a tool category.
+
+    Issue #66: Uses model_registry as single source of truth instead of hardcoded dict.
+
+    Args:
+        tool: Tool category (codex, gemini, grok)
+
+    Returns:
+        OpenRouter model ID string (e.g., "openai/gpt-5.2-codex-max")
+    """
+    return get_latest_model(tool)
 
 
 def get_model_id(tool: str, method: str = "cli") -> str:
@@ -319,13 +331,12 @@ def get_model_id(tool: str, method: str = "cli") -> str:
     # Get the appropriate model mapping
     if method == "cli":
         models = models_config.get("cli", {})
-        defaults = DEFAULT_CLI_MODELS
+        # CLI uses bare model names (tool-specific naming)
+        return models.get(tool, DEFAULT_CLI_MODELS.get(tool, f"{tool}/unknown"))
     else:
         models = models_config.get("api", {})
-        defaults = DEFAULT_API_MODELS
-
-    # Return configured model or default
-    return models.get(tool, defaults.get(tool, f"{tool}/unknown"))
+        # API uses OpenRouter format - fall back to model_registry (Issue #66)
+        return models.get(tool, _get_default_api_model(tool))
 
 
 def get_model_display_name(tool: str, method: str = "cli") -> str:

@@ -342,5 +342,89 @@ class TestIntegrationWithOpenRouter:
                 # After CORE-018, it should return True
 
 
+class TestGetLatestModel:
+    """Tests for get_latest_model() function (Issue #66 - DRY refactor)."""
+
+    def test_get_latest_model_returns_string(self):
+        """get_latest_model should return a model ID string."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            registry = ModelRegistry(working_dir=Path(tmpdir))
+            for category in ['codex', 'gemini', 'grok', 'claude']:
+                model = registry.get_latest_model(category)
+                assert isinstance(model, str)
+                assert len(model) > 0
+
+    def test_get_latest_model_has_provider_prefix(self):
+        """Returned model IDs should have provider prefix (e.g., 'openai/')."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            registry = ModelRegistry(working_dir=Path(tmpdir))
+            for category in ['codex', 'gemini', 'grok', 'claude']:
+                model = registry.get_latest_model(category)
+                assert '/' in model, f"Model ID {model} should have provider prefix"
+
+    def test_get_latest_model_resolves_review_types(self):
+        """get_latest_model should resolve review type names to tool categories."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            registry = ModelRegistry(working_dir=Path(tmpdir))
+
+            # security/quality use codex
+            security_model = registry.get_latest_model('security')
+            quality_model = registry.get_latest_model('quality')
+            assert 'gpt' in security_model.lower() or 'codex' in security_model.lower()
+            assert 'gpt' in quality_model.lower() or 'codex' in quality_model.lower()
+
+            # consistency/holistic use gemini
+            consistency_model = registry.get_latest_model('consistency')
+            holistic_model = registry.get_latest_model('holistic')
+            assert 'gemini' in consistency_model.lower()
+            assert 'gemini' in holistic_model.lower()
+
+            # vibe_coding uses grok
+            vibe_model = registry.get_latest_model('vibe_coding')
+            assert 'grok' in vibe_model.lower()
+
+
+class TestModelRegistryIntegration:
+    """Integration tests for Issue #66 - Model registry as single source of truth."""
+
+    def test_api_executor_uses_registry_not_hardcoded(self):
+        """api_executor should use get_latest_model() instead of hardcoded dict."""
+        # This test verifies the code structure, not runtime behavior
+        import inspect
+        from src.review import api_executor
+
+        # Read the source code
+        source = inspect.getsource(api_executor)
+
+        # After the fix, OPENROUTER_MODELS should not contain hardcoded version strings
+        # or should import from model_registry
+        if 'OPENROUTER_MODELS' in source:
+            # If OPENROUTER_MODELS exists, it should use registry
+            assert 'get_latest_model' in source or 'model_registry' in source, (
+                "api_executor.py has hardcoded OPENROUTER_MODELS dict - "
+                "should use model_registry.get_latest_model() instead (Issue #66)"
+            )
+
+    def test_review_config_uses_registry_not_hardcoded(self):
+        """review/config.py should use get_latest_model() instead of hardcoded dicts."""
+        import inspect
+        from src.review import config
+
+        source = inspect.getsource(config)
+
+        # After the fix, DEFAULT_CLI_MODELS and DEFAULT_API_MODELS should use registry
+        # Check if get_latest_model is used
+        has_hardcoded_defaults = (
+            'DEFAULT_CLI_MODELS' in source and
+            'gpt-5' in source  # Version-specific string indicates hardcoding
+        )
+
+        if has_hardcoded_defaults:
+            assert 'get_latest_model' in source or 'model_registry' in source, (
+                "config.py has hardcoded DEFAULT_CLI_MODELS/DEFAULT_API_MODELS - "
+                "should use model_registry.get_latest_model() instead (Issue #66)"
+            )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

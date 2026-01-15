@@ -1,45 +1,53 @@
-# Risk Analysis: Issue #61 - CLI Non-Interactive Mode Fix
+# Issues #65 and #66: CLI Review Choices + Model DRY Refactor - Risk Analysis
 
-## Risk Assessment
+## Issue #65: CLI Review Type Choices
 
-| Risk | Severity | Likelihood | Mitigation |
-|------|----------|------------|------------|
-| Breaking existing interactive behavior | Medium | Low | Test both modes explicitly |
-| `CI` env var false positives | Low | Low | CI is standard; document behavior |
-| Missing `input()` locations | Medium | Low | Grep for all `input(` in cli.py |
-| Regression in `--yes` flag handling | Medium | Low | Existing tests should catch |
+### Risk Level: LOW
 
-## Impact Analysis
+**Risks:**
+1. **Import Error**: If `get_all_review_types()` fails to import at CLI startup
+   - Mitigation: The function already exists and is tested
+   - Fallback: Keep hardcoded list as fallback (not recommended, defeats purpose)
 
-### Files Changed
-- `src/cli.py` - Add helpers, modify 4 functions
+2. **Empty List**: If registry returns empty list
+   - Mitigation: Registry always has 5 defined types (static, not API-dependent)
+   - Impact: Low - this would be a bug in the registry itself
 
-### Functions Modified
-1. `cmd_advance()` - Critical path for workflow advancement
-2. `cmd_init()` - Used once per project setup
-3. `cmd_resolve()` - Conflict resolution (less frequent)
-4. `cmd_workflow_cleanup()` - Maintenance command
+**Impact Assessment:**
+- Breaking change: No (additive - adds `vibe_coding` option)
+- Backwards compatible: Yes (existing review types still work)
+- Recovery: Trivial (revert 1 line)
 
-### Backward Compatibility
-- **Preserved**: All existing flags (`--yes`, `--force`) continue to work
-- **New behavior**: Non-interactive mode now fails fast instead of hanging
-- **Breaking**: Scripts relying on stdin input will fail (expected - this is the fix)
+## Issue #66: Model Version DRY Refactor
 
-## Rollback Plan
+### Risk Level: MEDIUM
 
-If issues arise:
-1. Revert the commit
-2. All changes are in a single file (`src/cli.py`)
-3. No database or state changes
+**Risks:**
+1. **Circular Import**: `model_registry.py` imports from `review.config`, and vice versa
+   - Mitigation: Use lazy imports or move model resolution to a single module
+   - Already addressed: `model_registry._resolve_category()` handles this
 
-## Security Considerations
+2. **Model ID Format Mismatch**: CLI vs API use different formats
+   - CLI: `gpt-5.2-codex-max` (bare)
+   - API: `openai/gpt-5.2-codex-max` (prefixed)
+   - Mitigation: Registry already handles both via `get_latest_model()`
 
-- **No new attack surface**: Changes are defensive (fail-fast)
-- **No secrets handling changes**: N/A
-- **No network calls added**: N/A
+3. **Runtime vs Import-time Resolution**: Moving from static dict to function calls
+   - Risk: Performance impact if called frequently
+   - Mitigation: Low frequency (once per review run)
 
-## Testing Requirements
+4. **Test Breakage**: Tests may mock hardcoded values
+   - Mitigation: Update tests to use registry or mock registry
 
-- Must test both interactive and non-interactive modes
-- Must verify `--yes` flag works in non-interactive mode
-- Must verify graceful error messages
+**Impact Assessment:**
+- Breaking change: No (external API unchanged)
+- Backwards compatible: Yes (same model IDs returned)
+- Recovery: Medium (multiple files, but straightforward revert)
+
+## Overall Risk: LOW-MEDIUM
+
+The changes are:
+- Well-isolated (specific files, specific functions)
+- Additive (#65) or internal refactor (#66)
+- Easy to verify (run `orchestrator review vibe_coding`)
+- Easy to revert if needed

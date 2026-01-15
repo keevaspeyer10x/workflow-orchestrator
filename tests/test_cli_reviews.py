@@ -7,6 +7,65 @@ from unittest.mock import patch, MagicMock
 from pathlib import Path
 from src.cli import run_auto_review
 from src.review.router import ReviewMethod
+from src.review.registry import get_all_review_types
+
+
+class TestCLIReviewChoices:
+    """Tests for CLI review type argument choices (Issue #65)."""
+
+    def test_cli_review_choices_include_all_registry_types(self):
+        """CLI review choices should include all types from registry plus 'all'."""
+        import subprocess
+        import sys
+
+        # Get expected choices from registry
+        registry_types = set(get_all_review_types())
+        expected_choices = registry_types | {'all'}
+
+        # Run orchestrator review --help and check output
+        result = subprocess.run(
+            [sys.executable, '-m', 'src.cli', 'review', '--help'],
+            capture_output=True, text=True, cwd=str(Path(__file__).parent.parent)
+        )
+
+        # The help output should mention all review types
+        for review_type in expected_choices:
+            assert review_type in result.stdout or review_type in result.stderr, (
+                f"Review type '{review_type}' not found in CLI help output. "
+                f"Make sure CLI uses get_all_review_types() for choices."
+            )
+
+    def test_cli_accepts_vibe_coding_review_type(self):
+        """CLI should accept 'vibe_coding' as a valid review type (Issue #65 regression test)."""
+        import subprocess
+        import sys
+
+        # This should NOT fail with "invalid choice" error
+        result = subprocess.run(
+            [sys.executable, '-m', 'src.cli', 'review', 'vibe_coding', '--help'],
+            capture_output=True, text=True, cwd=str(Path(__file__).parent.parent)
+        )
+
+        # Check that it's not rejected as an invalid choice
+        assert 'invalid choice' not in result.stderr.lower(), (
+            f"'vibe_coding' rejected as invalid choice. "
+            f"Error: {result.stderr}"
+        )
+
+    def test_cli_accepts_all_registry_review_types(self):
+        """CLI should accept all review types from the registry."""
+        import subprocess
+        import sys
+
+        for review_type in get_all_review_types():
+            result = subprocess.run(
+                [sys.executable, '-m', 'src.cli', 'review', review_type, '--help'],
+                capture_output=True, text=True, cwd=str(Path(__file__).parent.parent)
+            )
+            assert 'invalid choice' not in result.stderr.lower(), (
+                f"Review type '{review_type}' rejected as invalid. "
+                f"Error: {result.stderr}"
+            )
 
 class TestRunAutoReview:
     """Tests for run_auto_review function."""

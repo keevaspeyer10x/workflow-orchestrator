@@ -1,69 +1,84 @@
-# Test Cases: Issue #61 - CLI Non-Interactive Mode Fix
+# Issues #65 and #66: CLI Review Choices + Model DRY Refactor - Test Cases
 
-## Unit Tests
+## Issue #65: CLI Review Type Choices
 
-### TC-001: `is_interactive()` returns True in terminal
-- **Setup**: Mock `sys.stdin.isatty()` = True, `sys.stdout.isatty()` = True, no CI env
-- **Expected**: Returns `True`
+### TC-65-1: CLI Accepts vibe_coding Review Type
+**Input**: `orchestrator review vibe_coding --help`
+**Expected**: Command parses successfully (no argparse error)
 
-### TC-002: `is_interactive()` returns False without tty
-- **Setup**: Mock `sys.stdin.isatty()` = False
-- **Expected**: Returns `False`
+### TC-65-2: CLI Choices Match Registry
+**Input**: Parse CLI choices from argparse
+**Expected**: Choices include all items from `get_all_review_types()` plus 'all'
+**Verification**:
+```python
+from src.review.registry import get_all_review_types
+expected = set(get_all_review_types()) | {'all'}
+# Verify CLI choices == expected
+```
 
-### TC-003: `is_interactive()` returns False with CI env
-- **Setup**: Set `CI=true` environment variable
-- **Expected**: Returns `False`
+### TC-65-3: All Review Types Executable
+**Input**: Run each review type individually
+**Expected**: Each type starts execution (may fail due to missing API keys, but no argparse error)
+```bash
+for type in security quality consistency holistic vibe_coding; do
+  orchestrator review $type --help
+done
+```
 
-### TC-004: `confirm()` with `yes_flag=True` skips prompt
-- **Setup**: Call `confirm("Question?", yes_flag=True)`
-- **Expected**: Returns `True` without calling `input()`
+## Issue #66: Model Version DRY Refactor
 
-### TC-005: `confirm()` exits in non-interactive mode
-- **Setup**: Mock non-interactive, call `confirm("Question?")`
-- **Expected**: Calls `sys.exit(1)` with error message
+### TC-66-1: get_latest_model Returns Valid IDs
+**Input**: Call `get_latest_model()` for each category
+**Expected**: Returns non-empty string with valid model ID format
+```python
+from src.model_registry import get_latest_model
+for category in ['codex', 'gemini', 'grok', 'claude']:
+    model = get_latest_model(category)
+    assert model is not None
+    assert '/' in model  # Has provider prefix
+```
 
-### TC-006: `confirm()` prompts in interactive mode
-- **Setup**: Mock interactive, mock `input()` returning "y"
-- **Expected**: Returns `True`
+### TC-66-2: Review Type to Model Resolution
+**Input**: Call `get_latest_model()` with review type names
+**Expected**: Resolves correctly via `_resolve_category()`
+```python
+from src.model_registry import get_latest_model
+# Review types should resolve to their tool categories
+assert 'gpt' in get_latest_model('security').lower() or 'codex' in get_latest_model('security').lower()
+assert 'gemini' in get_latest_model('consistency').lower()
+assert 'grok' in get_latest_model('vibe_coding').lower()
+```
 
-## Integration Tests
+### TC-66-3: API Executor Uses Registry
+**Input**: Check that `api_executor.py` calls registry instead of hardcoded dict
+**Expected**: No hardcoded `OPENROUTER_MODELS` dict with version strings
+**Verification**: Grep for hardcoded model versions after refactor
 
-### TC-007: `orchestrator advance --yes` in non-interactive mode
-- **Setup**: Create workflow at blocking phase, simulate non-interactive
-- **Command**: `orchestrator advance --yes`
-- **Expected**: Advances without hanging
+### TC-66-4: Config Module Uses Registry
+**Input**: Check `config.py` for hardcoded model versions
+**Expected**: Uses `get_latest_model()` instead of static dicts
+**Verification**: Grep for hardcoded model versions after refactor
 
-### TC-008: `orchestrator advance` without `--yes` in non-interactive mode
-- **Setup**: Workflow at blocking phase with critique issues, non-interactive
-- **Command**: `orchestrator advance`
-- **Expected**: Exit code 1, error message about non-interactive mode
+### TC-66-5: Integration Test - Full Review Run
+**Input**: `orchestrator review all` (with valid API keys)
+**Expected**: All 5 review types execute using correct models from registry
+**Note**: Requires API keys to be configured
 
-### TC-009: `orchestrator init --force` in non-interactive mode
-- **Setup**: Existing `workflow.yaml`, non-interactive
-- **Command**: `orchestrator init --force`
-- **Expected**: Overwrites without prompting
+## Regression Tests
 
-### TC-010: `orchestrator init` without `--force` in non-interactive mode
-- **Setup**: Existing `workflow.yaml`, non-interactive
-- **Command**: `orchestrator init`
-- **Expected**: Exit code 1, error message suggesting `--force`
+### RT-1: Existing Review Types Still Work
+**Input**: Run `orchestrator review security`
+**Expected**: Executes security review as before
 
-### TC-011: `orchestrator resolve` in non-interactive mode
-- **Setup**: Git repo with merge conflicts, non-interactive
-- **Command**: `orchestrator resolve --apply`
-- **Expected**: Exit code 1, error suggesting `--strategy ours/theirs`
+### RT-2: CLI Help Shows All Options
+**Input**: `orchestrator review --help`
+**Expected**: Help text shows all review types including vibe_coding
 
-### TC-012: `orchestrator workflow cleanup --yes` in non-interactive mode
-- **Setup**: Multiple old sessions, non-interactive
-- **Command**: `orchestrator workflow cleanup --older-than 30 --yes`
-- **Expected**: Removes sessions without prompting
+## Acceptance Criteria
 
-## Edge Cases
-
-### TC-013: Interactive mode still works normally
-- **Setup**: Real terminal session
-- **Expected**: Prompts appear and accept input
-
-### TC-014: CI environment detection
-- **Setup**: Various CI env vars (CI, GITHUB_ACTIONS, GITLAB_CI)
-- **Expected**: All detected as non-interactive
+- [ ] `orchestrator review vibe_coding` no longer fails with argparse error
+- [ ] All 5 review types available in CLI choices
+- [ ] `get_latest_model()` used instead of hardcoded strings in api_executor.py
+- [ ] `get_latest_model()` used instead of hardcoded strings in config.py
+- [ ] Existing test suite passes
+- [ ] New tests added to prevent regression
