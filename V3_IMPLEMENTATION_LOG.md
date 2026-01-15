@@ -56,21 +56,82 @@ This log tracks things for human verification when you wake up.
 
 ---
 
-## Phase 1: Phase Types & Tool Scoping - PENDING
+## Phase 1: Phase Types & Tool Scoping - COMPLETED
 
-Will add:
-- `PhaseType` enum (strict/guided/autonomous)
-- `intended_tools` field in schema
-- Block `--force/--skip` in LLM mode
+### Files Modified
+
+1. **`src/schema.py`** - Added PhaseType enum and PhaseDef fields
+   - `PhaseType` enum: STRICT, GUIDED, AUTONOMOUS
+   - `phase_type` field in PhaseDef (defaults to GUIDED)
+   - `intended_tools` field in PhaseDef (documentation only)
+
+2. **`tests/test_phase_types.py`** - 11 new tests
+   - 5 PhaseType/schema tests
+   - 4 LLM mode blocking tests
+   - 2 CLI documentation tests
+
+### Test Results
+
+- **Full suite:** 2072 passed, 5 skipped, 0 failures
+- **New tests:** 11/11 passed
+
+### Reviews Completed
+
+| Review | Model | Duration | Findings |
+|--------|-------|----------|----------|
+| Security | codex/gpt-5.1-codex-max | 44.5s | None |
+| Quality | codex/gpt-5.1-codex-max | 83.0s | None |
+| Consistency | gemini/gemini-3-pro-preview | 6.9s | None |
+| Holistic | gemini/gemini-3-pro-preview | 5.4s | None |
+| Vibe_coding | grok/grok-4.1-fast-via-openrouter | 29.1s | None |
+
+### Tags
+
+- `v3-phase1-complete` - Phase 1 rollback point
 
 ---
 
-## Phase 2: Artifact-Based Gates - PENDING
+## Phase 2: Artifact-Based Gates - COMPLETED
 
-Will add:
-- Gate types: artifact, command, human_approval, composite
-- Default validator = `not_empty`
-- Adversarial protection (symlink, path traversal, shell injection)
+### Files Created
+
+1. **`src/gates.py`** - Artifact-based gate validation system
+   - `ArtifactGate` - Validates file exists and passes validator (path traversal & symlink protection)
+   - `CommandGate` - Validates command exits with expected code (shell injection safe via shlex)
+   - `HumanApprovalGate` - Manual approval gate
+   - `CompositeGate` - Combines gates with AND/OR logic
+   - Validators: `exists`, `not_empty` (default), `min_size`, `json_valid`, `yaml_valid`
+
+2. **`tests/test_gates.py`** - 18 new tests
+   - 7 ArtifactGate tests (validators, empty files, JSON/YAML)
+   - 4 CommandGate tests (success, failure, timeout, custom exit codes)
+   - 4 Adversarial tests (symlink, path traversal, shell injection)
+   - 3 CompositeGate tests (AND/OR logic)
+
+### Test Results
+
+- **Full suite:** 2090 passed, 5 skipped, 0 failures
+- **New tests:** 18/18 passed
+
+### Reviews Completed
+
+| Review | Model | Duration | Findings |
+|--------|-------|----------|----------|
+| Security | codex/gpt-5.1-codex-max | ~60s | None |
+| Quality | codex/gpt-5.1-codex-max | ~70s | None |
+| Consistency | gemini (fallback) | ~10s | None |
+| Holistic | gemini (fallback) | ~8s | None |
+| Vibe_coding | grok/grok-4.1-fast-via-openrouter | ~30s | None |
+
+### Tags
+
+- `v3-phase2-complete` - Phase 2 rollback point (to be created)
+
+### Security Measures
+
+1. **Path traversal protection:** Blocks any path containing `..`
+2. **Symlink attack prevention:** Rejects symlinks pointing outside base_path
+3. **Shell injection safety:** Uses `shlex.split()` instead of `shell=True` (except for builtins)
 
 ---
 

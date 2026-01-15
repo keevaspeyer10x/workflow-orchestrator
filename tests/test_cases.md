@@ -1,34 +1,31 @@
-# V3 Hybrid Orchestration - Phase 1 Test Cases
+# V3 Hybrid Orchestration - Phase 2 Test Cases
 
-**Task:** Implement v3 hybrid orchestration Phase 1: Phase Types & Tool Scoping
+**Task:** Implement v3 hybrid orchestration Phase 2: Artifact-Based Gates
 **Date:** 2026-01-16
 
 ## Test Categories
 
-### Category 1: PhaseType Schema (3 tests)
+### ArtifactGate Tests
 
-| ID | Test Case | Expected | Priority |
-|----|-----------|----------|----------|
-| PT-01 | PhaseType enum has all values | STRICT, GUIDED, AUTONOMOUS present | High |
-| PT-02 | PhaseDef accepts phase_type | No validation error | High |
-| PT-03 | PhaseDef accepts intended_tools | No validation error | High |
+| ID | Test | Expected |
+|----|------|----------|
+| AG-01 | not_empty rejects empty file | False |
+| AG-02 | not_empty accepts content | True |
+| AG-03 | exists accepts empty file | True |
+| AG-04 | json_valid validates JSON | True/False |
 
-### Category 2: LLM Mode Blocking (4 tests)
+### CommandGate Tests
 
-| ID | Test Case | Expected | Priority |
-|----|-----------|----------|----------|
-| LM-01 | Skip blocked in LLM mode (strict phase) | Error message, blocked | Critical |
-| LM-02 | Skip allowed in human mode | Success | Critical |
-| LM-03 | Force blocked in LLM mode | Error message, blocked | Critical |
-| LM-04 | Force allowed in human mode | Success | High |
+| ID | Test | Expected |
+|----|------|----------|
+| CG-01 | Command timeout | False, timeout error |
+| CG-02 | Success exit code | True |
+| CG-03 | Failure exit code | False |
 
-### Category 3: Emergency Override (2 tests)
+### Adversarial Tests
 
-| ID | Test Case | Expected | Priority |
-|----|-----------|----------|----------|
-| EO-01 | Emergency override bypasses LLM block | Success | Critical |
-| EO-02 | Invalid override doesn't bypass | Blocked | High |
-
-## Test File
-
-Tests in: `tests/test_phase_types.py`
+| ID | Test | Expected |
+|----|------|----------|
+| ADV-01 | Symlink blocked | Rejected |
+| ADV-02 | Path traversal blocked | ValueError |
+| ADV-03 | Shell injection blocked | Safe execution |

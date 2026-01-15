@@ -5,6 +5,16 @@ All notable changes to the workflow-orchestrator.
 ## [Unreleased]
 
 ### Added
+- **V3 Hybrid Orchestration Phase 2: Artifact-Based Gates**
+  - `src/gates.py`: Gate validation system for workflow item completion
+    - `ArtifactGate`: File existence and content validation (with path traversal & symlink protection)
+    - `CommandGate`: Command execution with exit code validation (shell injection safe via shlex)
+    - `HumanApprovalGate`: Manual approval gate for human checkpoints
+    - `CompositeGate`: AND/OR logic for combining multiple gates
+  - Built-in validators: `exists`, `not_empty` (default), `min_size`, `json_valid`, `yaml_valid`
+  - Security measures: path traversal blocking, symlink attack prevention, shell injection safety
+  - `tests/test_gates.py`: 18 comprehensive tests including adversarial input tests
+
 - **V3 Hybrid Orchestration Phase 1: Phase Types & Tool Scoping**
   - `PhaseType` enum (STRICT, GUIDED, AUTONOMOUS) for phase autonomy levels
   - `phase_type` field in PhaseDef (defaults to GUIDED for backward compatibility)
