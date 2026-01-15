@@ -383,10 +383,26 @@ def cmd_start(args):
     worktree_path = None
     original_branch = None
 
+    # V3 Phase 5: Detect operator mode at workflow start
+    from .mode_detection import detect_operator_mode
+    from .audit import AuditLogger
+
+    mode_result = detect_operator_mode()
+
     # CORE-025: Create new session for this workflow
     paths = OrchestratorPaths(base_dir=working_dir)
     session_mgr = SessionManager(paths)
     session_id = session_mgr.create_session()
+
+    # V3 Phase 5: Initialize audit logger and log workflow start
+    audit_logger = AuditLogger(paths.orchestrator_dir)
+    audit_logger.log_event(
+        "workflow_start",
+        session_id=session_id,
+        task=args.task,
+        operator_mode=mode_result.mode.value,
+        mode_confidence=mode_result.confidence
+    )
 
     # Create .gitignore in .orchestrator/ to ignore all session files
     gitignore_path = paths.orchestrator_dir / ".gitignore"
@@ -1092,6 +1108,53 @@ def cmd_complete(args):
         else:
             notes = review_notes
 
+    # V3 Phase 5: Gate enforcement before completion
+    if not args.skip_verify:
+        try:
+            item_def = engine.get_item_definition(args.item)
+            if item_def and 'verification' in item_def:
+                verification = item_def['verification']
+                gate_type = verification.get('type')
+                working_dir = Path(args.dir) if hasattr(args, 'dir') and args.dir else Path('.')
+
+                if gate_type == 'file_exists':
+                    from .gates import ArtifactGate
+                    # Expand template variables in path
+                    artifact_path = verification.get('path', '')
+                    artifact_path = artifact_path.replace('{{docs_dir}}', 'docs')
+                    artifact_path = artifact_path.replace('{{tests_dir}}', 'tests')
+
+                    gate = ArtifactGate(path=artifact_path, validator='not_empty')
+                    if not gate.validate(working_dir):
+                        print("=" * 60)
+                        print(f"✗ GATE FAILED: Required artifact missing")
+                        print("=" * 60)
+                        print(f"  Expected: {artifact_path}")
+                        if gate.error:
+                            print(f"  Error: {gate.error}")
+                        print()
+                        print(f"Create the required file, then run:")
+                        print(f"  orchestrator complete {args.item}")
+                        print()
+                        print("Or skip verification with --skip-verify (not recommended)")
+                        sys.exit(1)
+
+                elif gate_type == 'command':
+                    from .gates import CommandGate
+                    command = verification.get('command', 'true')
+                    gate = CommandGate(command=command)
+                    if not gate.validate(working_dir):
+                        print("=" * 60)
+                        print(f"✗ GATE FAILED: Command verification failed")
+                        print("=" * 60)
+                        print(f"  Command: {command}")
+                        if gate.error:
+                            print(f"  Error: {gate.error}")
+                        sys.exit(1)
+
+        except Exception as e:
+            logger.debug(f"Gate enforcement skipped due to error: {e}")
+
     try:
         success, message = engine.complete_item(
             args.item,
@@ -1360,6 +1423,21 @@ def cmd_advance(args):
     success, message = engine.advance_phase(force=args.force)
 
     if success:
+        # V3 Phase 5: Log phase transition to audit log
+        try:
+            from .audit import AuditLogger
+            working_dir = Path(args.dir or '.')
+            paths = OrchestratorPaths(base_dir=working_dir)
+            audit_logger = AuditLogger(paths.orchestrator_dir)
+            audit_logger.log_event(
+                "phase_transition",
+                workflow_id=str(engine.state.workflow_id),
+                from_phase=str(previous_phase_id),
+                to_phase=str(engine.state.current_phase_id)
+            )
+        except Exception as e:
+            logger.debug(f"Failed to log phase transition to audit: {e}")
+
         print(f"✓ {message}")
 
         # CORE-010: Show skipped items from completed phase
@@ -1480,6 +1558,20 @@ def cmd_finish(args):
 
         engine.complete_workflow(notes=notes)
         completed_at = engine.state.completed_at
+
+        # V3 Phase 5: Log workflow finish to audit log
+        try:
+            from .audit import AuditLogger
+            working_dir = Path(args.dir or '.')
+            paths_for_audit = OrchestratorPaths(base_dir=working_dir)
+            audit_logger = AuditLogger(paths_for_audit.orchestrator_dir)
+            audit_logger.log_event(
+                "workflow_finish",
+                workflow_id=str(engine.state.workflow_id),
+                status="completed"
+            )
+        except Exception as e:
+            logger.debug(f"Failed to log workflow finish to audit: {e}")
 
         # CORE-025 Phase 4: Handle worktree merge for isolated workflows
         worktree_merged = False
@@ -3389,6 +3481,49 @@ def cmd_doctor(args):
         print()
 
     print("=" * 60)
+
+
+def cmd_health(args):
+    """Check orchestrator system health (V3 Phase 5)."""
+    from .health import HealthChecker
+
+    working_dir = Path(args.dir or '.')
+    json_output = getattr(args, 'json', False)
+
+    checker = HealthChecker(working_dir=working_dir)
+    report = checker.full_check()
+
+    if json_output:
+        print(report.to_json())
+    else:
+        # Human-readable output
+        print("=" * 60)
+        print("ORCHESTRATOR HEALTH CHECK")
+        print("=" * 60)
+        print()
+
+        status_symbols = {
+            'ok': '✓',
+            'warning': '⚠',
+            'error': '✗'
+        }
+
+        print(f"Overall Status: {status_symbols.get(report.overall_status, '?')} {report.overall_status.upper()}")
+        print()
+
+        print("Components:")
+        for component in report.components:
+            symbol = status_symbols.get(component.status, '?')
+            print(f"  {symbol} {component.name}: {component.status}")
+            if component.message:
+                print(f"      {component.message}")
+            if component.details:
+                for key, value in component.details.items():
+                    print(f"      {key}: {value}")
+
+        print()
+        print(f"Timestamp: {report.timestamp}")
+        print("=" * 60)
 
 
 def cmd_secrets(args):
@@ -6370,6 +6505,13 @@ Examples:
     doctor_parser.add_argument('--older-than', type=int, default=0,
                                help='Only cleanup worktrees older than N days (default: 0 = all orphaned)')
     doctor_parser.set_defaults(func=cmd_doctor)
+
+    # Health command (V3 Phase 5)
+    health_parser = subparsers.add_parser('health', help='Check orchestrator system health')
+    health_parser.add_argument('--json', action='store_true',
+                               help='Output as JSON')
+    health_parser.add_argument('-d', '--dir', help='Working directory')
+    health_parser.set_defaults(func=cmd_health)
 
     # Secrets command
     secrets_parser = subparsers.add_parser('secrets', help='Manage and test secret access')

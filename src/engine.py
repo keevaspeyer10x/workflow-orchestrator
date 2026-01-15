@@ -230,6 +230,21 @@ class WorkflowEngine:
             finally:
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
+        # V3 Phase 5: Verify state integrity if checksum present
+        from .state_version import compute_state_checksum
+        stored_checksum = data.pop('_checksum', None)
+        stored_version = data.pop('_version', None)
+        data.pop('_updated_at', None)  # Remove metadata field
+
+        if stored_checksum is not None:
+            computed = compute_state_checksum(data)
+            if stored_checksum != computed:
+                logger.warning(
+                    f"State file integrity check failed. "
+                    f"Expected {stored_checksum}, got {computed}. "
+                    f"State may have been modified externally."
+                )
+
         # Parse datetime strings
         data = self._parse_state_datetimes(data)
 
@@ -269,6 +284,16 @@ class WorkflowEngine:
         # CORE-025: Ensure session directory exists before writing
         self.paths.ensure_dirs()
 
+        # Get state as dict
+        state_data = self.state.model_dump(mode='json')
+
+        # V3 Phase 5: Add integrity checksum and version
+        from .state_version import compute_state_checksum, STATE_VERSION
+        from datetime import datetime, timezone
+        state_data['_version'] = STATE_VERSION
+        state_data['_checksum'] = compute_state_checksum(state_data)
+        state_data['_updated_at'] = datetime.now(timezone.utc).isoformat()
+
         # Write to temp file first, then atomic rename
         # Keep lock until after rename to prevent race condition
         temp_file = self.state_file.with_suffix('.tmp')
@@ -276,7 +301,7 @@ class WorkflowEngine:
         with open(temp_file, 'w') as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
             try:
-                json.dump(self.state.model_dump(mode='json'), f, indent=2, default=str)
+                json.dump(state_data, f, indent=2, default=str)
                 f.flush()  # Ensure data is written before rename
                 # Atomic rename while still holding lock
                 temp_file.replace(self.state_file)

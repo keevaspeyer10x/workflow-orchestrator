@@ -72,9 +72,18 @@ class HealthChecker:
             working_dir: Working directory for orchestrator
         """
         self.working_dir = Path(working_dir)
-        self.state_dir = self.working_dir / ".orchestrator" / "v3"
-        self.state_file = self.state_dir / "state.json"
-        self.lock_dir = self.working_dir / ".orchestrator" / "locks"
+        self.orchestrator_dir = self.working_dir / ".orchestrator"
+        self.lock_dir = self.orchestrator_dir / "locks"
+
+        # V3 Phase 5: Look for state in current session or v3 directory
+        # Check for current session first
+        current_session_file = self.orchestrator_dir / "current"
+        if current_session_file.exists():
+            session_id = current_session_file.read_text().strip()
+            self.state_file = self.orchestrator_dir / "sessions" / session_id / "state.json"
+        else:
+            # Fall back to v3 directory (for backward compatibility)
+            self.state_file = self.orchestrator_dir / "v3" / "state.json"
 
     def check_state(self) -> ComponentHealth:
         """

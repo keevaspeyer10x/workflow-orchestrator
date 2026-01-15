@@ -5,6 +5,24 @@ All notable changes to the workflow-orchestrator.
 ## [Unreleased]
 
 ### Added
+- **V3 Hybrid Orchestration Phase 5: CLI Integration**
+  - `orchestrator health` command for system health checks
+    - JSON output with `--json` flag
+    - Checks state file, locks, and checkpoints
+  - Mode detection at workflow start via `detect_operator_mode()`
+    - Logs to audit trail with operator mode and confidence
+    - Stored in workflow state metadata
+  - Audit logging for key operations
+    - Logs: `workflow_start`, `workflow_finish`, `phase_transition`
+    - Stored in `.orchestrator/audit.jsonl`
+  - State integrity checks with v3 version/checksum
+    - State files now include `_version`, `_checksum`, `_updated_at`
+    - Integrity verified on load with warning if tampered
+  - Gate enforcement in `orchestrator complete`
+    - Validates `file_exists` and `command` gates before completion
+    - Clear error messages when gate fails
+  - 15 new CLI integration tests in `tests/test_cli_v3_integration.py`
+
 - **V3 Hybrid Orchestration Phase 4: Integration & Hardening**
   - `src/audit.py`: Tamper-evident audit logging system
     - `AuditLogger` class with chained SHA256 hashes for integrity
