@@ -1,31 +1,40 @@
-# V3 Hybrid Orchestration - Phase 3 Test Cases
+# V3 Hybrid Orchestration - Phase 4 Test Cases
 
-**Task:** Implement v3 hybrid orchestration Phase 3: Checkpointing
+**Task:** Implement v3 hybrid orchestration Phase 4: Integration & Hardening
 **Date:** 2026-01-16
 
 ## Test Categories
 
-### Checkpoint Chaining Tests
+### Audit Logging Tests
 
 | ID | Test | Expected |
 |----|------|----------|
-| CC-01 | Create checkpoint with parent | parent_checkpoint_id set |
-| CC-02 | Get checkpoint chain | Returns full lineage |
-| CC-03 | Chain with missing parent | Handles gracefully |
+| AL-01 | Log checkpoint create | Entry with chained hash |
+| AL-02 | Log mode change | Entry with old/new modes |
+| AL-03 | Tamper detection | Raises on hash mismatch |
+| AL-04 | Log rotation | Old logs archived |
 
-### File Locking Tests
-
-| ID | Test | Expected |
-|----|------|----------|
-| FL-01 | Acquire exclusive lock | Lock acquired |
-| FL-02 | Acquire shared lock | Multiple readers allowed |
-| FL-03 | Lock timeout | Raises after timeout |
-| FL-04 | Lock released on exit | Auto-cleanup works |
-
-### Lock Manager Tests
+### Health Check Tests
 
 | ID | Test | Expected |
 |----|------|----------|
-| LM-01 | Context manager usage | Lock released after block |
-| LM-02 | Nested locks same file | No deadlock |
-| LM-03 | Stale lock detection | Old locks cleaned up |
+| HC-01 | State file healthy | Returns OK status |
+| HC-02 | State file corrupted | Returns ERROR status |
+| HC-03 | Lock state healthy | Returns OK status |
+| HC-04 | Full health report | All components checked |
+
+### Integration Tests
+
+| ID | Test | Expected |
+|----|------|----------|
+| INT-01 | Full workflow cycle | All phases complete |
+| INT-02 | Checkpoint round-trip | State restored correctly |
+| INT-03 | Gate integration | Gates block/allow correctly |
+
+### Adversarial Tests
+
+| ID | Test | Expected |
+|----|------|----------|
+| ADV-01 | Concurrent state access | No corruption |
+| ADV-02 | Malformed JSON state | Graceful error |
+| ADV-03 | Large checkpoint | Memory limits respected |

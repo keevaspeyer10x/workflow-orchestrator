@@ -1,41 +1,41 @@
-# Code Review: Issues #63 & #64 (CLI UX Fixes)
+# Code Review: V3 Pre-Implementation Checklist
+
+**Verdict: Changes Requested**
+
+The shift to the V3 pre-implementation plan is clear, and the documentation updates (`docs/plan.md`, `ROLLBACK.md`) are solid. However, the code changes in `src/cli.py` introduce dead code and potential logic confusion that should be addressed before merging.
+
+## 1. Dead Code in `src/cli.py`
+The functions `is_llm_mode()` and `_emergency_override_active()` are defined but **never called**. 
+- **Risk**: Committing dead code creates technical debt and confusion about intended usage.
+- **Action**: Wire these functions into the application logic (e.g., within `is_interactive()` or as a guard in `cmd_start`/`main`) or remove them until the implementation phase.
+
+## 2. Magic Strings
+In `_emergency_override_active()`:
+```python
+return os.environ.get('ORCHESTRATOR_EMERGENCY_OVERRIDE') == 'human-override-v3'
+```
+- **Concern**: `'human-override-v3'` is a magic string buried in the function.
+- **Action**: Extract this to a constant at the module level (e.g., `EMERGENCY_OVERRIDE_VALUE = 'human-override-v3'`) for better maintainability and visibility.
+
+## 3. Ambiguous Mode Detection Logic
+```python
+def is_llm_mode() -> bool:
+    if os.environ.get('CLAUDECODE') == '1':
+        return True
+    if not sys.stdin.isatty():
+        return True  # <--- Overlaps with is_interactive() check
+    return False
+```
+- **Concern**: `!sys.stdin.isatty()` is used in `is_interactive()` to return `False`, and here to return `True`. While semantically consistent (not tty = not interactive = llm mode?), it assumes *all* non-TTY usage is "LLM mode", which might not be true (e.g., CI pipelines, piped scripts).
+- **Question**: Should `is_llm_mode()` explicitly exclude CI environments? `is_interactive()` already checks for `CI` and `GITHUB_ACTIONS`.
+
+## 4. Documentation & Plan
+- **ROLLBACK.md**: Clear and concise. Good job.
+- **docs/plan.md**: The sequential checklist is well-structured.
+- **State Files**: The updates to `.orchestrator/state.json` and `.orchestrator/audit.jsonl` are acceptable as runtime artifacts.
 
 ## Summary
-The code changes successfully implement the requested UX fixes for `commit_and_sync` status updates (#63) and task provider auto-detection (#64). The logic is sound and safe. However, the PR is marred by **destructive documentation practices** and **missing automated tests**.
-
-## 🟢 Strengths
-*   **Logic Correctness (#64):** The update to `cmd_task_*` functions correctly delegates to `get_task_provider(None)`, which I verified has robust auto-detection logic (GitHub -> Local).
-*   **Safe Implementation (#63):** The state update in `cmd_finish` is wrapped in a broad try/except block. While usually a code smell, here it acts as a safety net ensuring the critical "finish" operation doesn't crash due to a minor status update metadata failure.
-*   **Low Risk:** The changes are isolated to the CLI layer and do not impact the core engine logic.
-
-## 🔴 Concerns & Issues
-
-### 1. Destructive Documentation (Major)
-*   **History Erasure:** `docs/plan.md` and `docs/risk_analysis.md` were completely overwritten with new content. These files should be versioned (e.g., `docs/plans/issue-63-64.md`) or appended to, not replaced. You have lost the history of previous tasks.
-*   **Data Loss:** `docs/test_cases.md` was **deleted** (containing 800+ lines of test history) and replaced with `tests/test_cases.md` containing only the new tests. This is a significant loss of regression test documentation.
-*   **Mismatched Artifacts:** `REVIEW_CORE_026.md` was reused/overwritten with a review for "Task Provider" and then "Issues #63/64". The filename `CORE-026` (Review Resilience) now conflicts with its content.
-
-### 2. Missing Automated Tests
-*   The `tests/test_cases.md` file outlines "Unit Tests to Add" (e.g., `test_task_provider_autodetect.py`), but these files **do not exist** in the file list or git status.
-*   The PR applies fixes but adds no regression tests to ensure these UX behaviors stick.
-
-### 3. Code Nitpicks
-*   **`src/cli.py` (Line ~1551):**
-    ```python
-    try:
-        from datetime import datetime, timezone
-        from .engine import ItemStatus
-        # ...
-    except Exception:
-        pass
-    ```
-    *   **Imports inside `try` block:** Imports should generally be at the top of the file.
-    *   **Silent Failure:** While safe, `pass` with no logging means we'll never know if this feature silently breaks. Consider `print(f"Warning: ... {e}", file=sys.stderr)` or a debug log.
-
-## Recommendations
-1.  **Restore Documentation:** Revert deletions/overwrites of `docs/test_cases.md`, `docs/plan.md`, etc., and create new files for this specific task (e.g., `docs/plans/2026-01-15_cli_ux_fixes.md`).
-2.  **Implement Tests:** Actually write the python tests described in your plan (`test_task_provider_autodetect.py`).
-3.  **Fix Review Filename:** Rename `REVIEW_CORE_026.md` to something accurate like `REVIEW_ISSUES_63_64.md`.
-
-## Decision
-**Approve with Comments** on the code logic, but **Request Changes** on the documentation/process and missing tests.
+The documentation and plan are approved. Please fix the `src/cli.py` issues:
+1.  Connect the new functions to the logic OR remove them.
+2.  Refactor the magic string.
+3.  Clarify the `is_llm_mode` logic regarding non-LLM automation (CI).
