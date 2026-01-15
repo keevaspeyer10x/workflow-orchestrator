@@ -1,43 +1,53 @@
-# V3 Hybrid Orchestration - Phase 2 Implementation Plan
+# V3 Hybrid Orchestration - Phase 3 Implementation Plan
 
-**Task:** Implement v3 hybrid orchestration Phase 2: Artifact-Based Gates
+**Task:** Implement v3 hybrid orchestration Phase 3: Checkpointing
 **Date:** 2026-01-16
 
 ## Overview
 
-Phase 2 adds artifact-based gate validation for workflow items.
+Phase 3 extends the existing checkpoint system with chaining, concurrent access handling, and lock management.
 
-## Files to Create
+## Files to Modify
 
-### 1. `src/gates.py` (NEW)
+### 1. `src/checkpoint.py` (MODIFY)
 
-**Gate Types:**
-- `ArtifactGate` - File exists and passes validator
-- `CommandGate` - Command exits with success code
-- `HumanApprovalGate` - Requires human approval
-- `CompositeGate` - Combines multiple gates with AND/OR
+**New Features:**
 
-**Validators:**
-- `exists` - File exists
-- `not_empty` - File exists and has content (DEFAULT)
-- `min_size` - File meets minimum size
-- `json_valid` - Valid JSON
-- `yaml_valid` - Valid YAML
+1. **Checkpoint Chaining**
+   - Add `parent_checkpoint_id` field to CheckpointData
+   - Track lineage for checkpoint history
+   - Method to get checkpoint chain
 
-### 2. `tests/test_gates.py` (NEW)
+2. **File Locking**
+   - Add `FileLock` class for cross-process locking
+   - Lock checkpoints during read/write operations
+   - Use `fcntl.flock()` for UNIX/Linux, fallback for Windows
+
+3. **Lock Management**
+   - Add `LockManager` class
+   - Timeout support for lock acquisition
+   - Automatic lock cleanup on process exit
+
+### 2. `tests/test_checkpoint_v3.py` (NEW)
 
 Test classes:
-- `TestArtifactGates` - not_empty, validators
-- `TestCommandGates` - timeout, exit codes
-- `TestAdversarialGates` - symlink, path traversal, shell injection
+- `TestCheckpointChaining` - parent chain, lineage
+- `TestFileLocking` - concurrent access, deadlock prevention
+- `TestLockManager` - acquire/release, timeouts
 
 ## Execution Strategy
 
-Sequential execution - files are interdependent.
+**Sequential execution** - Features are interdependent:
+- Locking depends on FileLock class
+- Chaining extends CheckpointData
+- Tests verify all features together
 
 ## Implementation Order
 
-1. Create src/gates.py with all gate classes
-2. Create tests/test_gates.py
-3. Run tests
-4. Tag v3-phase2-complete
+1. Add FileLock class to src/checkpoint.py
+2. Add LockManager class
+3. Extend CheckpointData with parent_checkpoint_id
+4. Add checkpoint chain methods
+5. Create tests/test_checkpoint_v3.py
+6. Run tests and verify
+7. Tag v3-phase3-complete

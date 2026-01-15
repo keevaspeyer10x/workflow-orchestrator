@@ -3,11 +3,21 @@ Checkpoint and Resume System (Feature 5)
 
 This module provides checkpoint creation, listing, and resume functionality
 for workflow state persistence across sessions.
+
+V3 additions:
+- Checkpoint chaining (parent_checkpoint_id)
+- File locking (FileLock class)
+- Lock management (LockManager class)
 """
 
+import atexit
+import fcntl
 import json
 import logging
 import hashlib
+import os
+import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List, TYPE_CHECKING
@@ -19,12 +29,246 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# ============================================================================
+# V3: File Locking for Concurrent Access
+# ============================================================================
+
+class LockTimeoutError(Exception):
+    """Raised when lock acquisition times out."""
+    pass
+
+
+class FileLock:
+    """
+    File-based locking for concurrent access control.
+
+    Uses fcntl.flock() for UNIX/Linux systems.
+    Supports both shared (read) and exclusive (write) locks.
+    """
+
+    def __init__(self, lock_path: Path):
+        """
+        Initialize file lock.
+
+        Args:
+            lock_path: Path to the lock file
+        """
+        self.lock_path = Path(lock_path)
+        self._fd: Optional[int] = None
+        self._locked = False
+        self._lock_type: Optional[int] = None
+
+    def acquire_exclusive(self, timeout: float = 10.0) -> None:
+        """
+        Acquire exclusive (write) lock.
+
+        Args:
+            timeout: Maximum time to wait for lock (seconds)
+
+        Raises:
+            LockTimeoutError: If lock cannot be acquired within timeout
+        """
+        self._acquire(fcntl.LOCK_EX, timeout)
+
+    def acquire_shared(self, timeout: float = 10.0) -> None:
+        """
+        Acquire shared (read) lock.
+
+        Args:
+            timeout: Maximum time to wait for lock (seconds)
+
+        Raises:
+            LockTimeoutError: If lock cannot be acquired within timeout
+        """
+        self._acquire(fcntl.LOCK_SH, timeout)
+
+    def _acquire(self, lock_type: int, timeout: float) -> None:
+        """Internal method to acquire lock with timeout."""
+        # Ensure parent directory exists
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Open/create lock file
+        self._fd = os.open(str(self.lock_path), os.O_RDWR | os.O_CREAT)
+
+        # Try non-blocking first
+        try:
+            fcntl.flock(self._fd, lock_type | fcntl.LOCK_NB)
+            self._locked = True
+            self._lock_type = lock_type
+            return
+        except BlockingIOError:
+            pass  # Lock held by another process
+
+        # Retry with timeout
+        import time
+        start = time.monotonic()
+        while time.monotonic() - start < timeout:
+            try:
+                fcntl.flock(self._fd, lock_type | fcntl.LOCK_NB)
+                self._locked = True
+                self._lock_type = lock_type
+                return
+            except BlockingIOError:
+                time.sleep(0.05)
+
+        # Timeout - clean up and raise
+        os.close(self._fd)
+        self._fd = None
+        raise LockTimeoutError(f"Could not acquire lock on {self.lock_path} within {timeout}s")
+
+    def release(self) -> None:
+        """Release the lock."""
+        if self._fd is not None:
+            try:
+                fcntl.flock(self._fd, fcntl.LOCK_UN)
+            except Exception:
+                pass  # Ignore errors during unlock
+            try:
+                os.close(self._fd)
+            except Exception:
+                pass
+            self._fd = None
+            self._locked = False
+            self._lock_type = None
+
+    def is_locked(self) -> bool:
+        """Check if lock is currently held."""
+        return self._locked
+
+    @contextmanager
+    def exclusive(self, timeout: float = 10.0):
+        """Context manager for exclusive lock."""
+        self.acquire_exclusive(timeout)
+        try:
+            yield
+        finally:
+            self.release()
+
+    @contextmanager
+    def shared(self, timeout: float = 10.0):
+        """Context manager for shared lock."""
+        self.acquire_shared(timeout)
+        try:
+            yield
+        finally:
+            self.release()
+
+    def __del__(self):
+        """Ensure lock is released on garbage collection."""
+        self.release()
+
+
+class LockManager:
+    """
+    Manages locks for orchestrator resources.
+
+    Provides:
+    - Named resource locking
+    - Reentrant locks (same thread can acquire multiple times)
+    - Stale lock detection and cleanup
+    """
+
+    def __init__(self, lock_dir: Path, stale_timeout: float = 300.0):
+        """
+        Initialize lock manager.
+
+        Args:
+            lock_dir: Directory to store lock files
+            stale_timeout: Time after which locks are considered stale (seconds)
+        """
+        self.lock_dir = Path(lock_dir)
+        self.lock_dir.mkdir(parents=True, exist_ok=True)
+        self.stale_timeout = stale_timeout
+        self._locks: dict[str, FileLock] = {}
+        self._lock_counts: dict[str, int] = {}
+        self._thread_lock = threading.Lock()
+
+        # Register cleanup on exit
+        atexit.register(self._cleanup_all)
+
+    @contextmanager
+    def acquire(self, resource_name: str, timeout: float = 10.0):
+        """
+        Acquire lock on a named resource.
+
+        Args:
+            resource_name: Name of the resource to lock
+            timeout: Maximum time to wait for lock
+
+        Yields:
+            None (lock is held while in context)
+        """
+        lock_path = self.lock_dir / f"{resource_name}.lock"
+
+        with self._thread_lock:
+            # Check for reentrant acquisition
+            if resource_name in self._locks and self._lock_counts.get(resource_name, 0) > 0:
+                self._lock_counts[resource_name] += 1
+                try:
+                    yield
+                finally:
+                    self._lock_counts[resource_name] -= 1
+                return
+
+            # Clean stale lock if needed
+            self._clean_stale_lock(lock_path)
+
+            # Create new lock
+            lock = FileLock(lock_path)
+            self._locks[resource_name] = lock
+            self._lock_counts[resource_name] = 1
+
+        try:
+            lock.acquire_exclusive(timeout)
+            # Write PID to lock file
+            with open(lock_path, 'w') as f:
+                f.write(str(os.getpid()))
+            yield
+        finally:
+            with self._thread_lock:
+                self._lock_counts[resource_name] -= 1
+                if self._lock_counts[resource_name] == 0:
+                    lock.release()
+                    del self._locks[resource_name]
+                    del self._lock_counts[resource_name]
+
+    def _clean_stale_lock(self, lock_path: Path) -> None:
+        """Remove stale lock if process is dead."""
+        if not lock_path.exists():
+            return
+
+        try:
+            content = lock_path.read_text().strip()
+            if content:
+                pid = int(content)
+                # Check if process exists
+                try:
+                    os.kill(pid, 0)  # Signal 0 just checks existence
+                except OSError:
+                    # Process doesn't exist - stale lock
+                    logger.info(f"Removing stale lock: {lock_path} (PID {pid} not running)")
+                    lock_path.unlink()
+        except (ValueError, FileNotFoundError):
+            pass
+
+    def _cleanup_all(self) -> None:
+        """Release all locks on process exit."""
+        for lock in list(self._locks.values()):
+            try:
+                lock.release()
+            except Exception:
+                pass
+        self._locks.clear()
+        self._lock_counts.clear()
+
+
 @dataclass
 class CheckpointData:
     """
     Data model for a workflow checkpoint.
-    
+
     Contains all information needed to resume a workflow in a new session.
+    V3: Added parent_checkpoint_id for checkpoint chaining.
     """
     checkpoint_id: str
     workflow_id: str
@@ -36,14 +280,18 @@ class CheckpointData:
     key_decisions: List[str] = field(default_factory=list)
     file_manifest: List[str] = field(default_factory=list)
     workflow_state_snapshot: Optional[dict] = None
-    
+    parent_checkpoint_id: Optional[str] = None  # V3: Checkpoint chaining
+
     def to_dict(self) -> dict:
         """Convert to dictionary."""
         return asdict(self)
-    
+
     @classmethod
     def from_dict(cls, data: dict) -> 'CheckpointData':
         """Create from dictionary."""
+        # Handle legacy checkpoints without parent_checkpoint_id
+        if 'parent_checkpoint_id' not in data:
+            data['parent_checkpoint_id'] = None
         return cls(**data)
 
 
@@ -78,11 +326,12 @@ class CheckpointManager:
         key_decisions: Optional[List[str]] = None,
         file_manifest: Optional[List[str]] = None,
         workflow_state: Optional[dict] = None,
-        auto_detect_files: bool = True
+        auto_detect_files: bool = True,
+        parent_checkpoint_id: Optional[str] = None  # V3: Checkpoint chaining
     ) -> CheckpointData:
         """
         Create a new checkpoint.
-        
+
         Args:
             workflow_id: ID of the workflow
             phase_id: Current phase ID
@@ -93,25 +342,28 @@ class CheckpointManager:
             file_manifest: Optional list of important files
             workflow_state: Optional workflow state snapshot
             auto_detect_files: Whether to auto-detect recently modified files
-        
+            parent_checkpoint_id: V3: ID of parent checkpoint for chaining
+
         Returns:
             CheckpointData: The created checkpoint
         """
+        import random
         timestamp = datetime.now(timezone.utc)
-        
-        # Generate checkpoint ID
-        checkpoint_id = f"cp_{timestamp.strftime('%Y%m%d_%H%M%S')}_{hashlib.md5(workflow_id.encode()).hexdigest()[:6]}"
-        
+
+        # Generate checkpoint ID (includes microseconds + random suffix to avoid collisions)
+        random_suffix = random.randint(0, 9999)
+        checkpoint_id = f"cp_{timestamp.strftime('%Y%m%d_%H%M%S')}_{timestamp.microsecond:06d}_{random_suffix:04d}_{hashlib.md5(workflow_id.encode()).hexdigest()[:4]}"
+
         # Auto-detect files if requested
         files = list(file_manifest or [])
         if auto_detect_files:
             auto_files = self._auto_detect_important_files()
             files.extend(f for f in auto_files if f not in files)
-        
+
         # Auto-generate context summary if not provided
         if not context_summary and workflow_state:
             context_summary = self._generate_context_summary(workflow_state, phase_id)
-        
+
         checkpoint = CheckpointData(
             checkpoint_id=checkpoint_id,
             workflow_id=workflow_id,
@@ -122,12 +374,13 @@ class CheckpointManager:
             context_summary=context_summary,
             key_decisions=key_decisions or [],
             file_manifest=files,
-            workflow_state_snapshot=workflow_state
+            workflow_state_snapshot=workflow_state,
+            parent_checkpoint_id=parent_checkpoint_id  # V3: Checkpoint chaining
         )
-        
+
         # Save checkpoint
         self._save_checkpoint(checkpoint)
-        
+
         logger.info(f"Created checkpoint: {checkpoint_id}")
         return checkpoint
     
@@ -266,7 +519,32 @@ class CheckpointManager:
         """Get the most recent checkpoint."""
         checkpoints = self.list_checkpoints(workflow_id=workflow_id)
         return checkpoints[0] if checkpoints else None
-    
+
+    def get_checkpoint_chain(self, checkpoint_id: str) -> List[CheckpointData]:
+        """
+        V3: Get the full checkpoint chain (lineage) from a checkpoint.
+
+        Follows parent_checkpoint_id links to build the complete chain.
+        Returns checkpoints in order from newest to oldest.
+
+        Args:
+            checkpoint_id: ID of the checkpoint to start from
+
+        Returns:
+            List of checkpoints in the chain (newest first)
+        """
+        chain = []
+        current_id = checkpoint_id
+
+        while current_id:
+            checkpoint = self.get_checkpoint(current_id)
+            if checkpoint is None:
+                break
+            chain.append(checkpoint)
+            current_id = checkpoint.parent_checkpoint_id
+
+        return chain
+
     def cleanup_old_checkpoints(
         self,
         max_age_days: int = 30,

@@ -135,12 +135,48 @@ This log tracks things for human verification when you wake up.
 
 ---
 
-## Phase 3: Checkpointing & Suspend/Resume - PENDING
+## Phase 3: Checkpointing & Suspend/Resume - COMPLETED
 
-Will add:
-- Checkpoint format with chaining
-- Concurrent access handling
-- Lock management
+### Files Modified
+
+1. **`src/checkpoint.py`** - Extended with v3 features:
+   - `FileLock` class: File-based locking using fcntl
+     - Exclusive and shared lock modes
+     - Timeout-based acquisition
+     - Context manager support
+   - `LockManager` class: Named resource locking
+     - Reentrant lock support (same thread can acquire multiple times)
+     - Stale lock detection and cleanup (checks if PID is running)
+     - Automatic cleanup on process exit via atexit
+   - `LockTimeoutError` exception for lock timeout handling
+   - `parent_checkpoint_id` field added to CheckpointData for chaining
+   - `get_checkpoint_chain()` method to retrieve full checkpoint lineage
+   - Fixed checkpoint ID collision by adding microseconds + random suffix
+
+2. **`tests/test_checkpoint_v3.py`** (NEW) - 11 tests:
+   - 3 checkpoint chaining tests (parent reference, chain retrieval, orphan handling)
+   - 4 file locking tests (exclusive, shared, timeout, context manager)
+   - 3 lock manager tests (context manager, nested locks, stale detection)
+   - 1 concurrent checkpoint test (thread safety)
+
+### Test Results
+
+- **Full suite:** 2101 passed, 5 skipped, 0 failures
+- **New tests:** 11/11 passed
+
+### Reviews Completed
+
+| Review | Model | Duration | Findings |
+|--------|-------|----------|----------|
+| Security | openai/gpt-5.1 | ~135s | None |
+| Quality | openai/gpt-5.1 | ~191s | None |
+| Consistency | gemini-3-pro | ~74s | None |
+| Holistic | gemini-3-pro | ~94s | None |
+| Vibe_coding | gemini-3-pro | ~171s | None |
+
+### Tags
+
+- `v3-phase3-complete` - Phase 3 rollback point (to be created)
 
 ---
 

@@ -1,31 +1,31 @@
-# V3 Hybrid Orchestration - Phase 2 Test Cases
+# V3 Hybrid Orchestration - Phase 3 Test Cases
 
-**Task:** Implement v3 hybrid orchestration Phase 2: Artifact-Based Gates
+**Task:** Implement v3 hybrid orchestration Phase 3: Checkpointing
 **Date:** 2026-01-16
 
 ## Test Categories
 
-### ArtifactGate Tests
+### Checkpoint Chaining Tests
 
 | ID | Test | Expected |
 |----|------|----------|
-| AG-01 | not_empty rejects empty file | False |
-| AG-02 | not_empty accepts content | True |
-| AG-03 | exists accepts empty file | True |
-| AG-04 | json_valid validates JSON | True/False |
+| CC-01 | Create checkpoint with parent | parent_checkpoint_id set |
+| CC-02 | Get checkpoint chain | Returns full lineage |
+| CC-03 | Chain with missing parent | Handles gracefully |
 
-### CommandGate Tests
-
-| ID | Test | Expected |
-|----|------|----------|
-| CG-01 | Command timeout | False, timeout error |
-| CG-02 | Success exit code | True |
-| CG-03 | Failure exit code | False |
-
-### Adversarial Tests
+### File Locking Tests
 
 | ID | Test | Expected |
 |----|------|----------|
-| ADV-01 | Symlink blocked | Rejected |
-| ADV-02 | Path traversal blocked | ValueError |
-| ADV-03 | Shell injection blocked | Safe execution |
+| FL-01 | Acquire exclusive lock | Lock acquired |
+| FL-02 | Acquire shared lock | Multiple readers allowed |
+| FL-03 | Lock timeout | Raises after timeout |
+| FL-04 | Lock released on exit | Auto-cleanup works |
+
+### Lock Manager Tests
+
+| ID | Test | Expected |
+|----|------|----------|
+| LM-01 | Context manager usage | Lock released after block |
+| LM-02 | Nested locks same file | No deadlock |
+| LM-03 | Stale lock detection | Old locks cleaned up |

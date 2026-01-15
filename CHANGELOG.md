@@ -5,6 +5,20 @@ All notable changes to the workflow-orchestrator.
 ## [Unreleased]
 
 ### Added
+- **V3 Hybrid Orchestration Phase 3: Checkpointing & Concurrency**
+  - `FileLock` class: File-based locking using fcntl for concurrent access control
+    - Exclusive (write) and shared (read) lock modes
+    - Timeout-based acquisition with `LockTimeoutError`
+    - Context manager support for automatic lock release
+  - `LockManager` class: Named resource locking with stale lock detection
+    - Reentrant locks (same thread can acquire multiple times safely)
+    - Automatic cleanup on process exit via atexit handler
+    - Stale lock detection (checks if PID is still running)
+  - Checkpoint chaining via `parent_checkpoint_id` field
+  - `get_checkpoint_chain()` method to retrieve full checkpoint lineage
+  - Fixed checkpoint ID collision with microseconds + random suffix
+  - `tests/test_checkpoint_v3.py`: 11 comprehensive tests for new features
+
 - **V3 Hybrid Orchestration Phase 2: Artifact-Based Gates**
   - `src/gates.py`: Gate validation system for workflow item completion
     - `ArtifactGate`: File existence and content validation (with path traversal & symlink protection)
