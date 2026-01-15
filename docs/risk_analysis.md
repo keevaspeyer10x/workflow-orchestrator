@@ -1,75 +1,29 @@
-# Issue #58: Risk Analysis
+# Risk Analysis: V3 Pre-Implementation Checklist
 
-## Overall Risk: MEDIUM
+## Overall Risk: LOW
 
-Adding fallback logic changes review execution behavior. Risk is medium because:
-- Changes core review path
-- Must correctly classify transient vs permanent errors
-- Could mask issues if fallback hides real problems
+All 9 items are reversible and non-destructive.
 
-## Detailed Risks
+## Item-by-Item Analysis
 
-### 1. Incorrect Error Classification
-**Risk**: Permanent errors classified as transient, causing wasted retries
-**Likelihood**: Medium
-**Impact**: Low (just slower failure)
-**Mitigation**: Port proven logic from multiminds, comprehensive tests
+| Item | Risk | Mitigation |
+|------|------|------------|
+| 1. Rollback tag | None | Tag can be deleted if wrong |
+| 2. Verify tests | None | Read-only operation |
+| 3. Emergency override | Low | Simple code addition, easily reverted |
+| 4. V3 branch | None | Branch can be deleted |
+| 5. Env detection | None | Already completed - read-only |
+| 6. Rollback docs | None | Documentation only |
+| 7. Review issues | None | Read-only operation |
+| 8. Test repo | None | In /tmp, ephemeral |
+| 9. Dogfood workflow | None | In test repo, isolated |
 
-### 2. Infinite Retry Loop
-**Risk**: Bug causes endless retries
-**Likelihood**: Low
-**Impact**: High (hangs workflow)
-**Mitigation**:
-- Hard limit on max_fallback_attempts (default: 2)
-- Total timeout on retry loop
-- Tests for loop termination
+## Key Safety Measures
 
-### 3. Fallback Masks Real Issues
-**Risk**: Fallback succeeds but masks that primary model has persistent issue
-**Likelihood**: Medium
-**Impact**: Low
-**Mitigation**:
-- Log fallback usage clearly
-- Show in output which reviews used fallback
-- `was_fallback` and `fallback_reason` fields preserved
+1. **Rollback tag created first** - ensures we can always return to v2
+2. **Work done on branch** - main branch untouched
+3. **Test repo is isolated** - no risk to real codebase
+4. **Emergency override** - escape hatch if detection fails
 
-### 4. Cost Implications
-**Risk**: Fallback to more expensive model increases costs
-**Likelihood**: Medium
-**Impact**: Low
-**Mitigation**:
-- Configure fallback chains to use cheaper alternatives first
-- Log cost of fallback operations
-- `--no-fallback` flag for cost-sensitive users
-
-### 5. Breaking Existing Behavior
-**Risk**: Changes break existing review functionality
-**Likelihood**: Low
-**Impact**: High
-**Mitigation**:
-- Fallback is opt-in behavior (enabled by default but configurable)
-- All existing tests must pass
-- Run full review suite after implementation
-
-## Security Considerations
-
-- No new API keys exposed
-- Error messages already sanitized (from #34)
-- Fallback doesn't bypass authentication
-
-## Rollback Plan
-
-If issues arise:
-1. Set `max_fallback_attempts: 0` to disable fallbacks
-2. Use `--no-fallback` flag per invocation
-3. Revert to pre-fallback code (single commit)
-
-## Conclusion
-
-**Recommendation: PROCEED**
-
-Risk is acceptable because:
-- Multiminds implementation is proven and tested
-- Existing error classification infrastructure from #34
-- Fallback can be disabled if issues arise
-- Improves reliability in common failure scenarios (rate limits)
+## No Breaking Changes
+None of these items modify production code or state.

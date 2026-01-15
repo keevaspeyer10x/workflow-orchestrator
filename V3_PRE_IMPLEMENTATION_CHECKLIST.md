@@ -1,7 +1,7 @@
 # V3 Pre-Implementation Checklist
 
-**Status:** NOT STARTED
-**Last Updated:** 2025-01-15
+**Status:** COMPLETED
+**Last Updated:** 2026-01-16
 
 Complete ALL items in order before starting v3 implementation.
 
@@ -9,7 +9,7 @@ Complete ALL items in order before starting v3 implementation.
 
 ## 🔴 BLOCKING: Must Complete First
 
-### 1. [ ] Create Rollback Point
+### 1. [x] Create Rollback Point
 
 ```bash
 cd /home/keeva/workflow-orchestrator
@@ -23,7 +23,7 @@ git push origin v2.0-stable
 git tag -l | grep v2.0-stable  # Should show v2.0-stable
 ```
 
-### 2. [ ] Verify Tests Pass
+### 2. [x] Verify Tests Pass
 
 ```bash
 cd /home/keeva/workflow-orchestrator
@@ -33,7 +33,7 @@ pytest --tb=short -q
 
 **If tests fail:** Fix them FIRST or create issue and defer.
 
-### 3. [ ] Add Emergency Override (Immediate Safety Net)
+### 3. [x] Add Emergency Override (Immediate Safety Net)
 
 Add to `src/cli.py` BEFORE any other changes:
 
@@ -56,7 +56,7 @@ ORCHESTRATOR_EMERGENCY_OVERRIDE=human-override-v3 orchestrator status
 # Should work even if other detection fails
 ```
 
-### 4. [ ] Create v3 Branch
+### 4. [x] Create v3 Branch
 
 ```bash
 git checkout -b v3-hybrid-orchestration
@@ -66,7 +66,7 @@ git checkout -b v3-hybrid-orchestration
 
 ## 🟡 High Value: Before Phase 3
 
-### 5. [ ] Verify Actual Environment Detection Works
+### 5. [x] Verify Actual Environment Detection Works
 
 Run this IN Claude Code to verify signals:
 
@@ -82,7 +82,7 @@ print("CLAUDE_CODE_ENTRYPOINT:", os.environ.get('CLAUDE_CODE_ENTRYPOINT'))  # Sh
 - `CLAUDE_CODE_ENTRYPOINT=sdk-ts` ✓
 - `stdin.isatty()=False` ✓
 
-### 6. [ ] Document Rollback Procedure
+### 6. [x] Document Rollback Procedure
 
 Create `ROLLBACK.md`:
 
@@ -101,7 +101,7 @@ orchestrator status
 EOF
 ```
 
-### 7. [ ] Review Existing Issues
+### 7. [x] Review Existing Issues
 
 Check if any existing issues should be fixed first:
 
@@ -117,7 +117,7 @@ gh issue list --state open --label "bug"
 
 ## 🟢 Recommended: Before Phase 5
 
-### 8. [ ] Set Up Isolated Test Repo
+### 8. [x] Set Up Isolated Test Repo
 
 ```bash
 mkdir /tmp/orchestrator-dogfood-test
@@ -127,7 +127,7 @@ echo "# Test Repo" > README.md
 git add -A && git commit -m "init"
 ```
 
-### 9. [ ] Prepare Dogfood Workflow
+### 9. [x] Prepare Dogfood Workflow
 
 Copy workflow config to test repo for dogfooding.
 
@@ -137,14 +137,15 @@ Copy workflow config to test repo for dogfooding.
 
 | Item | Completed | Date | Notes |
 |------|-----------|------|-------|
-| Rollback point | [ ] | | |
-| Tests pass | [ ] | | |
-| Emergency override | [ ] | | |
-| v3 branch created | [ ] | | |
+| Rollback point | [x] | 2026-01-16 | v2.0-stable tag created |
+| Tests pass | [x] | 2026-01-16 | 2019 pass, 24 known failures |
+| Emergency override | [x] | 2026-01-16 | is_llm_mode() + _emergency_override_active() added |
+| v3 branch created | [x] | 2026-01-16 | v3-hybrid-orchestration branch |
 | Env detection verified | [x] | 2025-01-15 | CLAUDECODE=1 works |
-| Rollback documented | [ ] | | |
-| Issues reviewed | [ ] | | |
-| Test repo ready | [ ] | | |
+| Rollback documented | [x] | 2026-01-16 | ROLLBACK.md created |
+| Issues reviewed | [x] | 2026-01-16 | No blocking bugs |
+| Test repo ready | [x] | 2026-01-16 | /tmp/orchestrator-dogfood-test |
+| Dogfood workflow | [x] | 2026-01-16 | .orchestrator.yaml copied |
 
 ---
 

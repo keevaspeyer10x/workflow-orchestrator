@@ -121,6 +121,34 @@ def is_interactive() -> bool:
     return True
 
 
+# ============================================================================
+# LLM Mode Detection and Emergency Override (V3 Pre-Implementation)
+# ============================================================================
+def is_llm_mode() -> bool:
+    """Check if running in LLM mode (Claude Code, Codex, etc.).
+
+    Returns True if:
+    - CLAUDECODE=1 is set (Claude Code environment)
+    - stdin is not a TTY (subprocess/piped input)
+    """
+    if os.environ.get('CLAUDECODE') == '1':
+        return True
+    if not sys.stdin.isatty():
+        return True
+    return False
+
+
+def _emergency_override_active() -> bool:
+    """Check if emergency override is set.
+
+    The emergency override allows humans to bypass LLM mode restrictions
+    when mode detection incorrectly identifies them as an LLM.
+
+    Usage: ORCHESTRATOR_EMERGENCY_OVERRIDE=human-override-v3 orchestrator <command>
+    """
+    return os.environ.get('ORCHESTRATOR_EMERGENCY_OVERRIDE') == 'human-override-v3'
+
+
 def confirm(prompt: str, yes_flag: bool = False) -> bool:
     """Prompt user for confirmation with non-interactive fail-fast.
 
