@@ -1,74 +1,106 @@
-# Issues #63 and #64: Quick Fix Implementation Plan
+# Issue #58: CORE-028b - Model Fallback Execution Chain
 
 ## Overview
 
-Two UX quick fixes for the workflow orchestrator:
-1. **#64**: Default task_provider to 'github' when gh CLI available
-2. **#63**: Fix commit_and_sync showing "Skipped" when auto-sync actually pushes
+Implement automatic model fallback when primary review model fails with transient errors (rate limits, timeouts, network errors).
 
-## Issue #64: Default task_provider to 'github'
+## Existing Infrastructure (from #34)
 
-### Problem
-- `orchestrator task add` stores tasks locally by default (~/.config/orchestrator/tasks.json)
-- Users expect GitHub Issues when working in a GitHub repo
-- Current explicit `--provider local` default causes task confusion
+Already implemented:
+- `ReviewErrorType` enum with `is_transient()` method
+- `classify_http_error()` for error categorization
+- `ReviewResult` has `was_fallback` and `fallback_reason` fields
+- `recovery.py` with error recovery guidance
 
-### Solution
-Change the default provider resolution in CLI task commands from hardcoded `'local'` to use `get_task_provider()` auto-detection, which already tries GitHub first.
+## Reference Implementation: multiminds
 
-### Files to Modify
-- `src/cli.py` - Lines 5886, 5910, 5946, 5965 in task command handlers
+The `multiminds` project has a complete implementation we can adapt:
+- `/home/keeva/multiminds/src/multiminds/resilience/retry.py` - Async retry with exponential backoff
+- `/home/keeva/multiminds/tests/test_fallback_execution.py` - Tests for fallback logic
 
-### Implementation Steps
-1. In `cmd_task_list()`, `cmd_task_add()`, `cmd_task_next()`, `cmd_task_close()`, `cmd_task_show()`:
-   - Change from: `provider_name = getattr(args, 'provider', None) or 'local'`
-   - To: `provider_name = getattr(args, 'provider', None)` (let get_task_provider auto-detect)
-2. The existing `get_task_provider(None)` already:
-   - Tries GitHub first (checks gh CLI + authentication + git remote)
-   - Falls back to local if GitHub unavailable
-3. Update help text to indicate auto-detection
+Key patterns to port:
+1. `is_retryable_error()` / `is_permanent_error()` - Error classification
+2. `async_retry_with_backoff()` - Retry decorator
+3. Fallback chain execution - Try primary, then fallbacks on transient failure
 
----
+## Implementation Plan
 
-## Issue #63: commit_and_sync UX in zero_human mode
+### Phase 1: Add Retry Module (Port from multiminds)
 
-### Problem
-- In zero_human mode, `commit_and_sync` manual gate is auto-skipped
-- Shows "Skipped: Auto-skipped (zero_human mode)" in summary
-- But `orchestrator finish` still pushes via CORE-031 auto-sync
-- Users think their work wasn't committed/pushed
+Create `src/review/retry.py`:
+- `is_retryable_error(error)` - Check if error is transient
+- `is_permanent_error(error)` - Check if error is permanent (401, 403, invalid key)
+- `retry_with_backoff(func, max_retries, base_delay)` - Sync retry wrapper
 
-### Solution
-**Option B (recommended)**: Mark `commit_and_sync` as "completed" (not "skipped") when auto-sync succeeds in zero_human mode.
+### Phase 2: Add Fallback Execution to APIExecutor
 
-### Files to Modify
-- `src/cli.py` - `cmd_finish()` function (lines ~1511-1552)
+Modify `src/review/api_executor.py`:
+- Add `fallbacks` parameter to `execute()`
+- Try primary model first
+- On transient failure → try fallback models in order
+- Populate `was_fallback` and `fallback_reason` on ReviewResult
+- Respect `max_fallback_attempts` setting
 
-### Implementation Steps
-1. After successful auto-sync in `cmd_finish()`:
-   - Load the workflow engine
-   - Find the `commit_and_sync` item
-   - If status is "skipped" and auto-sync succeeded:
-     - Update status to "completed"
-     - Set notes to "Auto-completed via CORE-031 sync"
-   - Save state
-2. The finish summary will now show "Completed" instead of "Skipped"
+```python
+def execute_with_fallback(
+    self,
+    review_type: str,
+    fallbacks: list[str] = None,
+    no_fallback: bool = False
+) -> ReviewResult:
+    """Execute review with automatic fallback on transient failures."""
+```
 
----
+### Phase 3: Update Review CLI
+
+Modify `src/cli.py`:
+- Add `--no-fallback` flag to `orchestrator review` command
+- Update output to show fallback usage:
+  ```
+  ✓ GPT-5.2 Max: Passed (45s)
+  ⟳ Gemini 3 Pro: Rate limited, falling back to Gemini 2.5 Flash...
+  ✓ Gemini 2.5 Flash: Passed (12s) [fallback]
+  ```
+
+### Phase 4: Configuration
+
+Add fallback chains to config/schema:
+```yaml
+review:
+  fallback_chains:
+    gemini: [gemini-2.5-flash, claude-3.5-sonnet]
+    codex: [gpt-5.1, claude-3.5-sonnet]
+    grok: [grok-3, claude-3.5-sonnet]
+  max_fallback_attempts: 2
+```
+
+### Phase 5: Tests
+
+Add `tests/test_review_fallback.py`:
+- Test primary succeeds (no fallback)
+- Test transient error triggers fallback
+- Test permanent error (401/403) does NOT trigger fallback
+- Test all fallbacks fail
+- Test `--no-fallback` flag disables fallback
+
+## Files to Modify/Create
+
+| File | Action |
+|------|--------|
+| `src/review/retry.py` | CREATE - Retry utilities |
+| `src/review/api_executor.py` | MODIFY - Add fallback logic |
+| `src/cli.py` | MODIFY - Add --no-fallback flag |
+| `src/review/config.py` | MODIFY - Add fallback chain config |
+| `tests/test_review_fallback.py` | CREATE - Fallback tests |
 
 ## Parallel Execution Decision
 
-**Will use SEQUENTIAL execution** because:
-- Both fixes are small (~10-20 lines each)
-- They're in the same file (src/cli.py)
-- Changes don't conflict but testing is easier sequentially
-- Total implementation time is minimal
+**Sequential execution** - Changes are interdependent (retry module must exist before executor uses it).
 
----
+## Success Criteria
 
-## Implementation Order
-
-1. **#64 first** - Simpler, isolated change to task commands
-2. **#63 second** - Requires understanding of engine state updates
-3. **Tests** - Run existing test suite + manual verification
-4. **Commit** - Single commit for both fixes
+1. When Gemini rate limits, automatically falls back to Gemini Flash
+2. When permanent error (401), fails immediately without fallback
+3. `--no-fallback` flag disables automatic fallback
+4. Output shows which reviews used fallback
+5. All existing tests pass

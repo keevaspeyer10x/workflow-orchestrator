@@ -1,0 +1,565 @@
+name: "Parallel Agent Workflow"
+version: "1.0"
+description: "Workflow contract for spawned agents. Enforced by orchestrator."
+
+# ============================================================================
+# CRITICAL: This workflow is ENFORCED, not advisory
+# - Agents receive read-only snapshots of this file
+# - Orchestrator validates all transitions against this contract
+# - Phase tokens cryptographically prove gate passage
+# - No direct state mutation allowed
+# ============================================================================
+
+phases:
+  - id: "PLAN"
+    name: "Planning & Approval"
+    description: "Agent must propose plan and get approval before proceeding"
+
+    required_artifacts:
+      - type: "plan_document"
+        schema: "schemas/plan.json"
+        description: "Technical plan with acceptance criteria"
+        validation:
+          - rule: "has_acceptance_criteria"
+            message: "Plan must include measurable acceptance criteria"
+          - rule: "has_implementation_steps"
+            message: "Plan must outline implementation steps"
+
+      - type: "scope_definition"
+        schema: "schemas/scope.json"
+        description: "What's in scope, what's out of scope"
+        validation:
+          - rule: "has_in_scope"
+            message: "Must define what IS in scope"
+          - rule: "has_out_of_scope"
+            message: "Must define what is NOT in scope (prevents scope creep)"
+
+    gates:
+      - id: "plan_approval"
+        type: "approval"  # Requires human/orchestrator approval
+        blockers:
+          - check: "plan_has_acceptance_criteria"
+            severity: "blocking"
+            message: "Plan must include measurable acceptance criteria"
+
+          - check: "scope_is_bounded"
+            severity: "blocking"
+            message: "Scope must be clearly bounded with constraints"
+
+          - check: "no_open_questions"
+            severity: "warning"
+            message: "Consider addressing open questions before proceeding"
+
+        timeout_seconds: 3600
+        approvers: ["human", "orchestrator"]
+
+    allowed_tools:
+      - "read_files"
+      - "search_codebase"
+      - "grep"
+      - "glob"
+      - "ask_user_question"
+      - "web_fetch"  # For research
+
+    forbidden_tools:
+      - "write_files"  # No implementation yet!
+      - "edit_files"
+      - "git_commit"
+      - "run_tests"
+      - "bash"  # No arbitrary commands in PLAN phase
+
+  - id: "TDD"
+    name: "Write Tests (RED phase)"
+    description: "Write failing tests BEFORE implementation"
+
+    required_artifacts:
+      - type: "test_files"
+        schema: "schemas/tests.json"
+        description: "Test files that cover acceptance criteria"
+        validation:
+          - rule: "tests_exist"
+            message: "Test files must be created"
+          - rule: "tests_cover_acceptance_criteria"
+            message: "Each acceptance criterion must have test coverage"
+
+      - type: "test_run_result"
+        schema: "schemas/test_result.json"
+        description: "Proof that tests were run and FAILED (RED phase)"
+        validation:
+          - rule: "tests_were_run"
+            message: "Must provide evidence of test execution"
+          - rule: "tests_failed"
+            message: "TDD requires tests to FAIL initially (RED phase)"
+
+    gates:
+      - id: "tests_written"
+        type: "validation"  # Automated validation
+        blockers:
+          - check: "tests_exist_for_acceptance_criteria"
+            severity: "blocking"
+            message: "Each acceptance criterion must have test coverage"
+
+          - check: "tests_are_failing"
+            severity: "blocking"
+            message: "TDD requires tests to FAIL initially (RED phase)"
+
+          - check: "tests_are_meaningful"
+            severity: "warning"
+            message: "Tests should assert behavior, not implementation"
+
+          - check: "test_files_follow_convention"
+            severity: "warning"
+            message: "Test files should follow project naming convention"
+
+        timeout_seconds: 1800
+        auto_advance: true  # No approval needed if validation passes
+
+    allowed_tools:
+      - "read_files"
+      - "write_files"  # BUT only for test files! (enforced by orchestrator)
+      - "edit_files"   # BUT only for test files!
+      - "grep"
+      - "glob"
+      - "bash"  # Limited to: pytest, npm test, etc.
+
+    forbidden_tools:
+      - "git_commit"  # Can't commit until reviewed
+
+    tool_constraints:
+      write_files:
+        allowed_patterns:
+          - "tests/**/*.py"
+          - "tests/**/*.ts"
+          - "tests/**/*.js"
+          - "**/__tests__/**/*"
+          - "**/*.test.*"
+          - "**/*.spec.*"
+        forbidden_patterns:
+          - "src/**/*"
+          - "lib/**/*"
+          - "mcp/**/*"
+
+      bash:
+        allowed_commands:
+          - "pytest"
+          - "npm test"
+          - "npm run test"
+          - "go test"
+          - "cargo test"
+        forbidden_commands:
+          - "git"
+          - "rm -rf"
+          - "curl"
+          - "wget"
+
+  - id: "IMPL"
+    name: "Implementation (GREEN phase)"
+    description: "Write minimal code to make tests pass"
+
+    required_artifacts:
+      - type: "implementation_files"
+        schema: "schemas/implementation.json"
+        description: "Implementation code"
+        validation:
+          - rule: "implementation_exists"
+            message: "Implementation files must be created"
+          - rule: "matches_plan"
+            message: "Implementation should follow the approved plan"
+
+      - type: "test_run_result"
+        schema: "schemas/test_result.json"
+        description: "Proof that tests now PASS (GREEN phase)"
+        validation:
+          - rule: "tests_were_run"
+            message: "Must provide evidence of test execution"
+          - rule: "tests_passed"
+            message: "All tests must pass to exit IMPL phase"
+
+    gates:
+      - id: "tests_passing"
+        type: "validation"
+        blockers:
+          - check: "all_tests_pass"
+            severity: "blocking"
+            message: "All tests must pass to exit IMPL phase"
+
+          - check: "no_skipped_tests"
+            severity: "blocking"
+            message: "Cannot skip tests to make them 'pass'"
+
+          - check: "coverage_threshold_met"
+            severity: "warning"
+            threshold: 80
+            message: "Code coverage below 80%"
+
+          - check: "no_commented_out_code"
+            severity: "warning"
+            message: "Remove commented-out code before review"
+
+        timeout_seconds: 3600
+        auto_advance: true
+
+    allowed_tools:
+      - "read_files"
+      - "write_files"
+      - "edit_files"
+      - "grep"
+      - "glob"
+      - "bash"  # Full bash access for implementation
+
+    forbidden_tools:
+      - "git_commit"  # Can't commit until reviewed!
+
+    tool_constraints:
+      # In IMPL phase, can write anywhere except critical files
+      write_files:
+        forbidden_patterns:
+          - ".git/**/*"
+          - "node_modules/**/*"
+          - "venv/**/*"
+          - ".env*"
+
+  - id: "REVIEW"
+    name: "Multi-Model Code Review"
+    description: "External model reviews (auto-spawned by orchestrator)"
+
+    required_artifacts:
+      - type: "review_report"
+        schema: "schemas/review.json"
+        description: "Consolidated review from all models"
+        validation:
+          - rule: "all_reviews_completed"
+            message: "All review models must complete"
+          - rule: "no_blocking_issues"
+            message: "Review found blocking issues that must be addressed"
+
+    gates:
+      - id: "review_approved"
+        type: "approval"
+        blockers:
+          - check: "no_blocking_issues"
+            severity: "blocking"
+            message: "Review found blocking issues that must be addressed"
+
+          - check: "all_review_models_completed"
+            severity: "blocking"
+            required_reviews:
+              - "security"
+              - "quality"
+              - "consistency"
+              - "holistic"
+              - "vibe_coding"
+            message: "All 5 review models must complete"
+
+          - check: "review_comments_addressed"
+            severity: "warning"
+            message: "Consider addressing review comments before proceeding"
+
+        timeout_seconds: 7200
+        approvers: ["review_agent", "orchestrator", "human"]
+
+    allowed_tools:
+      - "read_files"
+      - "grep"
+      - "glob"
+
+    forbidden_tools:
+      - "write_files"  # Reviews don't modify code
+      - "edit_files"
+      - "git_commit"
+      - "bash"
+
+    # CRITICAL: Orchestrator auto-spawns review agents when entering this phase
+    auto_spawn:
+      - agent_type: "review"
+        models: ["security", "quality", "consistency", "holistic", "vibe_coding"]
+        parallel: true
+        wait_for_completion: true
+
+  - id: "COMPLETE"
+    name: "Task Complete"
+    description: "All gates passed, task ready for merge"
+
+    required_artifacts:
+      - type: "completion_summary"
+        schema: "schemas/completion.json"
+        description: "Summary of what was accomplished"
+        validation:
+          - rule: "has_summary"
+            message: "Must provide completion summary"
+          - rule: "has_files_changed"
+            message: "Must list files changed"
+
+    gates: []  # No more gates, task is done
+
+    allowed_tools:
+      - "read_files"
+      - "git_commit"  # NOW agents can commit
+      - "bash"  # For git operations
+
+    forbidden_tools: []
+
+# ============================================================================
+# STATE MACHINE TRANSITIONS
+# ============================================================================
+transitions:
+  - from: "PLAN"
+    to: "TDD"
+    gate: "plan_approval"
+    requires_token: true
+
+  - from: "TDD"
+    to: "IMPL"
+    gate: "tests_written"
+    requires_token: true
+
+  - from: "IMPL"
+    to: "REVIEW"
+    gate: "tests_passing"
+    requires_token: true
+    triggers:
+      - action: "spawn_review_agents"
+        parallel: true
+
+  - from: "REVIEW"
+    to: "COMPLETE"
+    gate: "review_approved"
+    requires_token: true
+    triggers:
+      - action: "update_prd_state"
+        params:
+          status: "completed"
+      - action: "notify_orchestrator"
+        params:
+          event: "task_completed"
+
+# ============================================================================
+# ENFORCEMENT SETTINGS
+# ============================================================================
+enforcement:
+  mode: "strict"  # strict | permissive | advisory
+
+  # Agent SDK configuration
+  agent_sdk:
+    required: true  # Agents MUST use SDK, cannot bypass
+    version: ">=1.0.0"
+    endpoint: "http://localhost:8000/api/v1"
+    fallback_endpoint: "file://.orchestrator/api_socket"  # For offline mode
+
+  # Phase token cryptography
+  phase_tokens:
+    enabled: true
+    algorithm: "HS256"
+    secret_env_var: "ORCHESTRATOR_JWT_SECRET"
+    expiry_seconds: 7200
+    include_claims:
+      - "task_id"
+      - "phase"
+      - "allowed_tools"
+      - "exp"
+
+  # Tool access control
+  tool_enforcement:
+    enabled: true
+    violation_action: "reject"  # reject | warn | log
+
+    # Tools are capability-scoped by phase
+    # Agents literally cannot call forbidden tools
+    capability_model: "deny_by_default"
+
+    # Log all tool calls for audit
+    audit_log: ".orchestrator/tool_audit.jsonl"
+
+# ============================================================================
+# COORDINATION
+# ============================================================================
+coordination:
+  # How agents discover shared state
+  state_access:
+    mode: "read_only_snapshot"  # Agents get snapshots, can't mutate
+    snapshot_includes:
+      - "task_dependencies"
+      - "completed_tasks"
+      - "current_phase"
+      - "blockers"
+      - "prd_state"
+
+    # Agents request state updates via API
+    mutation_via: "orchestrator_api"
+
+  # How agents communicate completion
+  event_bus:
+    type: "sqlite"  # Use SQLite for simplicity (can upgrade to Redis later)
+    db_path: ".orchestrator/events.db"
+    events:
+      - "task_started"
+      - "phase_transition_requested"
+      - "gate_passed"
+      - "gate_blocked"
+      - "task_completed"
+      - "blocker_encountered"
+
+  # Conflict resolution
+  conflict_resolution:
+    strategy: "orchestrator_merge"  # Orchestrator resolves, not agents
+    lock_timeout_seconds: 300
+    optimistic_locking: true
+
+# ============================================================================
+# ARTIFACT SCHEMAS (referenced above)
+# ============================================================================
+schemas_dir: ".orchestrator/schemas"
+
+schemas:
+  plan.json:
+    type: "object"
+    required: ["title", "acceptance_criteria", "implementation_steps", "scope"]
+    properties:
+      title:
+        type: "string"
+        minLength: 10
+      acceptance_criteria:
+        type: "array"
+        minItems: 1
+        items:
+          type: "object"
+          required: ["criterion", "how_to_verify"]
+      implementation_steps:
+        type: "array"
+        minItems: 1
+      scope:
+        type: "object"
+        required: ["in_scope", "out_of_scope"]
+
+  scope.json:
+    type: "object"
+    required: ["in_scope", "out_of_scope", "constraints"]
+    properties:
+      in_scope:
+        type: "array"
+        items:
+          type: "string"
+      out_of_scope:
+        type: "array"
+        items:
+          type: "string"
+      constraints:
+        type: "array"
+
+  tests.json:
+    type: "object"
+    required: ["test_files", "coverage"]
+    properties:
+      test_files:
+        type: "array"
+        minItems: 1
+        items:
+          type: "object"
+          required: ["path", "covers"]
+      coverage:
+        type: "object"
+        required: ["acceptance_criteria_covered"]
+
+  test_result.json:
+    type: "object"
+    required: ["command", "exit_code", "passed", "failed", "skipped", "timestamp"]
+    properties:
+      command:
+        type: "string"
+      exit_code:
+        type: "integer"
+      passed:
+        type: "integer"
+      failed:
+        type: "integer"
+      skipped:
+        type: "integer"
+      timestamp:
+        type: "string"
+        format: "date-time"
+
+  implementation.json:
+    type: "object"
+    required: ["files_changed", "summary"]
+    properties:
+      files_changed:
+        type: "array"
+        items:
+          type: "object"
+          required: ["path", "change_type"]
+      summary:
+        type: "string"
+        minLength: 50
+
+  review.json:
+    type: "object"
+    required: ["reviews", "consolidated_issues", "blocking_issues"]
+    properties:
+      reviews:
+        type: "object"
+        required: ["security", "quality", "consistency", "holistic", "vibe_coding"]
+      consolidated_issues:
+        type: "array"
+      blocking_issues:
+        type: "array"
+
+  completion.json:
+    type: "object"
+    required: ["summary", "files_changed", "tests_added", "acceptance_criteria_met"]
+    properties:
+      summary:
+        type: "string"
+        minLength: 100
+      files_changed:
+        type: "array"
+      tests_added:
+        type: "integer"
+      acceptance_criteria_met:
+        type: "array"
+
+# ============================================================================
+# MONITORING & OBSERVABILITY
+# ============================================================================
+monitoring:
+  # Metrics to track
+  metrics:
+    - "phase_transition_time"
+    - "gate_pass_rate"
+    - "gate_block_rate"
+    - "tool_usage_by_phase"
+    - "artifact_validation_failures"
+
+  # Where to export metrics
+  export:
+    type: "jsonl"
+    path: ".orchestrator/metrics.jsonl"
+
+  # Alerting
+  alerts:
+    - condition: "gate_block_rate > 50%"
+      action: "notify_human"
+      message: "High gate block rate - agents may be struggling"
+
+    - condition: "task_stuck_in_phase > 2h"
+      action: "notify_human"
+      message: "Task stuck in phase for >2 hours"
+
+# ============================================================================
+# RECOVERY & FAILURE HANDLING
+# ============================================================================
+recovery:
+  # What to do if agent crashes
+  agent_crash:
+    action: "retry"
+    max_retries: 3
+    backoff_seconds: 60
+
+  # What to do if orchestrator crashes
+  orchestrator_crash:
+    resume_from: "last_checkpoint"
+    checkpoint_interval_seconds: 300
+
+  # What to do if gate times out
+  gate_timeout:
+    action: "escalate_to_human"
+    preserve_state: true

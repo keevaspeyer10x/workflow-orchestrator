@@ -1,31 +1,49 @@
-# Code Review: CORE-026 Review Resilience
+# Code Review: Task Provider & CLI Integration
 
-## Summary
-The changes implement a robust system for handling review failures, specifically focusing on API key recovery. The code introduces typed errors, proactive validation, and user-friendly recovery instructions. I found and fixed duplication in API key mappings and improved the dynamic resolution of secrets file paths.
+## Overall Impression
+The implementation of the Task Provider system (Issue #56) is well-structured and follows the plan closely. The separation of concerns between the interface, backends, and CLI is clean. The `LocalTaskProvider` is robust and well-tested.
 
-## Key Findings
+However, I have a significant concern regarding the `GitHubTaskProvider`'s `update_task` method, specifically how it handles labels, which seems to contradict its own comments and typical "update" semantics.
 
-### 1. Duplicate Configuration (Fixed)
-*   **Issue:** `MODEL_TO_API_KEY` was defined in both `src/review/router.py` and `src/review/recovery.py`.
-*   **Fix:** Extracted to `src/review/constants.py` and updated both files to import it. This ensures a single source of truth for model-to-key mappings.
+## 🟢 strengths
+- **Architecture**: The `TaskProvider` abstract base class and the factory pattern in `__init__.py` provide a solid foundation for future extensions.
+- **Local Backend**: `LocalTaskProvider` uses atomic writes (`.tmp` + rename), which is a great practice for file-based persistence.
+- **Testing**: `tests/test_task_provider.py` is comprehensive for the core logic and `LocalTaskProvider`.
+- **CLI Design**: The CLI commands are intuitive and cover the essential CRUD operations.
 
-### 2. Hardcoded Paths (Fixed)
-*   **Issue:** Recovery instructions in `src/review/recovery.py` hardcoded `secrets.enc.yaml` as the SOPS file path.
-*   **Fix:** Updated `recovery.py` to use `SecretsManager.list_sources()` to dynamically determine the configured SOPS file path (defaulting to `secrets.enc.yaml` if lookup fails).
+## 🔴 Concerns & Bugs
 
-### 3. Architecture & Patterns
-*   **Pattern Adherence:** The changes follow the project's pattern of using `src/engine.py` for core logic and `src/cli.py` for user interaction. The `ReviewErrorType` enum improves error handling granularity.
-*   **Resilience:** The new `validate_api_keys` (proactive) and `review-retry` command (reactive) significantly improve the user experience when API keys are missing or invalid.
+### 1. GitHub Label Update Logic (Potential Bug)
+In `src/task_provider/backends/github.py`:
+```python
+        if "labels" in updates:
+            # Note: This replaces all labels
+            for label in updates["labels"]:
+                args.extend(["--add-label", label])
+```
+- **The Issue**: The comment states "This replaces all labels", but `gh issue edit --add-label` **appends** labels to the existing set. It does not remove labels that are not in the new list.
+- **Impact**: If a task has labels `["A"]` and you update it with `labels=["B"]`, the result will be `["A", "B"]`, not `["B"]` as implied by the comment and typical "update" semantics.
+- **Recommendation**: Either update the comment to reflect that this is an additive operation, or implement true replacement logic (which usually requires fetching existing labels and removing the ones not in the new set, or using the API directly).
 
-### 4. Testing
-*   **Coverage:** `tests/test_review_resilience.py` provides good coverage for the new types, validation logic, and recovery flow.
-*   **Verification:** All 30 tests in the resilience suite passed after refactoring.
+### 2. Missing Tests for `GitHubTaskProvider.update_task`
+- `tests/test_task_provider.py` includes mocks for `create_task`, `list_tasks`, and `close_task` for the GitHub provider, but **skips** `update_task`.
+- This explains why the label logic issue wasn't caught.
+- **Action**: Add a test case for `update_task` that verifies the `gh` command arguments, and decide on the desired behavior for labels.
 
-## Refactoring Actions Taken
-1.  Created `src/review/constants.py`.
-2.  Refactored `src/review/router.py` to remove local key mapping.
-3.  Refactored `src/review/recovery.py` to use shared constants and dynamic secrets path.
+### 3. CLI Output Truncation
+- In `cmd_task_list`, the title is hard-truncated at 40 characters:
+  ```python
+  print(f"{task.id:<6} {priority_str:<10} {task.status.value:<12} {task.title[:40]}")
+  ```
+- **Suggestion**: Consider making this dynamic based on terminal width or at least slightly longer, as 40 chars is quite short for task titles.
 
-## Next Steps
-*   Implement the actual API ping in `validate_api_keys` (currently a TODO).
-*   Ensure `required_reviews` in `workflow.yaml` is populated for standard workflows.
+## Questions
+1. **YAGNI Section**: The `_render_body` method (in both providers) auto-generates a "YAGNI Check" section. Is this intended for *every* task added via CLI? It seems specific to "Feature Requests" or "Proposals". For a quick "Fix typo" task, this might be overkill.
+2. **Sync Behavior**: Is there a plan for synchronization between Local and GitHub? Currently, they are distinct silos.
+
+## Decision
+**Request Changes** before merging.
+The `GitHubTaskProvider.update_task` label logic needs to be clarified or fixed, and a corresponding test case added.
+
+---
+*Review generated by a skeptical senior engineer.*

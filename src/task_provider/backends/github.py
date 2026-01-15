@@ -230,7 +230,8 @@ class GitHubTaskProvider(TaskProvider):
             args.extend(["--body", updates["body"]])
 
         if "labels" in updates:
-            # Note: This replaces all labels
+            # Note: This appends labels (Github CLI --add-label behavior)
+            # It does NOT remove existing labels
             for label in updates["labels"]:
                 args.extend(["--add-label", label])
 

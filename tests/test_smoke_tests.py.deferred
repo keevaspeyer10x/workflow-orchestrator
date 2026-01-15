@@ -1,0 +1,247 @@
+"""
+Tests for automated smoke test framework.
+
+These tests verify that:
+1. Smoke test commands execute correctly
+2. Failed smoke tests are captured with exit codes
+3. Smoke tests are skippable when not defined
+4. Smoke test output is captured
+"""
+
+import pytest
+import subprocess
+from src.schema import WorkflowSettings, ChecklistItemDef, VerificationConfig, VerificationType
+from src.engine import WorkflowEngine
+
+
+class TestSmokeTestExecution:
+    """Test smoke test command execution."""
+
+    def test_smoke_test_command_execution(self):
+        """Smoke test command should execute successfully."""
+        settings = WorkflowSettings(smoke_test_command="echo 'test passed'")
+        engine = WorkflowEngine(settings=settings)
+
+        result = engine.execute_smoke_test()
+
+        assert result.returncode == 0
+        assert "test passed" in result.stdout
+
+    def test_smoke_test_with_pytest(self):
+        """Smoke test should work with pytest command."""
+        settings = WorkflowSettings(smoke_test_command="echo 'pytest would run here'")
+        engine = WorkflowEngine(settings=settings)
+
+        result = engine.execute_smoke_test()
+
+        assert result.returncode == 0
+
+    def test_smoke_test_failure_captured(self):
+        """Failed smoke tests should return non-zero exit code."""
+        settings = WorkflowSettings(smoke_test_command="exit 1")
+        engine = WorkflowEngine(settings=settings)
+
+        result = engine.execute_smoke_test()
+
+        assert result.returncode == 1  # Failed
+
+    def test_smoke_test_output_captured(self):
+        """Smoke test stdout and stderr should be captured."""
+        settings = WorkflowSettings(
+            smoke_test_command="echo 'stdout' && echo 'stderr' >&2"
+        )
+        engine = WorkflowEngine(settings=settings)
+
+        result = engine.execute_smoke_test()
+
+        assert "stdout" in result.stdout
+        assert "stderr" in result.stderr
+
+    def test_smoke_test_timeout(self):
+        """Smoke tests should timeout if they take too long."""
+        settings = WorkflowSettings(smoke_test_command="sleep 10")
+        engine = WorkflowEngine(settings=settings)
+
+        with pytest.raises(subprocess.TimeoutExpired):
+            engine.execute_smoke_test(timeout=1)  # 1 second timeout
+
+
+class TestSmokeTestSkipping:
+    """Test smoke test skip logic."""
+
+    def test_smoke_test_skipped_when_not_defined(self):
+        """When smoke_test_command not set, smoke test should be skippable."""
+        settings = WorkflowSettings()  # No smoke_test_command
+        engine = WorkflowEngine(settings=settings)
+
+        item = ChecklistItemDef(
+            id="automated_smoke_test",
+            name="Automated Smoke Test",
+            skip_conditions=["no_smoke_tests_defined"],
+            verification=VerificationConfig(type=VerificationType.COMMAND, command="{{smoke_test_command}}")
+        )
+
+        should_skip = engine.should_skip_item(item)
+        assert should_skip is True  # Skip when not defined
+
+    def test_smoke_test_runs_when_defined(self):
+        """When smoke_test_command set, smoke test should run."""
+        settings = WorkflowSettings(smoke_test_command="echo 'smoke test'")
+        engine = WorkflowEngine(settings=settings)
+
+        item = ChecklistItemDef(
+            id="automated_smoke_test",
+            name="Automated Smoke Test",
+            skip_conditions=["no_smoke_tests_defined"],
+            verification=VerificationConfig(type=VerificationType.COMMAND, command="{{smoke_test_command}}")
+        )
+
+        should_skip = engine.should_skip_item(item)
+        assert should_skip is False  # Should NOT skip when defined
+
+
+class TestSmokeTestTemplateSubstitution:
+    """Test {{smoke_test_command}} template substitution."""
+
+    def test_template_substitution(self):
+        """{{smoke_test_command}} should be substituted with actual command."""
+        settings = WorkflowSettings(smoke_test_command="pytest tests/smoke/ -v")
+        engine = WorkflowEngine(settings=settings)
+
+        item = ChecklistItemDef(
+            id="automated_smoke_test",
+            name="Automated Smoke Test",
+            verification=VerificationConfig(
+                type=VerificationType.COMMAND,
+                command="{{smoke_test_command}}"
+            )
+        )
+
+        substituted_command = engine.substitute_template(item.verification.command)
+        assert substituted_command == "pytest tests/smoke/ -v"
+
+    def test_template_substitution_with_empty_command(self):
+        """Template substitution with empty smoke_test_command should handle gracefully."""
+        settings = WorkflowSettings()  # No smoke_test_command
+        engine = WorkflowEngine(settings=settings)
+
+        item = ChecklistItemDef(
+            id="automated_smoke_test",
+            name="Automated Smoke Test",
+            verification=VerificationConfig(
+                type=VerificationType.COMMAND,
+                command="{{smoke_test_command}}"
+            )
+        )
+
+        substituted_command = engine.substitute_template(item.verification.command)
+        assert substituted_command == "" or substituted_command is None
+
+
+class TestSmokeTestVerification:
+    """Test smoke test verification in workflow item."""
+
+    def test_smoke_test_item_verification_type(self):
+        """Smoke test items should use COMMAND verification."""
+        item = ChecklistItemDef(
+            id="automated_smoke_test",
+            name="Automated Smoke Test",
+            description="Run automated smoke test suite",
+            verification=VerificationConfig(
+                type=VerificationType.COMMAND,
+                command="{{smoke_test_command}}",
+                expect_exit_code=0
+            )
+        )
+
+        assert item.verification.type == VerificationType.COMMAND
+        assert item.verification.expect_exit_code == 0
+
+    def test_smoke_test_expect_success(self):
+        """Smoke tests should expect exit code 0 (success)."""
+        settings = WorkflowSettings(smoke_test_command="exit 0")
+        engine = WorkflowEngine(settings=settings)
+
+        result = engine.execute_smoke_test()
+        assert result.returncode == 0  # Success
+
+    def test_smoke_test_failure_detected(self):
+        """Smoke test failures should be detected."""
+        settings = WorkflowSettings(smoke_test_command="exit 1")
+        engine = WorkflowEngine(settings=settings)
+
+        result = engine.execute_smoke_test()
+        assert result.returncode != 0  # Failure
+
+
+class TestSmokeTestExamples:
+    """Test smoke test examples for different project types."""
+
+    def test_cli_smoke_test_example(self):
+        """CLI smoke test example: test --version works."""
+        settings = WorkflowSettings(smoke_test_command="echo 'orchestrator v1.0.0'")
+        engine = WorkflowEngine(settings=settings)
+
+        result = engine.execute_smoke_test()
+        assert result.returncode == 0
+        assert "orchestrator" in result.stdout
+
+    def test_web_smoke_test_example(self):
+        """Web smoke test example: check health endpoint."""
+        settings = WorkflowSettings(smoke_test_command="echo 'Health: OK'")
+        engine = WorkflowEngine(settings=settings)
+
+        result = engine.execute_smoke_test()
+        assert result.returncode == 0
+        assert "OK" in result.stdout
+
+    def test_api_smoke_test_example(self):
+        """API smoke test example: test API responds."""
+        settings = WorkflowSettings(smoke_test_command="echo 'API Status: 200'")
+        engine = WorkflowEngine(settings=settings)
+
+        result = engine.execute_smoke_test()
+        assert result.returncode == 0
+        assert "200" in result.stdout
+
+
+class TestSmokeTestIntegration:
+    """Test smoke test integration with workflow."""
+
+    def test_smoke_test_in_verify_phase(self):
+        """Smoke test should typically run in VERIFY phase."""
+        from src.schema import PhaseDef
+
+        phase = PhaseDef(
+            id="VERIFY",
+            name="Verification",
+            items=[
+                ChecklistItemDef(
+                    id="automated_smoke_test",
+                    name="Automated Smoke Test",
+                    verification=VerificationConfig(
+                        type=VerificationType.COMMAND,
+                        command="{{smoke_test_command}}"
+                    )
+                )
+            ]
+        )
+
+        assert phase.id == "VERIFY"
+        assert len(phase.items) == 1
+        assert phase.items[0].id == "automated_smoke_test"
+
+    def test_smoke_test_settings_loaded_from_workflow(self):
+        """Smoke test command should load from workflow settings."""
+        from src.schema import WorkflowDef
+
+        workflow = WorkflowDef(
+            name="Test",
+            phases=[],
+            settings={
+                "smoke_test_command": "pytest tests/smoke/ -v --tb=short"
+            }
+        )
+
+        settings = WorkflowSettings(**workflow.settings)
+        assert settings.smoke_test_command == "pytest tests/smoke/ -v --tb=short"

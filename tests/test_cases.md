@@ -1,150 +1,160 @@
-# Issues #63 and #64: Test Cases
+# Issue #58: Test Cases
 
-## Issue #64: Default task_provider to 'github'
+## Retry Logic Tests
 
-### TC-64-1: Auto-detect GitHub when Available
-**Setup**: In a git repo with gh CLI installed and authenticated
-**Input**: `orchestrator task list` (no --provider flag)
-**Expected**: Uses GitHub provider (lists issues from repo)
-**Verification**: Output shows GitHub issues, not local JSON
+### TC-58-1: is_retryable_error Returns True for Rate Limit
+**Input**: Exception with message "429: Rate limit exceeded"
+**Expected**: Returns True
+**Verification**: Unit test assertion
 
-### TC-64-2: Fallback to Local when gh Unavailable
-**Setup**: gh CLI not installed OR not authenticated
-**Input**: `orchestrator task list` (no --provider flag)
-**Expected**: Falls back to local provider
-**Verification**: Output shows tasks from ~/.config/orchestrator/tasks.json
+### TC-58-2: is_retryable_error Returns True for Timeout
+**Input**: `requests.exceptions.Timeout` exception
+**Expected**: Returns True
+**Verification**: Unit test assertion
 
-### TC-64-3: Explicit --provider Overrides Auto-detect
-**Setup**: In a git repo with gh CLI available
-**Input**: `orchestrator task list --provider local`
-**Expected**: Uses local provider despite GitHub being available
-**Verification**: Output shows local JSON tasks
+### TC-58-3: is_retryable_error Returns False for Auth Error
+**Input**: Exception with message "401: Unauthorized"
+**Expected**: Returns False
+**Verification**: Unit test assertion
 
-### TC-64-4: Task Add Uses Auto-detect
-**Setup**: In a git repo with gh CLI available
-**Input**: `orchestrator task add "Test task"`
-**Expected**: Creates GitHub issue (not local task)
-**Verification**: `gh issue list` shows new issue
+### TC-58-4: is_permanent_error Detects 401
+**Input**: Exception with message "401: Invalid API key"
+**Expected**: Returns True
+**Verification**: Unit test assertion
 
-### TC-64-5: Task Add Fallback to Local
-**Setup**: gh CLI not authenticated
-**Input**: `orchestrator task add "Test task"`
-**Expected**: Creates local task
-**Verification**: ~/.config/orchestrator/tasks.json contains new task
+### TC-58-5: retry_with_backoff Retries on Transient Error
+**Setup**: Mock function that fails twice with 503, then succeeds
+**Input**: Call with max_retries=3
+**Expected**: Function called 3 times, returns success
+**Verification**: Mock call count, return value
 
----
-
-## Issue #63: commit_and_sync UX in zero_human Mode
-
-### TC-63-1: commit_and_sync Marked Completed After Auto-sync
-**Setup**:
-- Workflow in LEARN phase with commit_and_sync item "skipped"
-- Zero_human mode enabled
-- Uncommitted changes exist
-**Input**: `orchestrator finish`
-**Expected**:
-- Auto-sync pushes changes
-- commit_and_sync status changes from "skipped" to "completed"
-- Notes show "Auto-completed via CORE-031 sync"
-**Verification**: `orchestrator status` shows item as completed
-
-### TC-63-2: commit_and_sync Stays Skipped if Sync Fails
-**Setup**:
-- Workflow with commit_and_sync "skipped"
-- Network unavailable or push rejected
-**Input**: `orchestrator finish`
-**Expected**:
-- Sync fails with error
-- commit_and_sync remains "skipped"
-**Verification**: Status shows "Skipped" (not incorrectly completed)
-
-### TC-63-3: commit_and_sync Stays Skipped with --no-push
-**Setup**:
-- Workflow with commit_and_sync "skipped"
-**Input**: `orchestrator finish --no-push`
-**Expected**:
-- No sync attempted
-- commit_and_sync remains "skipped" (correct - no sync happened)
-**Verification**: Status shows "Skipped"
-
-### TC-63-4: Already Completed commit_and_sync Unchanged
-**Setup**:
-- Workflow with commit_and_sync already "completed" (not skipped)
-**Input**: `orchestrator finish`
-**Expected**:
-- Item remains "completed"
-- No duplicate completion or status change
-**Verification**: Status unchanged, no errors
-
-### TC-63-5: commit_and_sync Not in Workflow (Edge Case)
-**Setup**: Custom workflow.yaml without commit_and_sync item
-**Input**: `orchestrator finish`
-**Expected**:
-- No errors (graceful handling)
-- Finish completes normally
-**Verification**: Command succeeds, no exceptions
+### TC-58-6: retry_with_backoff Fails Immediately on Permanent Error
+**Setup**: Mock function that fails with 401
+**Input**: Call with max_retries=3
+**Expected**: Function called once, raises immediately
+**Verification**: Mock call count = 1
 
 ---
 
-## Regression Tests
+## Fallback Execution Tests
 
-### RT-1: Existing task list Works
-**Input**: `orchestrator task list --provider local`
-**Expected**: Lists tasks from local JSON file (existing behavior)
+### TC-58-7: Primary Succeeds - No Fallback Used
+**Setup**: Primary model returns successful review
+**Input**: `execute_with_fallback("security", fallbacks=["backup"])`
+**Expected**:
+- `was_fallback = False`
+- `fallback_reason = None`
+- Primary model used
+**Verification**: ReviewResult fields
 
-### RT-2: Existing task list --provider github Works
-**Input**: `orchestrator task list --provider github`
-**Expected**: Lists GitHub issues (existing behavior)
+### TC-58-8: Primary Rate Limited - Fallback Used
+**Setup**:
+- Primary model raises 429 rate limit
+- Fallback model succeeds
+**Input**: `execute_with_fallback("security", fallbacks=["backup"])`
+**Expected**:
+- `was_fallback = True`
+- `fallback_reason` contains "rate limit"
+- Fallback model used
+**Verification**: ReviewResult fields
 
-### RT-3: orchestrator finish Without Changes
-**Setup**: No uncommitted changes
-**Input**: `orchestrator finish`
-**Expected**: "Already in sync" message, no errors
+### TC-58-9: Primary Auth Error - No Fallback (Permanent)
+**Setup**: Primary model raises 401 unauthorized
+**Input**: `execute_with_fallback("security", fallbacks=["backup"])`
+**Expected**:
+- `success = False`
+- `was_fallback = False`
+- `error_type = KEY_INVALID`
+- Fallback NOT attempted
+**Verification**: ReviewResult, mock call count
 
-### RT-4: Full Workflow Lifecycle
-**Input**: Start workflow → complete items → finish
-**Expected**: All phases complete correctly, summary accurate
+### TC-58-10: All Models Fail - Error Returned
+**Setup**: All models raise 503 errors
+**Input**: `execute_with_fallback("security", fallbacks=["backup1", "backup2"])`
+**Expected**:
+- `success = False`
+- Error message indicates all attempts failed
+**Verification**: ReviewResult
+
+### TC-58-11: no_fallback Flag Disables Fallback
+**Setup**: Primary model raises 429 rate limit
+**Input**: `execute_with_fallback("security", fallbacks=["backup"], no_fallback=True)`
+**Expected**:
+- `success = False`
+- `was_fallback = False`
+- Fallback NOT attempted
+**Verification**: ReviewResult, mock call count
 
 ---
 
-## Automated Test Coverage
+## CLI Tests
 
-### Unit Tests to Add
+### TC-58-12: --no-fallback Flag Recognized
+**Input**: `orchestrator review security --no-fallback`
+**Expected**: Command executes with fallback disabled
+**Verification**: argparse accepts flag
+
+### TC-58-13: Output Shows Fallback Usage
+**Setup**: Review uses fallback
+**Input**: `orchestrator review all`
+**Expected**: Output shows "[fallback]" indicator
+**Verification**: stdout contains fallback marker
+
+---
+
+## Configuration Tests
+
+### TC-58-14: Default Fallback Chains Exist
+**Input**: Load review config
+**Expected**: `fallback_chains` has entries for gemini, codex, grok
+**Verification**: Config access
+
+### TC-58-15: max_fallback_attempts Defaults to 2
+**Input**: Load review config without override
+**Expected**: `max_fallback_attempts = 2`
+**Verification**: Config access
+
+---
+
+## Integration Tests
+
+### TC-58-16: End-to-End Fallback (Manual)
+**Setup**: Set GEMINI_API_KEY to invalid value
+**Input**: `orchestrator review security`
+**Expected**:
+- Gemini fails with auth error
+- Falls back to next model
+- Review completes
+**Verification**: Manual observation
+
+### TC-58-17: Regression - Normal Reviews Still Work
+**Input**: `orchestrator review all`
+**Expected**: All reviews complete (may use fallback)
+**Verification**: Exit code 0, reviews completed
+
+---
+
+## Test File Structure
 
 ```python
-# test_task_provider_autodetect.py
-def test_task_list_auto_detects_github():
-    """When gh CLI available, task list uses GitHub by default."""
-    pass
+# tests/test_review_fallback.py
 
-def test_task_list_falls_back_to_local():
-    """When gh CLI unavailable, task list uses local."""
-    pass
+class TestRetryLogic:
+    def test_is_retryable_rate_limit(self): ...
+    def test_is_retryable_timeout(self): ...
+    def test_is_retryable_auth_error(self): ...
+    def test_is_permanent_401(self): ...
+    def test_retry_with_backoff_success(self): ...
+    def test_retry_with_backoff_permanent_fail(self): ...
 
-def test_task_add_respects_auto_detect():
-    """Task add uses auto-detected provider."""
-    pass
+class TestFallbackExecution:
+    def test_primary_succeeds_no_fallback(self): ...
+    def test_rate_limit_triggers_fallback(self): ...
+    def test_auth_error_no_fallback(self): ...
+    def test_all_fail_returns_error(self): ...
+    def test_no_fallback_flag(self): ...
 
-# test_finish_commit_sync_ux.py
-def test_finish_updates_skipped_commit_sync_on_success():
-    """commit_and_sync marked completed after successful auto-sync."""
-    pass
-
-def test_finish_keeps_skipped_on_sync_failure():
-    """commit_and_sync stays skipped if auto-sync fails."""
-    pass
-
-def test_finish_no_push_keeps_skipped():
-    """--no-push keeps commit_and_sync as skipped."""
-    pass
+class TestFallbackConfig:
+    def test_default_chains_exist(self): ...
+    def test_max_attempts_default(self): ...
 ```
-
----
-
-## Manual Verification Checklist
-
-- [ ] `orchestrator task list` auto-detects GitHub in this repo
-- [ ] `orchestrator task add "Test" --provider local` uses local
-- [ ] `orchestrator finish` shows "Completed" for commit_and_sync after push
-- [ ] `orchestrator finish --no-push` shows "Skipped" for commit_and_sync
-- [ ] All existing tests pass (`pytest tests/`)

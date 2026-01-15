@@ -600,6 +600,38 @@ class TestGitHubTaskProviderMocked:
         assert "Done!" in args
 
 
+    @patch("subprocess.run")
+    def test_update_task_appends_labels(self, mock_run):
+        """update_task calls gh with --add-label (additive behavior)."""
+        # Mock for edit and view
+        mock_run.side_effect = [
+            MagicMock(stdout="", returncode=0),  # edit
+            MagicMock(stdout=json.dumps({
+                "number": 1,
+                "title": "Test",
+                "body": "",
+                "state": "OPEN",
+                "labels": [{"name": "existing"}, {"name": "new"}],
+                "url": "https://github.com/test/repo/issues/1",
+            }), returncode=0),  # view
+        ]
+
+        provider = GitHubTaskProvider(repo="test/repo")
+        task = provider.update_task("1", {"labels": ["new"]})
+
+        # Verify edit was called with --add-label
+        edit_call = mock_run.call_args_list[0]
+        args = edit_call[0][0]
+        
+        assert "issue" in args
+        assert "edit" in args
+        assert "1" in args
+        assert "--add-label" in args
+        assert "new" in args
+        # Should not have --remove-label or similar
+        assert "--remove-label" not in str(args)
+
+
 # =============================================================================
 # Factory Tests
 # =============================================================================

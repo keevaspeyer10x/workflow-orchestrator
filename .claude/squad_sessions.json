@@ -1,0 +1,22 @@
+{
+  "demo-task": {
+    "task_id": "demo-task",
+    "session_id": "wfo-:task-demo-task",
+    "session_name": "task-demo-task",
+    "branch": "main",
+    "status": "terminated",
+    "created_at": "2026-01-10T03:25:46.609239+00:00",
+    "updated_at": "2026-01-10T03:26:25.843365+00:00",
+    "prompt_file": ".claude/prompt_demo-task.md"
+  },
+  "core-024-session-logging": {
+    "task_id": "core-024-session-logging",
+    "session_id": "wfo-:task-core-024-session-logging",
+    "session_name": "task-core-024-session-logging",
+    "branch": "claude/core-024-session-logging",
+    "status": "running",
+    "created_at": "2026-01-10T04:16:09.461465+00:00",
+    "updated_at": "2026-01-10T04:16:09.461465+00:00",
+    "prompt_file": ".claude/prompt_core-024-session-logging.md"
+  }
+}
