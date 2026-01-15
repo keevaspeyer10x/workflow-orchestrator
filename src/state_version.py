@@ -1,0 +1,102 @@
+"""
+State file versioning for safe rollback.
+
+V3 state files are stored in .orchestrator/v3/ to avoid conflicts with v2.
+Includes integrity verification via checksums.
+"""
+
+import os
+import json
+import hashlib
+from pathlib import Path
+from datetime import datetime, timezone
+
+
+STATE_VERSION = "3.0"
+STATE_DIR_V3 = ".orchestrator/v3"
+
+
+def get_state_dir() -> Path:
+    """Get versioned state directory."""
+    return Path(STATE_DIR_V3)
+
+
+def compute_state_checksum(state_data: dict) -> str:
+    """
+    Compute checksum for state integrity verification.
+
+    The checksum excludes metadata fields (_checksum, _updated_at) to allow
+    verification. Uses SHA256 truncated to 16 chars for readability.
+    """
+    # Exclude metadata fields from hash
+    excluded = {'_checksum', '_updated_at'}
+    data_copy = {k: v for k, v in state_data.items() if k not in excluded}
+    content = json.dumps(data_copy, sort_keys=True)
+    return hashlib.sha256(content.encode()).hexdigest()[:16]
+
+
+def save_state_with_integrity(state_path: Path, state_data: dict):
+    """
+    Save state with integrity checksum.
+
+    Uses atomic write (temp file + rename + fsync) to prevent corruption.
+
+    Args:
+        state_path: Path to save state file
+        state_data: Dictionary of state data
+    """
+    # Add version and checksum
+    state_data['_version'] = STATE_VERSION
+    state_data['_checksum'] = compute_state_checksum(state_data)
+    state_data['_updated_at'] = datetime.now(timezone.utc).isoformat()
+
+    # Ensure parent directory exists
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Atomic write
+    temp_path = state_path.with_suffix('.tmp')
+    with open(temp_path, 'w') as f:
+        json.dump(state_data, f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())  # Ensure written to disk
+
+    temp_path.rename(state_path)
+
+
+def load_state_with_verification(state_path: Path) -> dict:
+    """
+    Load state and verify integrity.
+
+    Raises:
+        ValueError: If checksum mismatch or version incompatible.
+        FileNotFoundError: If state file doesn't exist.
+    """
+    with open(state_path) as f:
+        state_data = json.load(f)
+
+    # Check version
+    version = state_data.get('_version', '1.0')
+    if not version.startswith('3.'):
+        raise ValueError(
+            f"State file version {version} incompatible with v3 orchestrator. "
+            f"Run rollback or delete .orchestrator/v3/ to start fresh."
+        )
+
+    # Verify checksum exists
+    stored_checksum = state_data.get('_checksum')
+    if stored_checksum is None:
+        raise ValueError(
+            "State file missing checksum. File may be corrupted or tampered."
+        )
+
+    # Verify checksum matches
+    computed_checksum = compute_state_checksum(state_data)
+
+    if stored_checksum != computed_checksum:
+        raise ValueError(
+            f"State file integrity check failed. "
+            f"File may have been tampered with or corrupted. "
+            f"Expected checksum {stored_checksum}, got {computed_checksum}."
+        )
+
+    return state_data

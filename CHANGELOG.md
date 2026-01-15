@@ -5,6 +5,24 @@ All notable changes to the workflow-orchestrator.
 ## [Unreleased]
 
 ### Added
+- **V3 Hybrid Orchestration Phase 0: Foundation**
+  - `src/mode_detection.py`: Operator mode detection (human vs LLM)
+    - `OperatorMode` enum (HUMAN, LLM) for type-safe mode handling
+    - `ModeDetectionResult` dataclass with mode, reason, and confidence
+    - `detect_operator_mode()` with priority-based detection: emergency override → explicit mode → CLAUDECODE → TTY
+    - `is_llm_mode()` convenience function for simple boolean checks
+    - `log_mode_detection()` for audit logging
+  - `src/state_version.py`: State file versioning with integrity checks
+    - `STATE_VERSION = "3.0"` constant for version identification
+    - `.orchestrator/v3/` isolated state directory (doesn't conflict with v2)
+    - SHA256 checksums for tamper detection
+    - Atomic writes with fsync for corruption prevention
+    - Version verification prevents v2/v3 state confusion
+  - `tests/test_mode_detection.py`: 18 comprehensive tests
+    - 10 mode detection tests (emergency override, explicit mode, CLAUDECODE, TTY)
+    - 5 state integrity tests (round-trip, tamper detection, version check)
+    - 3 state versioning tests (directory path, checksum exclusion, content sensitivity)
+
 - **Issue #58: CORE-028b Model Fallback Execution Chain**
   - API reviews now automatically retry with fallback models on transient failures (rate limits, 503s, timeouts)
   - New `src/review/retry.py` module with `is_retryable_error()`, `is_permanent_error()`, and `retry_with_backoff()` functions
