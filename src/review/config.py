@@ -352,3 +352,56 @@ def get_model_display_name(tool: str, method: str = "cli") -> str:
     """
     model_id = get_model_id(tool, method)
     return f"{tool}/{model_id}"
+
+
+# =============================================================================
+# FALLBACK CHAIN CONFIGURATION (CORE-028b)
+# =============================================================================
+
+# Default fallback chains for each tool category
+# Format: primary_tool -> [fallback1, fallback2, ...]
+DEFAULT_FALLBACK_CHAINS = {
+    "gemini": ["google/gemini-2.5-flash", "anthropic/claude-3.5-sonnet"],
+    "codex": ["openai/gpt-5.1", "anthropic/claude-3.5-sonnet"],
+    "grok": ["xai/grok-3", "anthropic/claude-3.5-sonnet"],
+}
+
+# Default max fallback attempts
+DEFAULT_MAX_FALLBACK_ATTEMPTS = 2
+
+
+def get_fallback_chain(tool: str) -> list[str]:
+    """
+    Get the fallback chain for a tool category.
+
+    Reads from workflow.yaml settings.reviews.fallback_chains,
+    falling back to defaults if not configured.
+
+    Args:
+        tool: Primary tool category (codex, gemini, grok)
+
+    Returns:
+        List of fallback model IDs to try in order
+    """
+    settings = _load_workflow_settings()
+    reviews_config = settings.get("reviews", {})
+    fallback_chains = reviews_config.get("fallback_chains", {})
+
+    # Return configured chain or default
+    return fallback_chains.get(tool, DEFAULT_FALLBACK_CHAINS.get(tool, []))
+
+
+def get_max_fallback_attempts() -> int:
+    """
+    Get the maximum number of fallback attempts.
+
+    Reads from workflow.yaml settings.reviews.max_fallback_attempts,
+    falling back to default if not configured.
+
+    Returns:
+        Maximum number of fallback models to try
+    """
+    settings = _load_workflow_settings()
+    reviews_config = settings.get("reviews", {})
+
+    return reviews_config.get("max_fallback_attempts", DEFAULT_MAX_FALLBACK_ATTEMPTS)

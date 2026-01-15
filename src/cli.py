@@ -2563,7 +2563,8 @@ def cmd_review(args):
     try:
         router = ReviewRouter(
             working_dir=working_dir,
-            method=args.method if args.method != 'auto' else None
+            method=args.method if args.method != 'auto' else None,
+            no_fallback=getattr(args, 'no_fallback', False)  # CORE-028b
         )
     except ValueError as e:
         print(f"Error: {e}")
@@ -2628,9 +2629,14 @@ def cmd_review(args):
 
     for review_name, result in results.items():
         icon = "✓" if result.success and not result.has_blocking_findings() else "✗"
-        print(f"{icon} {review_name.upper()} REVIEW")
+        # CORE-028b: Show fallback indicator if used
+        fallback_tag = " [fallback]" if getattr(result, 'was_fallback', False) else ""
+        print(f"{icon} {review_name.upper()} REVIEW{fallback_tag}")
         print(f"  Model: {result.model_used}")
         print(f"  Method: {result.method_used}")
+        if getattr(result, 'was_fallback', False) and getattr(result, 'fallback_reason', None):
+            reason = result.fallback_reason[:60] + "..." if len(result.fallback_reason) > 60 else result.fallback_reason
+            print(f"  Fallback reason: {reason}")
 
         if result.error:
             print(f"  Error: {result.error}")
@@ -6278,6 +6284,8 @@ Examples:
                                default='all', help='Review type to run (default: all)')
     review_parser.add_argument('--method', '-m', choices=['auto', 'cli', 'aider', 'api'],
                                default='auto', help='Execution method (default: auto-detect)')
+    review_parser.add_argument('--no-fallback', action='store_true',
+                               help='Disable model fallback on transient failures (CORE-028b)')
     review_parser.add_argument('--json', action='store_true', help='Output as JSON')
     review_parser.set_defaults(func=cmd_review)
 
@@ -6294,6 +6302,8 @@ Examples:
     review_retry_parser = subparsers.add_parser('review-retry', help='Retry failed reviews after fixing API keys')
     review_retry_parser.add_argument('--method', '-m', choices=['auto', 'cli', 'aider', 'api'],
                                      default='auto', help='Execution method (default: auto-detect)')
+    review_retry_parser.add_argument('--no-fallback', action='store_true',
+                                     help='Disable model fallback on transient failures (CORE-028b)')
     review_retry_parser.set_defaults(func=cmd_review_retry)
 
     # Setup-reviews command

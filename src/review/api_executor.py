@@ -14,6 +14,8 @@ from typing import Optional
 from .context import ReviewContext, ReviewContextCollector
 from .prompts import get_prompt, get_tool
 from .result import ReviewResult, ReviewErrorType, classify_http_error, parse_review_output
+from .retry import is_retryable_error, is_permanent_error, retry_with_backoff
+from .config import get_fallback_chain, get_max_fallback_attempts
 from ..secrets import get_secret
 from ..model_registry import get_latest_model
 
@@ -143,6 +145,162 @@ class APIExecutor:
                 error_type=error_type,
                 duration_seconds=time.time() - start_time,
             )
+
+    def execute_with_fallback(
+        self,
+        review_type: str,
+        fallbacks: Optional[list[str]] = None,
+        no_fallback: bool = False,
+        context_override: Optional[str] = None
+    ) -> ReviewResult:
+        """
+        Execute a review with automatic fallback on transient failures.
+
+        CORE-028b: Model Fallback Execution Chain
+
+        Args:
+            review_type: One of security, consistency, quality, holistic, vibe_coding
+            fallbacks: List of fallback model IDs to try on failure.
+                       If None, uses configured fallback chain for the tool.
+            no_fallback: If True, disable fallback (fail immediately on error)
+            context_override: Optional custom prompt
+
+        Returns:
+            ReviewResult with findings, was_fallback and fallback_reason set if applicable
+        """
+        start_time = time.time()
+
+        # Get primary model
+        tool = get_tool(review_type)
+        primary_model = get_openrouter_model(tool)
+
+        # Get fallback models if not disabled
+        if fallbacks is None and not no_fallback:
+            fallbacks = get_fallback_chain(tool)
+            max_attempts = get_max_fallback_attempts()
+            fallbacks = fallbacks[:max_attempts] if fallbacks else []
+        elif no_fallback:
+            fallbacks = []
+
+        # Build list of models to try: primary + fallbacks
+        models_to_try = [primary_model] + (fallbacks or [])
+
+        # Collect context once (reused across attempts)
+        context = None
+        prompt = None
+        try:
+            if context_override:
+                prompt = context_override
+            else:
+                context = self.context_collector.collect(review_type)
+                prompt = self._build_prompt(review_type, context)
+        except Exception as e:
+            # Context collection failed - this is not retryable
+            logger.error(f"Failed to collect context for {review_type}: {e}")
+            return ReviewResult(
+                review_type=review_type,
+                success=False,
+                model_used="unknown",
+                method_used="api",
+                error=f"Context collection failed: {self._sanitize_error(str(e))}",
+                error_type=ReviewErrorType.REVIEW_FAILED,
+                duration_seconds=time.time() - start_time,
+            )
+
+        # Try each model in order
+        last_error: Optional[Exception] = None
+        last_error_type: ReviewErrorType = ReviewErrorType.REVIEW_FAILED
+        fallback_reason: Optional[str] = None
+        model_used = primary_model
+
+        for i, model in enumerate(models_to_try):
+            is_fallback = i > 0
+            try:
+                logger.debug(f"Trying model {model} for {review_type} (fallback={is_fallback})")
+
+                # Use retry_with_backoff for transient errors within same model
+                output = retry_with_backoff(
+                    self._call_openrouter,
+                    prompt,
+                    model,
+                    max_retries=2,  # Quick retries for same model
+                    base_delay=1.0,
+                )
+
+                duration = time.time() - start_time
+                model_used = model
+
+                # Parse output
+                findings, metadata = parse_review_output(review_type, output)
+
+                result = ReviewResult(
+                    review_type=review_type,
+                    success=True,
+                    model_used=model,
+                    method_used="api",
+                    findings=findings,
+                    raw_output=output,
+                    summary=metadata.get("summary"),
+                    score=metadata.get("score"),
+                    assessment=metadata.get("assessment"),
+                    duration_seconds=duration,
+                    was_fallback=is_fallback,
+                    fallback_reason=fallback_reason if is_fallback else None,
+                )
+
+                # Add truncation warning if applicable
+                if context and context.truncated:
+                    result.summary = (result.summary or "") + f"\n\n⚠️ {context.truncation_warning}"
+
+                if is_fallback:
+                    logger.info(f"Fallback to {model} succeeded for {review_type}")
+
+                return result
+
+            except Exception as e:
+                last_error = e
+                last_error_type = self._classify_exception(e)
+                error_str = str(e)
+                model_used = model  # Track last attempted model for error reporting
+
+                logger.warning(f"Model {model} failed for {review_type}: {error_str[:100]}")
+
+                # Check if this is a permanent error (don't try fallbacks)
+                if is_permanent_error(e):
+                    logger.debug(f"Permanent error, not trying fallbacks: {error_str[:100]}")
+                    break
+
+                # Check if this is a retryable error (try fallback)
+                if is_retryable_error(e) and i < len(models_to_try) - 1:
+                    # Record reason for fallback
+                    fallback_reason = error_str[:200]
+                    logger.info(f"Transient error, trying fallback: {fallback_reason}")
+                    continue
+
+                # Non-retryable, non-permanent (unknown) - stop trying
+                if not is_retryable_error(e):
+                    logger.debug(f"Non-retryable error, stopping: {error_str[:100]}")
+                    break
+
+        # All attempts failed
+        duration = time.time() - start_time
+        error_msg = self._sanitize_error(str(last_error) if last_error else "Unknown error")
+
+        # Build informative error message
+        if len(models_to_try) > 1:
+            error_msg = f"All models failed. Last error ({model_used}): {error_msg}"
+
+        return ReviewResult(
+            review_type=review_type,
+            success=False,
+            model_used=model_used,
+            method_used="api",
+            error=error_msg,
+            error_type=last_error_type,
+            duration_seconds=duration,
+            was_fallback=len(models_to_try) > 1 and models_to_try.index(model_used) > 0,
+            fallback_reason=fallback_reason,
+        )
 
     def _sanitize_error(self, error: str) -> str:
         """Sanitize error message to avoid leaking sensitive information."""

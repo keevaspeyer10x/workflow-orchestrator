@@ -4,6 +4,18 @@ All notable changes to the workflow-orchestrator.
 
 ## [Unreleased]
 
+### Added
+- **Issue #58: CORE-028b Model Fallback Execution Chain**
+  - API reviews now automatically retry with fallback models on transient failures (rate limits, 503s, timeouts)
+  - New `src/review/retry.py` module with `is_retryable_error()`, `is_permanent_error()`, and `retry_with_backoff()` functions
+  - Added `execute_with_fallback()` method to `APIExecutor` for fallback chain execution
+  - Fallback chains configurable in `workflow.yaml` under `settings.reviews.fallback_chains`
+  - Added `--no-fallback` CLI flag to `orchestrator review` and `orchestrator review-retry` commands
+  - CLI output now shows `[fallback]` indicator and fallback reason when alternative model is used
+  - Permanent errors (401, 403, invalid API key) fail immediately without retry or fallback
+  - Default fallback chains: gemini→flash→sonnet, codex→gpt-5.1→sonnet, grok→grok-3→sonnet
+  - Comprehensive test coverage in `tests/test_review_fallback.py` (23 tests)
+
 ### Fixed
 - **Issue #64: Default task_provider to 'github' when gh CLI available**
   - Task commands (list, add, next, close, show) now auto-detect provider instead of defaulting to 'local'

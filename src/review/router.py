@@ -265,11 +265,13 @@ class ReviewRouter:
         working_dir: Path,
         method: Optional[str] = None,
         context_limit: Optional[int] = None,
-        base_branch: str = "main"
+        base_branch: str = "main",
+        no_fallback: bool = False
     ):
         self.working_dir = Path(working_dir).resolve()
         self.context_limit = context_limit
         self.base_branch = base_branch
+        self.no_fallback = no_fallback  # CORE-028b: Disable fallback
 
         # Auto-load API keys from SOPS/secrets before checking setup
         self._loaded_keys = ensure_api_keys_loaded()
@@ -397,7 +399,12 @@ class ReviewRouter:
                 base_branch=self.base_branch
             )
 
-        return self._api_executor.execute(review_type, context_override=context_override)
+        # CORE-028b: Use execute_with_fallback for automatic fallback on transient errors
+        return self._api_executor.execute_with_fallback(
+            review_type,
+            context_override=context_override,
+            no_fallback=self.no_fallback
+        )
 
     def execute_all_reviews(self) -> dict[str, ReviewResult]:
         """
