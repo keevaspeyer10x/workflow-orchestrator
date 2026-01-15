@@ -53,6 +53,19 @@ class PhaseStatus(str, Enum):
     BLOCKED = "blocked"
 
 
+class PhaseType(str, Enum):
+    """
+    Autonomy level for a workflow phase.
+
+    - STRICT: All items required in order, no skipping allowed in LLM mode
+    - GUIDED: Can reorder items, limited skipping with reason
+    - AUTONOMOUS: Flexible completion, can skip with reason
+    """
+    STRICT = "strict"
+    GUIDED = "guided"
+    AUTONOMOUS = "autonomous"
+
+
 class WorkflowStatus(str, Enum):
     """Status of a workflow instance."""
     ACTIVE = "active"
@@ -159,7 +172,11 @@ class PhaseDef(BaseModel):
     notes: list[str] = Field(default_factory=list)  # Operating notes for this phase
     # CORE-026: Required reviews for REVIEW phase (validated at finish)
     required_reviews: list[str] = Field(default_factory=list)
-    
+    # V3: Phase type determines autonomy level (strict/guided/autonomous)
+    phase_type: PhaseType = PhaseType.GUIDED
+    # V3: Documentation of intended tools (not enforced - Claude controls tool access)
+    intended_tools: list[str] = Field(default_factory=list)
+
     @field_validator('id')
     @classmethod
     def id_must_be_uppercase(cls, v):

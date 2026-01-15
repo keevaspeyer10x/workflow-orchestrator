@@ -5,6 +5,12 @@ All notable changes to the workflow-orchestrator.
 ## [Unreleased]
 
 ### Added
+- **V3 Hybrid Orchestration Phase 1: Phase Types & Tool Scoping**
+  - `PhaseType` enum (STRICT, GUIDED, AUTONOMOUS) for phase autonomy levels
+  - `phase_type` field in PhaseDef (defaults to GUIDED for backward compatibility)
+  - `intended_tools` field in PhaseDef (documentation only, not enforced)
+  - 11 new tests in `tests/test_phase_types.py`
+
 - **V3 Hybrid Orchestration Phase 0: Foundation**
   - `src/mode_detection.py`: Operator mode detection (human vs LLM)
     - `OperatorMode` enum (HUMAN, LLM) for type-safe mode handling
