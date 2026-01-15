@@ -482,8 +482,14 @@ def cmd_start(args):
         # Apply detected commands (if not already overridden by .orchestrator.yaml)
         if detected_commands.get("test_command") and "test_command" not in settings_overrides:
             settings_overrides["test_command"] = detected_commands["test_command"]
+        elif not detected_commands.get("test_command") and "test_command" not in settings_overrides:
+            # No project type detected - use no-op to avoid npm errors on config/docs repos
+            settings_overrides["test_command"] = "true"
         if detected_commands.get("build_command") and "build_command" not in settings_overrides:
             settings_overrides["build_command"] = detected_commands["build_command"]
+        elif not detected_commands.get("build_command") and "build_command" not in settings_overrides:
+            # No project type detected - use no-op
+            settings_overrides["build_command"] = "true"
 
     # Apply CLI flags (highest priority - overrides everything)
     test_command = getattr(args, 'test_command', None)
@@ -1780,6 +1786,7 @@ def cmd_finish(args):
                 gh_cmd.extend(['--comment', f'Closed automatically by orchestrator finish.\n\nTask: {task_description}'])
 
                 try:
+                    import subprocess
                     result = subprocess.run(gh_cmd, capture_output=True, text=True, timeout=30)
                     if result.returncode == 0:
                         output(f"  ✓ Closed issue {issue_ref}")
