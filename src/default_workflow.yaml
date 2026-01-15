@@ -42,7 +42,7 @@ settings:
   #   Web: "playwright test tests/smoke/"
   #   CLI: "orchestrator --version && orchestrator status"
   #   API: "curl -f http://localhost:8000/health"
-  smoke_test_command: "python -m pytest tests/smoke/ -v --tb=short"
+  smoke_test_command: "python3 -m pytest tests/smoke/ -v --tb=short"
 
   # Supervision mode - how much human oversight is required
   # - zero_human: Fully autonomous, skip manual gates with warning (AI-only code review)
