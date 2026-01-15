@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "reviewer": {
+      "type": "string",
+      "description": "Reviewer name/ID"
+    },
+    "approved": {
+      "type": "boolean",
+      "description": "Whether review is approved"
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "severity": {"type": "string"},
+          "message": {"type": "string"},
+          "file": {"type": "string"},
+          "line": {"type": "integer"}
+        }
+      },
+      "description": "Issues found during review"
+    },
+    "comments": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Review comments"
+    }
+  }
+}

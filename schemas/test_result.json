@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["command", "exit_code"],
+  "properties": {
+    "command": {
+      "type": "string",
+      "description": "Command used to run tests"
+    },
+    "exit_code": {
+      "type": "integer",
+      "description": "Exit code from test run"
+    },
+    "passed": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of tests passed"
+    },
+    "failed": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of tests failed"
+    },
+    "skipped": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of tests skipped"
+    },
+    "timestamp": {
+      "type": "string",
+      "description": "Timestamp of test run"
+    },
+    "output": {
+      "type": "string",
+      "description": "Output from test run"
+    }
+  }
+}
