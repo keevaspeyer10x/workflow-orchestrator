@@ -329,15 +329,44 @@ phases:
           - "[key] Requires XAI_API_KEY environment variable"
           - "[vibe] Specifically designed for zero-human-review workflows"
 
+      - id: "design_validation"
+        name: "Design Validation Review"
+        description: |
+          Validates that implementation matches design goals from docs/plan.md.
+          Uses multi-model review to verify:
+          1. All stated goals are FULLY implemented (not partial)
+          2. Implementation will work in production (not just tests)
+          3. No gaps between design intent and actual code
+          4. Parameter choices and architecture align with plan
+          5. Scope control - no undocumented features, no missing planned features
+
+          Run: minds ask "Review implementation against design goals in docs/plan.md.
+          For each goal: 1) Quote the goal from plan.md, 2) Cite implementation evidence (file:line),
+          3) Rate: PASS/PARTIAL/MISSING. Flag any scope drift." --file docs/plan.md
+        required: true
+        skippable: true
+        skip_conditions:
+          - "no_plan_exists"           # Nothing to validate against
+          - "simple_bug_fix"           # No design document for hotfixes
+          - "trivial_change"           # Single-line changes
+          - "documentation_only"       # No code to validate
+          - "config_only_change"       # No architectural impact
+        notes:
+          - "[purpose] Bridges design intent → implementation reality"
+          - "[evidence] Require file:line citations, not assertions"
+          - "[scope] Flag undocumented features as potential scope creep"
+          - "[action] On deviation: fix code OR update plan.md (document decision)"
+          - "[minds] Designed with input from Claude, GPT, Grok, DeepSeek consensus"
+
       - id: "collect_review_results"
         name: "Collect All Review Results"
-        description: "Wait for all 5 background reviews to complete. Aggregate findings. Report which models were used and any issues found. Block if any CRITICAL issues."
+        description: "Wait for all 6 reviews to complete. Aggregate findings. Report which models were used and any issues found. Block if any CRITICAL issues."
         step_type: "gate"
         notes:
-          - "[gate] Do not proceed until ALL 5 reviews have completed"
+          - "[gate] Do not proceed until ALL 6 reviews have completed (or been skipped with justification)"
           - "[report] List each review with: model used, duration, issues found"
           - "[block] If any review found CRITICAL issues, do not advance phase"
-          - "[models] Codex (security, quality), Gemini (consistency, holistic), Grok (vibe_coding)"
+          - "[models] Codex (security, quality), Gemini (consistency, holistic), Grok (vibe_coding), Multi-model (design_validation)"
 
   # ===========================================================================
   # PHASE 4: VERIFY

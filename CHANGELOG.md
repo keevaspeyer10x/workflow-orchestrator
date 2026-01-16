@@ -5,6 +5,33 @@ All notable changes to the workflow-orchestrator.
 ## [Unreleased]
 
 ### Added
+- **Design Validation Review (#82)**: New 6th review type in REVIEW phase
+  - Validates implementation matches design goals from `docs/plan.md`
+  - Checks: requirements traceability, scope control, parameter alignment
+  - Skippable when: no plan exists, simple bug fix, trivial change
+  - Prompt designed with multi-model input (Claude, GPT, Grok, DeepSeek consensus)
+
+### Security
+- **Timing Attack Prevention (#71)**: Use `hmac.compare_digest` for hash comparisons
+  - `verify_integrity()` now uses constant-time comparison
+  - `check_audit_integrity()` uses constant-time comparison for chain verification
+- **Audit Hash Verification (#74)**: `check_audit_integrity()` now recomputes and verifies hashes
+  - Previously only checked chain linkage (prev_hash)
+  - Now detects tampered entries by recomputing expected hash
+
+### Performance
+- **Audit Log Memory Fix (#79)**: `_load_last_hash()` uses seek-from-end approach
+  - Previously read entire file into memory (potential DoS)
+  - Now reads only last 4KB chunk
+- **File Detection Optimization (#87)**: `_auto_detect_important_files()` optimized
+  - Tries `git ls-files` first (faster for git repos)
+  - Falls back to rglob with depth limit
+  - Excludes common artifact directories (node_modules, __pycache__, etc.)
+
+### Fixed
+- Fixed `test_sanitize_paths` asserting on wrong field (`entries[0].get('path')` → `entries[0]['data']['path']`)
+
+### Added
 - **V3 Hybrid Orchestration Phase 5: CLI Integration**
   - `orchestrator health` command for system health checks
     - JSON output with `--json` flag

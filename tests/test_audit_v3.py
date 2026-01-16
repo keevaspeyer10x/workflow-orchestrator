@@ -85,8 +85,10 @@ class TestAuditLogger:
 
         log_file = tmp_path / "audit.jsonl"
         entries = [json.loads(line) for line in log_file.read_text().strip().split('\n')]
-        # Path should be sanitized
-        assert '.secrets' not in entries[0].get('path', '')
+        # Path should be sanitized - data is stored under 'data' field
+        assert 'data' in entries[0]
+        assert entries[0]['data']['path'] == '[REDACTED]'
+        assert '.secrets' not in entries[0]['data']['path']
 
 
 class TestAuditIntegrity:
@@ -124,3 +126,75 @@ class TestAuditIntegrity:
 
         # Should not raise
         assert logger.verify_integrity() is True
+
+    def test_hmac_compare_digest_used(self, tmp_path):
+        """Verify hmac.compare_digest is used for timing attack prevention (#71)."""
+        from src.audit import AuditLogger
+        from unittest.mock import patch
+
+        logger = AuditLogger(log_dir=tmp_path)
+        logger.log_event("event_1")
+        logger.log_event("event_2")
+
+        # Patch hmac.compare_digest to verify it's called
+        with patch('src.audit.hmac.compare_digest', return_value=True) as mock_compare:
+            logger.verify_integrity()
+            # Should be called for each entry's hash verification
+            assert mock_compare.call_count >= 1
+
+
+class TestAuditEfficiency:
+    """Test audit log efficiency improvements (#79)."""
+
+    def test_load_last_hash_empty_file(self, tmp_path):
+        """Verify empty audit log doesn't cause errors (#79)."""
+        from src.audit import AuditLogger
+
+        # Create empty audit log file
+        audit_file = tmp_path / "audit.jsonl"
+        audit_file.write_text("")
+
+        # Should initialize without error
+        logger = AuditLogger(log_dir=tmp_path)
+        assert logger._last_hash is None
+
+    def test_load_last_hash_small_file(self, tmp_path):
+        """Verify small files work correctly (#79)."""
+        from src.audit import AuditLogger
+        import json
+
+        # Create small audit log
+        logger = AuditLogger(log_dir=tmp_path)
+        logger.log_event("single_event", data="test")
+        expected_hash = logger._last_hash
+
+        # Create new logger to test loading
+        logger2 = AuditLogger(log_dir=tmp_path)
+        assert logger2._last_hash == expected_hash
+
+    def test_load_last_hash_multiple_entries(self, tmp_path):
+        """Verify correct last hash is loaded with multiple entries (#79)."""
+        from src.audit import AuditLogger
+
+        logger = AuditLogger(log_dir=tmp_path)
+        logger.log_event("event_1")
+        logger.log_event("event_2")
+        logger.log_event("event_3")
+        expected_hash = logger._last_hash
+
+        # Create new logger to test loading
+        logger2 = AuditLogger(log_dir=tmp_path)
+        assert logger2._last_hash == expected_hash
+
+    def test_load_last_hash_binary_mode(self, tmp_path):
+        """Verify binary mode reading works correctly (#79)."""
+        from src.audit import AuditLogger
+
+        logger = AuditLogger(log_dir=tmp_path)
+        # Add entry with unicode characters
+        logger.log_event("test_event", message="Hello 世界")
+        expected_hash = logger._last_hash
+
+        # Create new logger to verify loading works
+        logger2 = AuditLogger(log_dir=tmp_path)
+        assert logger2._last_hash == expected_hash

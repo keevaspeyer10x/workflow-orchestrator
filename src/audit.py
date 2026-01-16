@@ -11,6 +11,7 @@ Features:
 """
 
 import hashlib
+import hmac
 import json
 import logging
 from datetime import datetime, timezone
@@ -71,13 +72,38 @@ class AuditLogger:
             self._load_last_hash()
 
     def _load_last_hash(self) -> None:
-        """Load the hash of the last entry for chain continuation."""
+        """Load the hash of the last entry for chain continuation.
+
+        Uses seek-from-end approach to avoid reading entire file into memory.
+        This prevents DoS attacks via large audit log files.
+        """
+        if not self.log_file.exists():
+            return
+
         try:
-            with open(self.log_file, 'r') as f:
-                lines = f.read().strip().split('\n')
-                if lines and lines[-1]:
-                    last_entry = json.loads(lines[-1])
-                    self._last_hash = last_entry.get('hash')
+            with open(self.log_file, 'rb') as f:
+                # Seek to end to get file size
+                f.seek(0, 2)
+                size = f.tell()
+                if size == 0:
+                    return
+
+                # Read only the last chunk (4KB should be more than enough for one JSON line)
+                chunk_size = min(4096, size)
+                f.seek(-chunk_size, 2)
+                chunk = f.read()
+
+                # Find last complete line by splitting on newlines
+                lines = chunk.split(b'\n')
+                for line in reversed(lines):
+                    line = line.strip()
+                    if line:
+                        try:
+                            last_entry = json.loads(line.decode('utf-8'))
+                            self._last_hash = last_entry.get('hash')
+                            return
+                        except (json.JSONDecodeError, UnicodeDecodeError):
+                            continue
         except Exception as e:
             logger.warning(f"Could not load last audit hash: {e}")
 
@@ -226,7 +252,8 @@ class AuditLogger:
                 }, sort_keys=True)
 
                 expected_hash = self._compute_hash(content, prev_hash)
-                if entry['hash'] != expected_hash:
+                # Use hmac.compare_digest for constant-time comparison (prevents timing attacks)
+                if not hmac.compare_digest(entry['hash'], expected_hash):
                     raise AuditTamperError(
                         f"Line {line_num}: Hash mismatch. "
                         f"Expected {expected_hash}, got {entry['hash']}"

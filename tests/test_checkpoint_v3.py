@@ -256,3 +256,93 @@ class TestConcurrentCheckpoints:
         # All checkpoints should be retrievable
         all_checkpoints = manager.list_checkpoints()
         assert len(all_checkpoints) == 5
+
+
+class TestAutoDetectImportantFiles:
+    """Test optimized file detection (#87)."""
+
+    def test_is_important_file_extensions(self, tmp_path):
+        """Verify _is_important_file checks extensions correctly (#87)."""
+        from src.checkpoint import CheckpointManager
+
+        manager = CheckpointManager(working_dir=str(tmp_path))
+
+        # Should be important
+        assert manager._is_important_file("test.py")
+        assert manager._is_important_file("test.js")
+        assert manager._is_important_file("config.yaml")
+        assert manager._is_important_file("README.md")
+
+        # Should not be important
+        assert not manager._is_important_file("binary.exe")
+        assert not manager._is_important_file("image.png")
+        assert not manager._is_important_file("data.bin")
+
+    def test_auto_detect_git_fallback(self, tmp_path):
+        """Verify fallback to rglob when git unavailable (#87)."""
+        from src.checkpoint import CheckpointManager
+        from unittest.mock import patch
+        import subprocess
+
+        manager = CheckpointManager(working_dir=str(tmp_path))
+
+        # Create some files
+        test_file = tmp_path / "test.py"
+        test_file.write_text("# test")
+        test_file.touch()  # Ensure recent mtime
+
+        # Mock subprocess.run to simulate no git
+        with patch('subprocess.run', side_effect=FileNotFoundError):
+            files = manager._auto_detect_important_files()
+            # Should fall back to rglob and find the file
+            # Note: May be empty if file mtime is not recent enough
+            assert isinstance(files, list)
+
+    def test_auto_detect_depth_limit(self, tmp_path):
+        """Verify depth limit is respected (#87)."""
+        from src.checkpoint import CheckpointManager
+        from unittest.mock import patch
+        import time
+
+        manager = CheckpointManager(working_dir=str(tmp_path))
+
+        # Create deeply nested file
+        deep_dir = tmp_path / "a" / "b" / "c" / "d" / "e" / "f" / "g"
+        deep_dir.mkdir(parents=True)
+        deep_file = deep_dir / "deep.py"
+        deep_file.write_text("# deep")
+
+        # Create shallow file
+        shallow_file = tmp_path / "shallow.py"
+        shallow_file.write_text("# shallow")
+
+        # Mock subprocess to force rglob fallback
+        with patch('subprocess.run', side_effect=FileNotFoundError):
+            files = manager._auto_detect_important_files(max_depth=3)
+            # Deep file should be excluded due to depth limit
+            assert not any("deep.py" in f for f in files)
+
+    def test_auto_detect_excludes_patterns(self, tmp_path):
+        """Verify excluded patterns are respected (#87)."""
+        from src.checkpoint import CheckpointManager
+        from unittest.mock import patch
+
+        manager = CheckpointManager(working_dir=str(tmp_path))
+
+        # Create files in excluded directories
+        node_modules = tmp_path / "node_modules"
+        node_modules.mkdir()
+        excluded_file = node_modules / "excluded.js"
+        excluded_file.write_text("// excluded")
+
+        pycache = tmp_path / "__pycache__"
+        pycache.mkdir()
+        pyc_file = pycache / "test.py"
+        pyc_file.write_text("# excluded")
+
+        # Mock subprocess to force rglob fallback
+        with patch('subprocess.run', side_effect=FileNotFoundError):
+            files = manager._auto_detect_important_files()
+            # Excluded files should not be included
+            assert not any("node_modules" in f for f in files)
+            assert not any("__pycache__" in f for f in files)

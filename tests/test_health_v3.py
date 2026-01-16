@@ -107,3 +107,122 @@ class TestHealthReport:
         json_str = report.to_json()
         parsed = json.loads(json_str)
         assert 'overall_status' in parsed
+
+
+class TestAuditIntegrityCheck:
+    """Test audit log integrity verification (#74)."""
+
+    def test_audit_integrity_no_log(self, tmp_path):
+        """Missing audit log returns ok status (#74)."""
+        from src.health import HealthChecker
+
+        checker = HealthChecker(working_dir=tmp_path)
+        report = checker.check_audit_integrity()
+
+        assert report.status == "ok"
+        assert "No audit log present" in report.message
+
+    def test_audit_integrity_valid_chain(self, tmp_path):
+        """Valid audit log chain passes integrity check (#74)."""
+        from src.health import HealthChecker
+        from src.audit import AuditLogger
+
+        # Create valid audit log
+        orchestrator_dir = tmp_path / ".orchestrator"
+        orchestrator_dir.mkdir(parents=True)
+
+        audit_logger = AuditLogger(log_dir=orchestrator_dir)
+        audit_logger.log_event("event_1")
+        audit_logger.log_event("event_2")
+        audit_logger.log_event("event_3")
+
+        # Check integrity
+        checker = HealthChecker(working_dir=tmp_path)
+        report = checker.check_audit_integrity()
+
+        assert report.status == "ok"
+        assert "3 entries" in report.message
+
+    def test_audit_integrity_broken_chain(self, tmp_path):
+        """Broken hash chain is detected (#74)."""
+        from src.health import HealthChecker
+        from src.audit import AuditLogger
+
+        # Create valid audit log first
+        orchestrator_dir = tmp_path / ".orchestrator"
+        orchestrator_dir.mkdir(parents=True)
+
+        audit_logger = AuditLogger(log_dir=orchestrator_dir)
+        audit_logger.log_event("event_1")
+        audit_logger.log_event("event_2")
+
+        # Now tamper with the prev_hash of the second entry
+        audit_file = orchestrator_dir / "audit.jsonl"
+        lines = audit_file.read_text().strip().split('\n')
+        entry = json.loads(lines[1])
+        entry['prev_hash'] = "tampered_hash"
+        lines[1] = json.dumps(entry)
+        audit_file.write_text('\n'.join(lines) + '\n')
+
+        # Check integrity
+        checker = HealthChecker(working_dir=tmp_path)
+        report = checker.check_audit_integrity()
+
+        assert report.status == "error"
+        assert "chain broken" in report.message.lower()
+
+    def test_audit_integrity_tampered_hash(self, tmp_path):
+        """Tampered entry hash is detected (#74 - from minds review)."""
+        from src.health import HealthChecker
+        from src.audit import AuditLogger
+
+        # Create valid audit log first
+        orchestrator_dir = tmp_path / ".orchestrator"
+        orchestrator_dir.mkdir(parents=True)
+
+        audit_logger = AuditLogger(log_dir=orchestrator_dir)
+        audit_logger.log_event("event_1")
+
+        # Now tamper with the event (which changes the expected hash)
+        audit_file = orchestrator_dir / "audit.jsonl"
+        lines = audit_file.read_text().strip().split('\n')
+        entry = json.loads(lines[0])
+        entry['event'] = "tampered_event"  # Change event but keep original hash
+        lines[0] = json.dumps(entry)
+        audit_file.write_text('\n'.join(lines) + '\n')
+
+        # Check integrity - should detect hash mismatch
+        checker = HealthChecker(working_dir=tmp_path)
+        report = checker.check_audit_integrity()
+
+        assert report.status == "error"
+        assert "hash mismatch" in report.message.lower()
+
+    def test_audit_integrity_invalid_json(self, tmp_path):
+        """Invalid JSON in audit log is detected (#74)."""
+        from src.health import HealthChecker
+
+        # Create audit log with invalid JSON on second line
+        orchestrator_dir = tmp_path / ".orchestrator"
+        orchestrator_dir.mkdir(parents=True)
+        audit_file = orchestrator_dir / "audit.jsonl"
+        audit_file.write_text('not valid json at all\n')
+
+        # Check integrity
+        checker = HealthChecker(working_dir=tmp_path)
+        report = checker.check_audit_integrity()
+
+        assert report.status == "error"
+        # Error could be "Invalid JSON" or caught by general exception handler
+        assert "error" in report.status or "Invalid" in report.message or "Error" in report.message
+
+    def test_full_check_includes_audit_integrity(self, tmp_path):
+        """Full health check includes audit integrity (#74)."""
+        from src.health import HealthChecker
+
+        checker = HealthChecker(working_dir=tmp_path)
+        report = checker.full_check()
+
+        # Should have audit_log component
+        component_names = [c.name for c in report.components]
+        assert "audit_log" in component_names

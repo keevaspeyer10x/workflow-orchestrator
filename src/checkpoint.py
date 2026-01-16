@@ -498,50 +498,99 @@ class CheckpointManager:
         with open(filepath, 'w') as f:
             json.dump(checkpoint.to_dict(), f, indent=2, default=str)
     
-    def _auto_detect_important_files(self, max_files: int = 10) -> List[str]:
-        """
-        Auto-detect important files based on recent modifications.
-        
-        Returns files modified in the last hour, excluding hidden files and common artifacts.
-        """
-        import time
-        
-        one_hour_ago = time.time() - 3600
-        important_files = []
-        
-        # Patterns to exclude
-        exclude_patterns = {
-            '.git', '__pycache__', 'node_modules', '.pytest_cache',
-            '.workflow_state.json', '.workflow_log.jsonl', '.workflow_checkpoints'
-        }
-        
-        # Extensions to include
+    def _is_important_file(self, filepath: str) -> bool:
+        """Check if a file should be considered important based on extension."""
         include_extensions = {
             '.py', '.js', '.ts', '.yaml', '.yml', '.json', '.md',
             '.html', '.css', '.sh', '.sql', '.env'
         }
-        
+        # Handle both Path objects and strings
+        if hasattr(filepath, 'suffix'):
+            ext = filepath.suffix.lower()
+        else:
+            ext = Path(filepath).suffix.lower()
+        return ext in include_extensions
+
+    def _auto_detect_important_files(self, max_files: int = 10, max_depth: int = 5) -> List[str]:
+        """
+        Auto-detect important files based on recent modifications.
+
+        Optimized to use git ls-files when available (much faster for git repos),
+        falling back to rglob with depth limiting.
+
+        Args:
+            max_files: Maximum number of files to return
+            max_depth: Maximum directory depth to search (for rglob fallback)
+
+        Returns:
+            List of recently modified important file paths
+        """
+        import time
+        import subprocess
+
+        one_hour_ago = time.time() - 3600
+        important_files = []
+
+        # Try git first (much faster for git repos)
+        try:
+            result = subprocess.run(
+                ['git', 'ls-files', '-m', '--others', '--exclude-standard'],
+                cwd=self.working_dir,
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                for filepath in result.stdout.strip().split('\n'):
+                    if filepath and self._is_important_file(filepath):
+                        important_files.append(filepath)
+                        if len(important_files) >= max_files:
+                            break
+                if important_files:
+                    return important_files
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            pass  # Fall back to rglob
+
+        # Fallback: use rglob with depth limit
+        # Patterns to exclude
+        exclude_patterns = {
+            '.git', '__pycache__', 'node_modules', '.pytest_cache',
+            '.workflow_state.json', '.workflow_log.jsonl', '.workflow_checkpoints',
+            '.orchestrator', 'venv', '.venv', 'dist', 'build'
+        }
+
         try:
             for filepath in self.working_dir.rglob('*'):
                 if filepath.is_file():
+                    # Check depth limit
+                    try:
+                        rel_path = filepath.relative_to(self.working_dir)
+                        if len(rel_path.parts) > max_depth:
+                            continue
+                    except ValueError:
+                        continue
+
                     # Skip excluded patterns
                     if any(p in str(filepath) for p in exclude_patterns):
                         continue
-                    
+
                     # Check extension
-                    if filepath.suffix.lower() not in include_extensions:
+                    if not self._is_important_file(filepath):
                         continue
-                    
+
                     # Check modification time
-                    if filepath.stat().st_mtime > one_hour_ago:
-                        rel_path = str(filepath.relative_to(self.working_dir))
-                        important_files.append(rel_path)
-                        
-                        if len(important_files) >= max_files:
-                            break
+                    try:
+                        if filepath.stat().st_mtime > one_hour_ago:
+                            rel_path_str = str(filepath.relative_to(self.working_dir))
+                            important_files.append(rel_path_str)
+
+                            if len(important_files) >= max_files:
+                                break
+                    except OSError:
+                        continue
         except Exception as e:
             logger.warning(f"Error auto-detecting files: {e}")
-        
+
         return important_files
     
     def _generate_context_summary(self, workflow_state: dict, phase_id: str) -> str:

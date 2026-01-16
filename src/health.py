@@ -6,16 +6,19 @@ Provides system health checks for workflow orchestrator components.
 Features:
 - State file integrity checks
 - Lock state verification
+- Audit log integrity verification (hash chain)
 - Structured health reports
 - JSON output for automation
 """
 
+import hmac
 import json
 import logging
 import sys
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import List, Optional, Literal
+import hashlib
 
 # Try to import psutil for cross-platform PID checking
 try:
@@ -270,6 +273,106 @@ class HealthChecker:
             message=f"{valid_count} checkpoint(s) valid"
         )
 
+    def check_audit_integrity(self) -> ComponentHealth:
+        """
+        Verify audit log hash chain integrity.
+
+        Reads through the audit log and verifies:
+        1. Each entry's prev_hash matches the previous entry's hash
+        2. Each entry's hash can be recomputed and matches stored hash
+        3. JSON is valid for all entries
+
+        Returns:
+            ComponentHealth for audit log integrity
+        """
+        audit_file = self.orchestrator_dir / "audit.jsonl"
+
+        if not audit_file.exists():
+            return ComponentHealth(
+                name="audit_log",
+                status="ok",
+                message="No audit log present"
+            )
+
+        try:
+            prev_hash = None
+            line_num = 0
+
+            with open(audit_file, 'r') as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    line_num += 1
+
+                    entry = json.loads(line)
+
+                    # Verify chain link using constant-time comparison
+                    entry_prev_hash = entry.get('prev_hash')
+                    if prev_hash is None:
+                        # First entry should have no prev_hash
+                        if entry_prev_hash is not None:
+                            return ComponentHealth(
+                                name="audit_log",
+                                status="error",
+                                message=f"Audit chain broken at line {line_num}: first entry has prev_hash",
+                                details={"line": line_num, "unexpected_prev_hash": entry_prev_hash}
+                            )
+                    else:
+                        # Subsequent entries should chain to previous
+                        if entry_prev_hash is None:
+                            return ComponentHealth(
+                                name="audit_log",
+                                status="error",
+                                message=f"Audit chain broken at line {line_num}: missing prev_hash",
+                                details={"line": line_num, "expected_prev": prev_hash}
+                            )
+                        if not hmac.compare_digest(entry_prev_hash, prev_hash):
+                            return ComponentHealth(
+                                name="audit_log",
+                                status="error",
+                                message=f"Audit chain broken at line {line_num}",
+                                details={"expected_prev": prev_hash, "actual_prev": entry_prev_hash}
+                            )
+
+                    # Recompute and verify the entry's hash (not just chain link)
+                    content = json.dumps({
+                        'timestamp': entry['timestamp'],
+                        'event': entry['event'],
+                        'data': entry.get('data')
+                    }, sort_keys=True)
+                    to_hash = content if entry_prev_hash is None else f"{entry_prev_hash}:{content}"
+                    expected_hash = hashlib.sha256(to_hash.encode()).hexdigest()[:32]
+
+                    stored_hash = entry.get('hash', '')
+                    if not stored_hash or not hmac.compare_digest(stored_hash, expected_hash):
+                        return ComponentHealth(
+                            name="audit_log",
+                            status="error",
+                            message=f"Audit hash mismatch at line {line_num}",
+                            details={"expected_hash": expected_hash, "actual_hash": stored_hash}
+                        )
+
+                    prev_hash = stored_hash
+
+            return ComponentHealth(
+                name="audit_log",
+                status="ok",
+                message=f"Audit chain verified ({line_num} entries)"
+            )
+
+        except json.JSONDecodeError as e:
+            return ComponentHealth(
+                name="audit_log",
+                status="error",
+                message=f"Invalid JSON in audit log at line {line_num}: {e}"
+            )
+        except Exception as e:
+            return ComponentHealth(
+                name="audit_log",
+                status="error",
+                message=f"Error checking audit log: {e}"
+            )
+
     def full_check(self) -> HealthReport:
         """
         Run full health check on all components.
@@ -283,6 +386,7 @@ class HealthChecker:
             self.check_state(),
             self.check_locks(),
             self.check_checkpoints(),
+            self.check_audit_integrity(),
         ]
 
         # Determine overall status
