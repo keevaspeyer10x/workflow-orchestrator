@@ -25,6 +25,14 @@ All notable changes to the workflow-orchestrator.
   - Prompt designed with multi-model input (Claude, GPT, Grok, DeepSeek consensus)
 
 ### Security
+- **TOCTOU Fix in Stale Lock Cleanup (#73)**: Use atomic rename pattern in `_clean_stale_lock()`
+  - Previously: check-then-delete pattern had race condition vulnerability
+  - Now: atomically rename to `.removing` before delete, preventing lock bypass
+  - Gracefully handles concurrent removal attempts
+- **Directory fsync for State Durability (#80)**: Add directory fsync after atomic rename
+  - `save_state_with_integrity()` now fsyncs parent directory after rename
+  - Ensures rename is durable on crash (especially on ext4)
+  - Uses `O_DIRECTORY` flag when available, with graceful fallback
 - **Timing Attack Prevention (#71)**: Use `hmac.compare_digest` for hash comparisons
   - `verify_integrity()` now uses constant-time comparison
   - `check_audit_integrity()` uses constant-time comparison for chain verification

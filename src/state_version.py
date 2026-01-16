@@ -46,6 +46,7 @@ def save_state_with_integrity(state_path: Path, state_data: dict):
     Save state with integrity checksum.
 
     Uses atomic write (temp file + rename + fsync) to prevent corruption.
+    Includes directory fsync to ensure rename durability (Issue #80).
 
     Args:
         state_path: Path to save state file
@@ -69,6 +70,25 @@ def save_state_with_integrity(state_path: Path, state_data: dict):
             os.fsync(f.fileno())  # Ensure written to disk
 
         temp_path.rename(state_path)
+
+        # Issue #80: Sync directory to ensure rename is durable
+        # On some filesystems (e.g., ext4), a crash after rename but before
+        # directory sync can lose the rename. This is a best-effort operation.
+        try:
+            # Use O_DIRECTORY if available (Unix), fallback to O_RDONLY
+            flags = os.O_RDONLY
+            if hasattr(os, 'O_DIRECTORY'):
+                flags |= os.O_DIRECTORY
+            dir_fd = os.open(str(state_path.parent), flags)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            # Directory fsync failure is non-fatal - state is still saved
+            # This can happen on some platforms or filesystems
+            pass
+
     except Exception:
         # Clean up temp file on failure
         try:

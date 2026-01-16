@@ -334,7 +334,15 @@ class LockManager:
                     self._thread_ids.pop(resource_name, None)
 
     def _clean_stale_lock(self, lock_path: Path) -> None:
-        """Remove stale lock if process is dead."""
+        """
+        Remove stale lock if process is dead.
+
+        Uses atomic rename pattern to avoid TOCTOU vulnerability (Issue #73):
+        1. Check if process is dead
+        2. Atomically rename to .removing suffix
+        3. If rename succeeds, we own the file and can safely delete
+        4. If rename fails, another process either removed or acquired it
+        """
         if not lock_path.exists():
             return
 
@@ -354,7 +362,16 @@ class LockManager:
                 # Check if process exists using cross-platform function
                 if not _process_exists(pid):
                     logger.info(f"Removing stale lock: {lock_path} (PID {pid} not running)")
-                    lock_path.unlink()
+                    # TOCTOU fix: Use atomic rename before delete
+                    # If rename succeeds, we own the file and can safely delete it
+                    temp_path = lock_path.with_suffix('.removing')
+                    try:
+                        lock_path.rename(temp_path)
+                        temp_path.unlink()
+                    except FileNotFoundError:
+                        pass  # Another process already removed it
+                    except OSError:
+                        pass  # Lock was acquired (no longer stale)
         except (ValueError, FileNotFoundError):
             pass
 
