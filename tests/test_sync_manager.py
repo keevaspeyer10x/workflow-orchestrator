@@ -88,6 +88,90 @@ class TestSyncManager:
         result = sync_mgr.get_remote_tracking_branch()
         assert result is None
 
+    def test_has_uncommitted_changes_clean(self, mock_git_repo):
+        """Test has_uncommitted_changes returns False when working directory is clean."""
+        from src.sync_manager import SyncManager
+
+        sync_mgr = SyncManager(mock_git_repo)
+
+        result = sync_mgr.has_uncommitted_changes()
+        assert result is False
+
+    def test_has_uncommitted_changes_staged(self, mock_git_repo):
+        """Test has_uncommitted_changes returns True when there are staged changes."""
+        from src.sync_manager import SyncManager
+
+        # Create and stage a new file
+        (mock_git_repo / "new_file.txt").write_text("New content")
+        subprocess.run(["git", "add", "new_file.txt"], cwd=mock_git_repo, capture_output=True)
+
+        sync_mgr = SyncManager(mock_git_repo)
+
+        result = sync_mgr.has_uncommitted_changes()
+        assert result is True
+
+    def test_has_uncommitted_changes_unstaged(self, mock_git_repo):
+        """Test has_uncommitted_changes returns True when there are unstaged changes."""
+        from src.sync_manager import SyncManager
+
+        # Modify an existing file without staging
+        (mock_git_repo / "README.md").write_text("# Modified")
+
+        sync_mgr = SyncManager(mock_git_repo)
+
+        result = sync_mgr.has_uncommitted_changes()
+        assert result is True
+
+    def test_has_uncommitted_changes_untracked(self, mock_git_repo):
+        """Test has_uncommitted_changes returns True when there are untracked files."""
+        from src.sync_manager import SyncManager
+
+        # Create an untracked file
+        (mock_git_repo / "untracked.txt").write_text("Untracked")
+
+        sync_mgr = SyncManager(mock_git_repo)
+
+        result = sync_mgr.has_uncommitted_changes()
+        assert result is True
+
+    def test_commit_all_success(self, mock_git_repo):
+        """Test commit_all stages and commits all changes."""
+        from src.sync_manager import SyncManager
+
+        # Create some uncommitted changes
+        (mock_git_repo / "new_file.txt").write_text("New content")
+        (mock_git_repo / "README.md").write_text("# Modified")
+
+        sync_mgr = SyncManager(mock_git_repo)
+        assert sync_mgr.has_uncommitted_changes() is True
+
+        # Commit all
+        result = sync_mgr.commit_all("Test commit message")
+        assert result is True
+
+        # Verify changes are committed
+        assert sync_mgr.has_uncommitted_changes() is False
+
+        # Verify commit message
+        log_result = subprocess.run(
+            ["git", "log", "-1", "--format=%s"],
+            cwd=mock_git_repo,
+            capture_output=True,
+            text=True
+        )
+        assert log_result.stdout.strip() == "Test commit message"
+
+    def test_commit_all_nothing_to_commit(self, mock_git_repo):
+        """Test commit_all returns False when nothing to commit."""
+        from src.sync_manager import SyncManager
+
+        sync_mgr = SyncManager(mock_git_repo)
+        assert sync_mgr.has_uncommitted_changes() is False
+
+        # Commit with no changes - git commit returns non-zero
+        result = sync_mgr.commit_all("Empty commit")
+        assert result is False
+
     def test_fetch_success(self, mock_git_repo_with_remote):
         """Test successful fetch from remote."""
         from src.sync_manager import SyncManager

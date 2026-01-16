@@ -76,6 +76,10 @@ All notable changes to the workflow-orchestrator.
   - Excludes common artifact directories (node_modules, __pycache__, etc.)
 
 ### Fixed
+- **orchestrator finish silently ignores uncommitted changes (#92)**: Auto-commit uncommitted changes before sync
+  - `orchestrator finish` now auto-commits all uncommitted changes with message "Complete workflow: <task>"
+  - Prevents silent data loss when workflow completes but changes aren't pushed
+  - Use `--no-push` to skip both commit and push
 - Fixed `test_sanitize_paths` asserting on wrong field (`entries[0].get('path')` → `entries[0]['data']['path']`)
 
 ### Added

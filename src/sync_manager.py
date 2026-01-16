@@ -95,6 +95,36 @@ class SyncManager:
             return None
         return result.stdout.strip()
 
+    def has_uncommitted_changes(self) -> bool:
+        """
+        Check if there are uncommitted changes in the working directory.
+
+        Returns:
+            True if there are staged or unstaged changes, False if clean
+        """
+        # git status --porcelain returns empty string if clean
+        result = self._run_git(["status", "--porcelain"], check=False)
+        return bool(result.stdout.strip())
+
+    def commit_all(self, message: str) -> bool:
+        """
+        Stage all changes and commit with the given message.
+
+        Args:
+            message: Commit message
+
+        Returns:
+            True if commit succeeded, False otherwise
+        """
+        # Stage all changes
+        result = self._run_git(["add", "."], check=False)
+        if result.returncode != 0:
+            return False
+
+        # Commit
+        result = self._run_git(["commit", "-m", message], check=False)
+        return result.returncode == 0
+
     def fetch(self) -> bool:
         """
         Fetch from remote.

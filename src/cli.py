@@ -1621,6 +1621,20 @@ def cmd_finish(args):
 
         if not no_push:
             sync_mgr = SyncManager(working_dir)
+
+            # Issue #92: Auto-commit uncommitted changes before syncing
+            if sync_mgr.has_uncommitted_changes():
+                print()
+                print("Committing uncommitted changes...")
+                commit_msg = f"Complete workflow: {task_description}"
+                commit_result = sync_mgr.commit_all(commit_msg)
+                if commit_result:
+                    print(f"✓ Committed changes: {commit_msg[:50]}{'...' if len(commit_msg) > 50 else ''}")
+                else:
+                    print("⚠️  Failed to commit changes. Commit manually and run:")
+                    print("  orchestrator finish --continue")
+                    sys.exit(1)
+
             upstream = sync_mgr.get_remote_tracking_branch()
 
             if upstream:
