@@ -3,9 +3,75 @@
 This module defines the core data structures used across the healing system.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from typing import Literal, Optional
+
+
+@dataclass
+class PatternContext:
+    """Context captured with each pattern for intelligent filtering.
+
+    Dimensions are ordered by matching weight (highest first).
+    Used to determine pattern relevance across different contexts.
+    """
+
+    # Tier 1: Must match (weight 1.0)
+    language: Optional[str] = None  # python, javascript, go, rust, java, unknown
+
+    # Tier 2: Should match (weight 0.8)
+    error_category: Optional[str] = None  # dependency, syntax, runtime, network, permission, config, test
+
+    # Tier 3: Nice to match (weight 0.5)
+    workflow_phase: Optional[str] = None  # plan, execute, review, verify, learn
+    framework: Optional[str] = None  # react, django, express, etc.
+
+    # Tier 4: Optional refinement (weight 0.3)
+    os: Optional[str] = None  # linux, darwin, windows
+    runtime_version: Optional[str] = None  # Semver string
+    package_manager: Optional[str] = None  # pip, npm, cargo, go
+
+    # Metadata
+    extraction_confidence: float = 0.5  # How confident we are in this context
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary, excluding None values."""
+        return {k: v for k, v in asdict(self).items() if v is not None}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "PatternContext":
+        """Create from dictionary."""
+        return cls(
+            language=data.get("language"),
+            error_category=data.get("error_category"),
+            workflow_phase=data.get("workflow_phase"),
+            framework=data.get("framework"),
+            os=data.get("os"),
+            runtime_version=data.get("runtime_version"),
+            package_manager=data.get("package_manager"),
+            extraction_confidence=data.get("extraction_confidence", 0.5),
+        )
+
+    def derive_tags(self) -> list[str]:
+        """Derive searchable tags from context."""
+        tags = []
+
+        if self.language:
+            tags.append(self.language)
+
+        if self.error_category:
+            tags.append(f"cat:{self.error_category}")
+
+        if self.workflow_phase:
+            tags.append(f"phase:{self.workflow_phase}")
+
+        if self.framework:
+            tags.append(f"fw:{self.framework}")
+
+        if self.package_manager:
+            tags.append(f"pkg:{self.package_manager}")
+
+        return tags
 
 
 @dataclass
@@ -38,6 +104,9 @@ class ErrorEvent:
     workflow_id: Optional[str] = None
     phase_id: Optional[str] = None
     project_id: Optional[str] = None
+
+    # Pattern context for intelligent filtering
+    context: Optional[PatternContext] = None
 
 
 @dataclass
