@@ -14,16 +14,27 @@ Phase 1: Detection, Fingerprinting & Config (complete)
 - Detectors: WorkflowLog, Subprocess, Transcript, Hook
 - ErrorAccumulator: Session-level error accumulation
 
-Phase 2: Pattern Memory, Lookup & Security (current)
+Phase 2: Pattern Memory, Lookup & Security (complete)
 - SecurityScrubber: Remove secrets/PII before storage
 - EmbeddingService: OpenAI embeddings for RAG
 - HealingSupabaseClient: Supabase client for pattern storage
 - PatternGenerator: LLM-based pattern generation
 - HealingClient: Unified client with three-tier lookup
 - PRESEEDED_PATTERNS: ~30 pre-built patterns for common errors
+
+Phase 3a: Validation Logic (complete)
+- SafetyCategorizer: Categorize fix safety based on diff analysis
+- MultiModelJudge: Multi-model consensus for fix approval
+- ValidationPipeline: 3-phase validation (preflight, verification, approval)
+- CostTracker: API cost tracking and limits
+- CascadeDetector: Detect fix ping-pong cascades
+
+Phase 3b: Fix Application (complete)
+- ContextRetriever: Get file context for fixes
+- FixApplicator: Environment-aware fix application
 """
 
-from .environment import Environment, detect_environment, ENVIRONMENT
+from .environment import Environment, detect_environment, ENVIRONMENT, get_environment
 from .config import HealingConfig, get_config, reset_config
 from .models import ErrorEvent, FixAction
 from .fingerprint import Fingerprinter, FingerprintConfig
@@ -44,10 +55,28 @@ from .pattern_generator import PatternGenerator
 from .client import HealingClient, LookupResult
 from .preseeded_patterns import PRESEEDED_PATTERNS, seed_patterns, match_preseeded
 
+# Phase 3a imports
+from .safety import SafetyCategory, SafetyCategorizer, SafetyAnalysis
+from .costs import CostTracker, CostStatus, get_cost_tracker, reset_cost_tracker
+from .cascade import CascadeDetector, AppliedFix, CascadeStatus, get_cascade_detector, reset_cascade_detector
+from .judges import MultiModelJudge, JudgeModel, JudgeVote, JudgeResult, SuggestedFix
+from .validation import (
+    ValidationPipeline,
+    ValidationPhase,
+    ValidationResult,
+    VerificationOutput,
+    validate_fix,
+)
+
+# Phase 3b imports
+from .context import ContextRetriever, FileContext, ContextBundle
+from .applicator import FixApplicator, ApplyResult, VerifyResult
+
 __all__ = [
     # Phase 0
     "Environment",
     "detect_environment",
+    "get_environment",
     "ENVIRONMENT",
     # Phase 1 - Config
     "HealingConfig",
@@ -82,4 +111,39 @@ __all__ = [
     "PRESEEDED_PATTERNS",
     "seed_patterns",
     "match_preseeded",
+    # Phase 3a - Safety
+    "SafetyCategory",
+    "SafetyCategorizer",
+    "SafetyAnalysis",
+    # Phase 3a - Costs
+    "CostTracker",
+    "CostStatus",
+    "get_cost_tracker",
+    "reset_cost_tracker",
+    # Phase 3a - Cascade Detection
+    "CascadeDetector",
+    "AppliedFix",
+    "CascadeStatus",
+    "get_cascade_detector",
+    "reset_cascade_detector",
+    # Phase 3a - Multi-Model Judges
+    "MultiModelJudge",
+    "JudgeModel",
+    "JudgeVote",
+    "JudgeResult",
+    "SuggestedFix",
+    # Phase 3a - Validation Pipeline
+    "ValidationPipeline",
+    "ValidationPhase",
+    "ValidationResult",
+    "VerificationOutput",
+    "validate_fix",
+    # Phase 3b - Context Retrieval
+    "ContextRetriever",
+    "FileContext",
+    "ContextBundle",
+    # Phase 3b - Fix Application
+    "FixApplicator",
+    "ApplyResult",
+    "VerifyResult",
 ]

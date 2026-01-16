@@ -43,3 +43,15 @@ def detect_environment() -> Environment:
 
 # Global singleton - initialized on module import
 ENVIRONMENT = detect_environment()
+
+
+def get_environment() -> Environment:
+    """Get the detected environment.
+
+    This function provides a consistent way to access the environment
+    detection result, which can be overridden for testing.
+
+    Returns:
+        Environment: The current environment.
+    """
+    return ENVIRONMENT

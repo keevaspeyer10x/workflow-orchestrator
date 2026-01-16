@@ -11,6 +11,41 @@ All notable changes to the workflow-orchestrator.
   - Added 6 unit tests for checksum computation in `tests/test_state_version.py`
 
 ### Added
+- **Self-Healing Infrastructure Phase 3**: Validation & Fix Application
+  - `src/healing/safety.py`: SafetyCategorizer for diff analysis
+    - Categories: SAFE (whitespace, imports, comments), MODERATE (error handling, conditionals), RISKY (DB ops, security, function sigs)
+    - Protected paths: migrations, .env, secrets, CI configs
+    - Methods: `categorize()`, `categorize_diff()`
+  - `src/healing/costs.py`: CostTracker for API cost management
+    - Daily budgets, per-validation limits
+    - Operation cost tracking (embeddings, judges)
+    - Methods: `record()`, `can_validate()`, `estimate_cost()`
+  - `src/healing/cascade.py`: CascadeDetector for hot file detection
+    - Prevents fix ping-pong on frequently modified files
+    - Hot file threshold: 3+ modifications/hour
+    - Methods: `is_file_hot()`, `record_fix()`, `check_cascade()`
+  - `src/healing/judges.py`: MultiModelJudge for consensus voting
+    - Models: Claude Opus, Gemini Pro, GPT-5.2, Grok
+    - Tiered judging: 1 judge (SAFE), 2 (MODERATE), 3 (RISKY)
+    - Methods: `judge()`, `_get_vote()`, `_parse_vote()`
+  - `src/healing/validation.py`: ValidationPipeline with 3 phases
+    - Phase 1 PRE_FLIGHT: Kill switch, constraints, precedent, cascade, cost budget
+    - Phase 2 VERIFICATION: Parallel build/test/lint
+    - Phase 3 APPROVAL: Multi-model consensus voting
+    - Methods: `validate()`, convenience function `validate_fix()`
+  - `src/healing/context.py`: ContextRetriever for file context
+    - Retrieves files for error location and fix action
+    - Related file detection by language (Python, JS, Go)
+    - Methods: `get_context()`, `get_related_files()`
+  - `src/healing/applicator.py`: FixApplicator with environment awareness
+    - Action types: diff, command, file_edit, multi_step
+    - Command allowlist for safety (pip, npm, yarn, go, cargo, etc.)
+    - Environment-aware: LOCAL (direct merge), CLOUD (PR creation)
+    - Build/test verification before merge
+    - Methods: `apply()`, `rollback()`, `_verify()`
+  - 99 unit tests for Phase 3 components
+  - All 339 healing tests pass (147 Phase 1 + 93 Phase 2 + 99 Phase 3)
+
 - **Self-Healing Infrastructure Phase 2**: Pattern Memory, Lookup & Security
   - `src/healing/security.py`: SecurityScrubber removes secrets/PII before storage
     - 13 regex patterns: API keys, bearer tokens, passwords, AWS keys, PEM, connection strings, emails, GitHub/Slack tokens
