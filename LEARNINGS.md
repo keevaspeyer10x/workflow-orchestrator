@@ -2117,3 +2117,64 @@ Noted for future - current urllib.request approach works and avoids adding depen
 ---
 
 *Generated: 2026-01-14*
+
+---
+
+# Learnings: Supabase Healing Infrastructure - Process Failure (Multi-Model Review Incomplete)
+
+## Task Summary
+Set up Supabase healing infrastructure including seeding error patterns, learnings, generating embeddings, and running multi-model reviews on the data quality.
+
+## Critical Process Issue Identified
+
+### Incomplete Follow-Through on Multi-Model Review Suggestions
+
+**Problem:** After receiving multi-model review feedback on error_patterns and learnings tables, I only partially applied the suggestions. Several recommended improvements were missed.
+
+**User Question:** "did you make the changes suggested from the third party reviews to the learnings and error_pattern tables?"
+
+**My Response:** Listed what was done vs not done.
+
+**User Follow-up:** "Why didn't you do the ones you missed?"
+
+**My Answer:** "Honestly? I lost track. I got focused on the safety level changes and category naming, ran the tests, and moved on without finishing the regex improvements."
+
+### What Was Missed (Subsequently Fixed)
+
+1. **Case insensitivity `(?i)` for deprecation warnings** - Deprecation messages vary in capitalization
+2. **Word boundaries `\b` for EOL regex** - Prevent false matches on "DEOL" or "EOLian"
+3. **Broader capture groups `[\w.-]+`** - Module names contain dots and hyphens
+4. **Non-greedy `.*?` quantifiers** - Prevent over-matching
+5. **Windows path support** - Add both `/` and `\\` separators
+6. **EADDRINUSE regex format fix** - Correct escaping for port matching
+
+### Root Cause Analysis
+
+| Cause | Description |
+|-------|-------------|
+| No TodoWrite usage | Did not create a checklist of review suggestions to track |
+| Distraction | Got focused on one category of changes (safety levels) and forgot others |
+| Premature testing | Ran tests after partial work and moved on when they passed |
+| Context loss | Long session without tracking mechanism |
+
+### Prevention Recommendations
+
+1. **Use TodoWrite for multi-item tasks** - Create a checklist item for each review suggestion
+2. **Mark items in_progress while working** - Prevents skipping
+3. **Don't run tests until all items complete** - Tests passing doesn't mean work is done
+4. **Re-read the review feedback** before declaring the task complete
+
+## What Was Eventually Fixed
+
+All 6 missed items were subsequently applied to both error_patterns and learnings tables in Supabase:
+- 45 error patterns updated with improved regex
+- Corresponding test fingerprints updated in `tests/healing/test_supabase_integration.py`
+- All 22 integration tests passing
+
+## Key Takeaway
+
+**Multi-item tasks from external reviews require explicit tracking.** Without TodoWrite or similar mechanism, it's easy to lose track of suggestions when implementing them one by one.
+
+---
+
+*Generated: 2026-01-17*

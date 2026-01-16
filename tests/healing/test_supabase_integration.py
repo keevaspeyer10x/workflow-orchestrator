@@ -58,7 +58,7 @@ class TestTier1FingerprintLookup:
         result = supabase_client.table("error_patterns").select("*").eq(
             "project_id", project_id
         ).eq(
-            "fingerprint", "ModuleNotFoundError: No module named '(\\w+)'"
+            "fingerprint", "ModuleNotFoundError: No module named ['\"]([\\w.-]+)['\"]"
         ).execute()
 
         assert result.data, "Should find ModuleNotFoundError pattern"
@@ -338,7 +338,7 @@ class TestFullHealingFlow:
     def test_error_to_learning_flow(self, supabase_client, project_id):
         """Can go from error fingerprint to actionable learning."""
         # Simulate receiving an error
-        error_fingerprint = "ModuleNotFoundError: No module named '(\\w+)'"
+        error_fingerprint = "ModuleNotFoundError: No module named ['\"]([\\w.-]+)['\"]"
 
         # Step 1: Find matching pattern
         pattern = supabase_client.table("error_patterns").select("id, fingerprint, safety_category").eq(
