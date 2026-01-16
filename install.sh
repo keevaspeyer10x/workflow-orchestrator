@@ -11,51 +11,79 @@ pip install -q aider-chat 2>/dev/null || echo "Note: aider-chat install skipped 
 echo "Enabling automatic updates for this repo..."
 orchestrator setup
 
-echo "Adding orchestrator instructions to CLAUDE.md..."
-ORCHESTRATOR_SECTION='
-## Workflow Orchestrator
+echo "Adding devtools instructions to CLAUDE.md..."
+DEVTOOLS_SECTION='
+## AI Development Tools
 
-This project uses **workflow-orchestrator** (we call it "orchestrator" for short).
+This project uses **keeva-devtools** for AI-assisted development.
+
+### One-Command Install (Recommended)
+For fresh environments like Claude Code Web, install all tools at once:
+```bash
+curl -sSL https://raw.githubusercontent.com/keevaspeyer10x/keeva-devtools/main/scripts/bootstrap.sh | bash
+```
+
+This installs:
+- **orchestrator** - Development workflow management (we call it "orchestrator")
+- **minds** - Multi-model AI queries (we call it "minds")
+- **ai-tool-bridge** - MCP server for tool discovery
 
 ### Quick Reference
+
+**Orchestrator:**
 - `orchestrator status` - Check current workflow state
 - `orchestrator start "task"` - Start a new workflow
 - `orchestrator advance` - Move to next phase
 
-### Installation (for fresh environments like Claude Code Web)
-```bash
-curl -sSL https://raw.githubusercontent.com/keevaspeyer10x/workflow-orchestrator/main/install.sh | bash
-```
+**Minds:**
+- `minds ask "question"` - Query multiple AI models
+- `minds review` - Multi-model code review
+- `minds status` - Check configuration
 
 ### Lazy Installation Pattern
 In ephemeral environments where tools do not persist, use just-in-time installation:
 ```bash
+# Install orchestrator if missing
 if ! command -v orchestrator &>/dev/null; then
     pip install -q git+https://github.com/keevaspeyer10x/workflow-orchestrator.git
 fi
-orchestrator status
+
+# Install minds if missing
+if ! command -v minds &>/dev/null; then
+    pip install -q git+https://github.com/keevaspeyer10x/multiminds.git
+fi
 ```
 
 ### Usage
 Say things like:
 - "Use orchestrator to implement feature X"
 - "Start a workflow for fixing the bug"
-- "What'\''s the orchestrator status?"
+- "Use minds to review this code"
+- "Ask minds about the best approach"
 
-For full documentation, see: https://github.com/keevaspeyer10x/workflow-orchestrator
+For full documentation:
+- Orchestrator: https://github.com/keevaspeyer10x/workflow-orchestrator
+- Minds: https://github.com/keevaspeyer10x/multiminds
+- DevTools: https://github.com/keevaspeyer10x/keeva-devtools
 '
 
 # Add to CLAUDE.md if not already present
 if [ -f "CLAUDE.md" ]; then
-    if ! grep -q "workflow-orchestrator" CLAUDE.md; then
-        echo "$ORCHESTRATOR_SECTION" >> CLAUDE.md
-        echo "  Added orchestrator section to existing CLAUDE.md"
+    if ! grep -q "keeva-devtools" CLAUDE.md; then
+        # Remove old orchestrator-only section if present
+        if grep -q "## Workflow Orchestrator" CLAUDE.md; then
+            # Create temp file without the old section
+            sed '/^## Workflow Orchestrator$/,/^## /{ /^## Workflow Orchestrator$/d; /^## /!d; }' CLAUDE.md > CLAUDE.md.tmp
+            mv CLAUDE.md.tmp CLAUDE.md
+        fi
+        echo "$DEVTOOLS_SECTION" >> CLAUDE.md
+        echo "  Added devtools section to existing CLAUDE.md"
     else
-        echo "  CLAUDE.md already has orchestrator instructions"
+        echo "  CLAUDE.md already has devtools instructions"
     fi
 else
-    echo "$ORCHESTRATOR_SECTION" > CLAUDE.md
-    echo "  Created CLAUDE.md with orchestrator instructions"
+    echo "$DEVTOOLS_SECTION" > CLAUDE.md
+    echo "  Created CLAUDE.md with devtools instructions"
 fi
 
 echo ""
@@ -90,3 +118,5 @@ echo "Ready! You can now say things like:"
 echo "  'Use orchestrator to build a login page'"
 echo "  'Start a workflow for fixing the search bug'"
 echo "  'What's the orchestrator status?'"
+echo "  'Use minds to review this code'"
+echo ""
