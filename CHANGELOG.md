@@ -5,6 +5,19 @@ All notable changes to the workflow-orchestrator.
 ## [Unreleased]
 
 ### Added
+- **Plan Validation Review (#88)**: Pre-implementation review in PLAN phase
+  - Reviews `docs/plan.md` BEFORE implementation to catch flawed designs while changes are cheap
+  - 10 checkpoints: Request Completeness, Requirements Alignment, Security & Compliance,
+    Risk Mitigation, Objective-Driven Optimality, Dependencies & Integration, Edge Cases,
+    Testing & Success Criteria, Implementability, Operational Readiness
+  - 5 verdicts: APPROVED, APPROVED_WITH_NOTES, NEEDS_REVISION (with fixes), BLOCKED, ESCALATE
+  - Request completeness check ensures nothing from original request is missing
+  - Objective-driven optimality validates solution is optimal for underlying goal
+  - "Fix-not-flag" approach: provides actual fixes, not just problem descriptions
+  - Skip conditions with concrete definitions (trivial_change, simple_bug_fix, well_understood_pattern)
+  - Never-skip scenarios: security-sensitive, data migrations, breaking API, multi-system impact
+  - Complements Design Validation Review (#82) which validates post-implementation
+  - Designed with multi-model input (Claude, GPT, Grok, DeepSeek consensus via /minds)
 - **Design Validation Review (#82)**: New 6th review type in REVIEW phase
   - Validates implementation matches design goals from `docs/plan.md`
   - Checks: requirements traceability, scope control, parameter alignment

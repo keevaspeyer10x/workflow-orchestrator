@@ -1,87 +1,104 @@
-# V3 Pre-Rollout Fixes - Risk Analysis
+# Risk Analysis: ai-tool.yaml Architecture
 
-## Overview
-Fix 5 issues before V3 rollout: #71, #79, #74, #87, #82
+## Risk Summary
 
-## Risk Assessment
+| Risk | Likelihood | Impact | Severity | Mitigation |
+|------|------------|--------|----------|------------|
+| Schema versioning conflicts | Low | Medium | Low | Include schema_version field, validate on load |
+| Missing ai-tool.yaml in tool repos | Medium | High | Medium | Fallback to CLAUDE.md, warn user |
+| YAML parsing errors | Low | Medium | Low | Validate schema, clear error messages |
+| Install command failures | Medium | Medium | Medium | Include fallback pip commands |
+| AI misinterprets triggers | Medium | Low | Low | Test triggers, refine based on feedback |
 
-### Issue #71: hmac.compare_digest for timing attack prevention
-| Aspect | Assessment |
-|--------|------------|
-| **Risk Level** | Low |
-| **Change Scope** | Single line change in audit.py |
-| **Breaking Changes** | None - API unchanged |
-| **Rollback Plan** | Revert commit |
+## Detailed Analysis
 
-**Mitigation:** Standard library function with well-understood behavior.
+### R1: Schema Versioning Conflicts
+**Risk:** Future schema changes break existing manifests
+**Likelihood:** Low (schema is simple, unlikely to change frequently)
+**Impact:** Medium (tools won't be discovered if schema incompatible)
+**Mitigation:**
+- Include `schema_version: "1.0"` in all manifests
+- ai-tool-bridge validates schema version before loading
+- Document upgrade path when schema changes
 
----
+### R2: Missing ai-tool.yaml in Tool Repos
+**Risk:** Tool doesn't have ai-tool.yaml, AI can't discover it
+**Likelihood:** Medium (new tools may not include manifest)
+**Impact:** High (tool unusable without discovery)
+**Mitigation:**
+- CLAUDE.md serves as minimal fallback
+- ai-tool-bridge warns when expected manifest missing
+- Bootstrap script checks for manifests after install
 
-### Issue #79: Audit log DoS fix
-| Aspect | Assessment |
-|--------|------------|
-| **Risk Level** | Medium |
-| **Change Scope** | Replace `_load_last_hash()` method |
-| **Breaking Changes** | None - internal implementation change |
-| **Rollback Plan** | Revert commit |
+### R3: YAML Parsing Errors
+**Risk:** Malformed YAML causes loader to fail
+**Likelihood:** Low (YAML is standard, tools exist to validate)
+**Impact:** Medium (tool not discoverable)
+**Mitigation:**
+- Use PyYAML with strict parsing
+- Provide clear error messages with line numbers
+- Include example template in documentation
 
-**Risks:**
-1. Edge case: File smaller than 4KB chunk - handled by min() check
-2. Edge case: No complete line in chunk - handled by loop through lines
-3. Binary vs text mode change - JSON parsing handles UTF-8
+### R4: Install Command Failures
+**Risk:** `pip install` from manifest fails
+**Likelihood:** Medium (network issues, GitHub rate limits)
+**Impact:** Medium (tool not installed, but error is recoverable)
+**Mitigation:**
+- Include fallback commands in manifest
+- ai-tool-bridge retries with alternate sources
+- Clear error messages guide manual install
 
-**Mitigation:** Comprehensive test coverage for edge cases.
+### R5: AI Misinterprets Triggers
+**Risk:** AI maps user request to wrong command
+**Likelihood:** Medium (natural language is ambiguous)
+**Impact:** Low (user can correct, no data loss)
+**Mitigation:**
+- Test triggers during development
+- Include multiple trigger variations
+- Add `examples` field to clarify intent
 
----
+## Security Considerations
 
-### Issue #74: Audit integrity check in health.py
-| Aspect | Assessment |
-|--------|------------|
-| **Risk Level** | Low |
-| **Change Scope** | New method, addition to full_check() |
-| **Breaking Changes** | None - additive change |
-| **Rollback Plan** | Revert commit |
+### No Arbitrary Code Execution
+The ai-tool.yaml manifest does NOT include:
+- `run_command` fields (security risk)
+- Arbitrary shell execution
+- Eval or dynamic code loading
 
-**Mitigation:** New functionality only, existing behavior unchanged.
+Commands are executed by the AI, not by ai-tool-bridge automatically.
 
----
+### Sensitive Data
+ai-tool.yaml files should NOT contain:
+- API keys or credentials
+- Internal URLs or endpoints
+- User-specific configuration
 
-### Issue #87: Optimize _auto_detect_important_files
-| Aspect | Assessment |
-|--------|------------|
-| **Risk Level** | Low |
-| **Change Scope** | Performance optimization |
-| **Breaking Changes** | None - same output, faster |
-| **Rollback Plan** | Revert commit |
+Install commands reference public GitHub repos only.
 
-**Risks:**
-1. git command not available - handled by try/except fallback
-2. subprocess timeout - 5 second timeout prevents hangs
+## Dependencies and External Factors
 
-**Mitigation:** Graceful fallback to existing rglob approach.
+### PyYAML Dependency
+- Standard Python package, well-maintained
+- No known security vulnerabilities in current version
+- Fallback: Could use `ruamel.yaml` if needed
 
----
+### GitHub Availability
+- Tool repos hosted on GitHub
+- Risk: GitHub outage prevents installation
+- Mitigation: Can install from local clones
 
-### Issue #82: Design Validation Review
-| Aspect | Assessment |
-|--------|------------|
-| **Risk Level** | Low |
-| **Change Scope** | New workflow item |
-| **Breaking Changes** | None - additive, skippable |
-| **Rollback Plan** | Revert commit |
+## Rollback Plan
 
-**Mitigation:** Skippable when plan.md doesn't exist.
+If implementation causes issues:
+1. Remove ai-tool.yaml files from tool repos
+2. Revert ai-tool-bridge changes
+3. Restore full CLAUDE.md content
+4. Bootstrap continues working (just without aggregation)
 
----
+No data migration required - all changes are additive.
 
-## Overall Risk Summary
+## Conclusion
 
-| Priority | Issue | Risk | Impact |
-|----------|-------|------|--------|
-| P0 | #71 Security | Low | Security improvement |
-| P1 | #79 Performance | Medium | Performance/security improvement |
-| P2 | #74 Defense | Low | Enhanced monitoring |
-| Low | #87 Performance | Low | Performance improvement |
-| Feature | #82 | Low | Workflow enhancement |
+Overall risk level: **LOW**
 
-**Conclusion:** All changes are low-to-medium risk with clear rollback paths. Sequential execution minimizes risk of conflicts.
+The architecture is additive (doesn't remove existing functionality), has clear fallbacks (CLAUDE.md), and doesn't involve security-sensitive operations. Implementation can proceed.

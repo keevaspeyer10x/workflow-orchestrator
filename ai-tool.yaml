@@ -1,0 +1,146 @@
+schema_version: "1.0"
+
+tool:
+  name: "orchestrator"
+  version: "2.6.0"
+  description: "Development workflow management for AI-assisted coding. Guides agents through structured 5-phase task completion: PLAN, EXECUTE, REVIEW, VERIFY, LEARN."
+  homepage: "https://github.com/keevaspeyer10x/workflow-orchestrator"
+
+install:
+  pip: "git+https://github.com/keevaspeyer10x/workflow-orchestrator.git"
+  check: "orchestrator --version"
+
+commands:
+  - id: "orchestrator:status"
+    description: "Show current workflow state including phase, checklist items, and blockers"
+    cli_command: "orchestrator status"
+    triggers:
+      - "check workflow status"
+      - "what's the orchestrator status"
+      - "workflow state"
+      - "show workflow"
+    dangerous: false
+    examples:
+      - "orchestrator status"
+
+  - id: "orchestrator:start"
+    description: "Start a new workflow for a task"
+    cli_command: "orchestrator start"
+    triggers:
+      - "start workflow"
+      - "begin workflow"
+      - "use orchestrator to"
+      - "start a new workflow"
+    parameters:
+      - name: "task"
+        type: "string"
+        description: "Task description"
+        required: true
+        positional: true
+      - name: "constraints"
+        type: "string"
+        description: "Constraints for the task"
+        required: false
+      - name: "isolated"
+        type: "bool"
+        description: "Create isolated git worktree"
+        required: false
+    dangerous: false
+    examples:
+      - "orchestrator start 'Implement feature X'"
+      - "orchestrator start 'Fix login bug' --isolated"
+
+  - id: "orchestrator:complete"
+    description: "Mark a workflow item as complete"
+    cli_command: "orchestrator complete"
+    triggers:
+      - "complete item"
+      - "mark complete"
+      - "finish item"
+    parameters:
+      - name: "item_id"
+        type: "string"
+        description: "ID of the item to complete"
+        required: true
+        positional: true
+      - name: "notes"
+        type: "string"
+        description: "Notes about what was done"
+        required: false
+    dangerous: false
+    examples:
+      - "orchestrator complete initial_plan --notes 'Created docs/plan.md'"
+
+  - id: "orchestrator:skip"
+    description: "Skip an optional workflow item"
+    cli_command: "orchestrator skip"
+    triggers:
+      - "skip item"
+      - "skip workflow item"
+    parameters:
+      - name: "item_id"
+        type: "string"
+        description: "ID of the item to skip"
+        required: true
+        positional: true
+      - name: "reason"
+        type: "string"
+        description: "Reason for skipping"
+        required: true
+    dangerous: false
+    examples:
+      - "orchestrator skip check_roadmap --reason 'Already reviewed'"
+
+  - id: "orchestrator:advance"
+    description: "Advance to the next workflow phase"
+    cli_command: "orchestrator advance"
+    triggers:
+      - "advance phase"
+      - "next phase"
+      - "move to next phase"
+    dangerous: false
+    examples:
+      - "orchestrator advance"
+
+  - id: "orchestrator:finish"
+    description: "Complete the workflow and sync with remote"
+    cli_command: "orchestrator finish"
+    triggers:
+      - "finish workflow"
+      - "complete workflow"
+      - "end workflow"
+    parameters:
+      - name: "no-push"
+        type: "bool"
+        description: "Skip pushing to remote"
+        required: false
+    dangerous: false
+    examples:
+      - "orchestrator finish"
+      - "orchestrator finish --no-push"
+
+  - id: "orchestrator:handoff"
+    description: "Generate a handoff prompt for another agent"
+    cli_command: "orchestrator handoff"
+    triggers:
+      - "generate handoff"
+      - "create handoff prompt"
+    dangerous: false
+    examples:
+      - "orchestrator handoff"
+
+guidance:
+  usage_patterns:
+    - trigger: "Use orchestrator to X"
+      action: "orchestrator start 'X' then follow the workflow phases"
+    - trigger: "What's the status?"
+      action: "orchestrator status"
+    - trigger: "Complete the X step"
+      action: "orchestrator complete <item_id> --notes 'description'"
+
+  best_practices:
+    - "Always check status first with 'orchestrator status'"
+    - "Follow the current phase - don't skip ahead"
+    - "Document everything with --notes"
+    - "Wait for approval at manual gates"
+    - "Never skip phases - complete or skip all items before advancing"

@@ -1,162 +1,116 @@
-# V3 Pre-Rollout Fixes - Test Cases
+# Test Cases: ai-tool.yaml Architecture
 
-## Issue #71: hmac.compare_digest for timing attack prevention
+## Unit Tests (ai-tool-bridge)
 
-### TC-71-1: Verify hmac.compare_digest is used
-- **Description:** Verify that hash comparison uses constant-time comparison
-- **Steps:**
-  1. Mock `hmac.compare_digest`
-  2. Call `verify_integrity()` with valid audit log
-  3. Assert `hmac.compare_digest` was called
-- **Expected:** hmac.compare_digest called for each hash comparison
+### YAML Loader Tests (`tests/test_yaml_loader.py`)
 
-### TC-71-2: Verify integrity check still works
-- **Description:** Verify tamper detection still functions correctly
-- **Steps:**
-  1. Create valid audit log
-  2. Tamper with one hash
-  3. Call `verify_integrity()`
-- **Expected:** AuditTamperError raised
+| ID | Test Name | Input | Expected Output |
+|----|-----------|-------|-----------------|
+| YL-01 | test_load_valid_manifest | Valid ai-tool.yaml | Parsed dict with tool/commands |
+| YL-02 | test_safe_load_used | YAML with Python tags | Raises error (not executed) |
+| YL-03 | test_missing_schema_version | YAML without schema_version | ValidationError |
+| YL-04 | test_missing_tool_name | YAML without tool.name | ValidationError |
+| YL-05 | test_missing_commands | YAML without commands | ValidationError |
+| YL-06 | test_duplicate_command_ids | YAML with duplicate IDs | ValidationError with message |
+| YL-07 | test_empty_commands_list | YAML with commands: [] | Warning logged, valid parse |
+| YL-08 | test_malformed_yaml | Invalid YAML syntax | YAMLError with line number |
 
----
+### Scanner Tests (`tests/test_scanner.py`)
 
-## Issue #79: Audit log DoS fix
+| ID | Test Name | Input | Expected Output |
+|----|-----------|-------|-----------------|
+| SC-01 | test_scan_single_dir | Dir with ai-tool.yaml | Returns 1 manifest |
+| SC-02 | test_scan_recursive | Nested dirs with manifests | Returns all manifests |
+| SC-03 | test_scan_empty_dir | Empty directory | Returns [] |
+| SC-04 | test_scan_no_manifest | Dir without ai-tool.yaml | Returns [] |
+| SC-05 | test_scan_multiple_paths | List of paths | Returns manifests from all |
+| SC-06 | test_scan_partial_failure | 2 valid, 1 invalid | Returns 2, logs error for 1 |
+| SC-07 | test_scan_strict_mode | 2 valid, 1 invalid, --strict | Raises error |
+| SC-08 | test_scan_nonexistent_dir | Path that doesn't exist | Logs warning, continues |
 
-### TC-79-1: Empty file handling
-- **Description:** Verify empty audit log doesn't cause errors
-- **Steps:**
-  1. Create empty audit.jsonl file
-  2. Initialize AuditLogger
-- **Expected:** No error, _last_hash is None
+### Aggregation Tests (`tests/test_aggregation.py`)
 
-### TC-79-2: Small file handling
-- **Description:** Verify files smaller than chunk size work
-- **Steps:**
-  1. Create audit log with single entry
-  2. Initialize AuditLogger
-- **Expected:** _last_hash correctly loaded
-
-### TC-79-3: Large file memory efficiency
-- **Description:** Verify memory usage stays constant for large files
-- **Steps:**
-  1. Create/mock large audit log (100MB+)
-  2. Initialize AuditLogger
-  3. Monitor memory usage
-- **Expected:** Memory usage < 10MB (only reads last 4KB)
-
-### TC-79-4: Multiple lines in chunk
-- **Description:** Verify correct last line is found
-- **Steps:**
-  1. Create audit log with multiple entries
-  2. Initialize AuditLogger
-- **Expected:** _last_hash matches last entry's hash
-
----
-
-## Issue #74: Audit integrity check in health.py
-
-### TC-74-1: Valid audit log
-- **Description:** Verify valid audit log passes integrity check
-- **Steps:**
-  1. Create valid audit log with chained hashes
-  2. Run check_audit_integrity()
-- **Expected:** ComponentHealth with status="ok"
-
-### TC-74-2: Broken hash chain
-- **Description:** Verify broken chain is detected
-- **Steps:**
-  1. Create audit log
-  2. Modify prev_hash of middle entry
-  3. Run check_audit_integrity()
-- **Expected:** ComponentHealth with status="error", message contains "chain broken"
-
-### TC-74-3: Invalid JSON in log
-- **Description:** Verify invalid JSON is detected
-- **Steps:**
-  1. Create audit log with invalid JSON line
-  2. Run check_audit_integrity()
-- **Expected:** ComponentHealth with status="error", message contains "Invalid JSON"
-
-### TC-74-4: Missing audit log
-- **Description:** Verify missing file is handled gracefully
-- **Steps:**
-  1. Ensure audit.jsonl doesn't exist
-  2. Run check_audit_integrity()
-- **Expected:** ComponentHealth with status="ok", message indicates no log present
-
-### TC-74-5: Full check includes audit integrity
-- **Description:** Verify full_check() includes audit integrity
-- **Steps:**
-  1. Run full_check()
-  2. Check components list
-- **Expected:** Component named "audit_log" in results
-
----
-
-## Issue #87: Optimize _auto_detect_important_files
-
-### TC-87-1: Git-based detection works
-- **Description:** Verify git ls-files is used when available
-- **Steps:**
-  1. Initialize CheckpointManager in git repo with modified files
-  2. Call _auto_detect_important_files()
-- **Expected:** Returns modified/untracked files from git
-
-### TC-87-2: Fallback when git unavailable
-- **Description:** Verify rglob fallback works
-- **Steps:**
-  1. Mock subprocess.run to raise exception
-  2. Call _auto_detect_important_files()
-- **Expected:** Falls back to rglob, returns recently modified files
-
-### TC-87-3: Timeout handling
-- **Description:** Verify git command timeout is handled
-- **Steps:**
-  1. Mock subprocess.run to raise TimeoutExpired
-  2. Call _auto_detect_important_files()
-- **Expected:** Falls back to rglob without error
-
----
-
-## Issue #82: Design Validation Review
-
-### TC-82-1: Workflow YAML valid
-- **Description:** Verify updated workflow.yaml is valid YAML
-- **Steps:**
-  1. Load src/default_workflow.yaml
-  2. Parse with yaml.safe_load()
-- **Expected:** No parse errors
-
-### TC-82-2: Design validation item exists
-- **Description:** Verify design_validation item in REVIEW phase
-- **Steps:**
-  1. Load workflow definition
-  2. Find REVIEW phase
-  3. Find design_validation item
-- **Expected:** Item exists with correct fields
-
-### TC-82-3: Skip conditions defined
-- **Description:** Verify skip conditions are set
-- **Steps:**
-  1. Load design_validation item
-  2. Check skip_conditions field
-- **Expected:** Contains "no_plan_exists", "simple_bug_fix", "trivial_change"
-
----
+| ID | Test Name | Input | Expected Output |
+|----|-----------|-------|-----------------|
+| AG-01 | test_aggregate_single | 1 manifest | ai-tools.json with 1 tool |
+| AG-02 | test_aggregate_multiple | 3 manifests | ai-tools.json with 3 tools |
+| AG-03 | test_aggregate_command_namespacing | 2 manifests with "status" cmd | Commands namespaced correctly |
+| AG-04 | test_aggregate_cross_tool_conflict | 2 tools with same namespaced ID | Error with clear message |
+| AG-05 | test_aggregate_empty_input | No manifests | Valid JSON with empty tools |
+| AG-06 | test_aggregate_preserves_all_fields | Full manifest | All fields in output |
 
 ## Integration Tests
 
-### TC-INT-1: Full workflow with all fixes
-- **Description:** Verify all fixes work together
-- **Steps:**
-  1. Create audit log
-  2. Run health check (tests #74)
-  3. Verify integrity (tests #71, #79)
-  4. Run workflow with design validation (tests #82)
-- **Expected:** All checks pass
+### CLI Tests (`tests/test_cli_integration.py`)
 
-### TC-INT-2: Existing test suite passes
-- **Description:** All existing tests still pass
-- **Steps:**
-  1. Run `pytest`
-- **Expected:** 2141+ tests pass
+| ID | Test Name | Command | Expected Output |
+|----|-----------|---------|-----------------|
+| CLI-01 | test_scan_command | `ai-tool-bridge scan <dir>` | Lists discovered tools |
+| CLI-02 | test_build_command | `ai-tool-bridge build` | Creates ai-tools.json |
+| CLI-03 | test_show_command | `ai-tool-bridge show` | Human-readable tool list |
+| CLI-04 | test_scan_paths_flag | `ai-tool-bridge scan --paths a,b` | Scans specific paths |
+| CLI-05 | test_build_output_flag | `ai-tool-bridge build --output x.json` | Creates x.json |
+| CLI-06 | test_strict_flag | `ai-tool-bridge scan --strict` | Fails on any error |
+
+### Full Flow Tests (`tests/test_integration.py`)
+
+| ID | Test Name | Steps | Expected Result |
+|----|-----------|-------|-----------------|
+| INT-01 | test_scan_build_flow | 1. Scan dirs 2. Build | Valid ai-tools.json |
+| INT-02 | test_three_tool_integration | Scan orchestrator, minds, vvs | All 3 in output |
+| INT-03 | test_roundtrip | Build → Load → Validate | Schema valid |
+
+## End-to-End Tests
+
+### Fresh Environment Tests (`tests/test_e2e.py`)
+
+| ID | Test Name | Scenario | Expected Result |
+|----|-----------|----------|-----------------|
+| E2E-01 | test_fresh_install | Run bootstrap.sh | Tools installed, ai-tools.json exists |
+| E2E-02 | test_discover_after_install | Bootstrap → show | All tools listed |
+| E2E-03 | test_cat_ai_tools_json | Bootstrap → cat ai-tools.json | Valid JSON output |
+
+## Security Tests
+
+| ID | Test Name | Input | Expected Result |
+|----|-----------|-------|-----------------|
+| SEC-01 | test_yaml_code_execution_blocked | YAML with !!python/object | Error, no execution |
+| SEC-02 | test_install_url_validation | Invalid URL pattern | Warning logged |
+| SEC-03 | test_cli_commands_not_executed | Manifest with cli_command | Command NOT run |
+
+## Test Environment Setup
+
+```bash
+# Create test fixtures
+mkdir -p tests/fixtures/valid
+mkdir -p tests/fixtures/invalid
+mkdir -p tests/fixtures/multi
+
+# Valid manifest
+cat > tests/fixtures/valid/ai-tool.yaml << 'EOF'
+schema_version: "1.0"
+tool:
+  name: "test-tool"
+  version: "1.0.0"
+  description: "Test tool"
+commands:
+  - id: "test:cmd"
+    description: "Test command"
+    cli_command: "test cmd"
+    triggers: ["run test"]
+EOF
+
+# Invalid manifest (missing required field)
+cat > tests/fixtures/invalid/ai-tool.yaml << 'EOF'
+tool:
+  name: "broken-tool"
+# Missing schema_version and commands
+EOF
+```
+
+## Coverage Requirements
+
+- Line coverage: >= 90%
+- Branch coverage: >= 85%
+- All security tests must pass
+- All integration tests must pass before merge
