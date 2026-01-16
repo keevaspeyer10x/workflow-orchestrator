@@ -5,6 +5,16 @@ All notable changes to the workflow-orchestrator.
 ## [Unreleased]
 
 ### Added
+- **Self-Healing Infrastructure Phase 0**: Abstraction layer for cross-environment operations
+  - `src/healing/environment.py`: Environment detection (LOCAL/CLOUD/CI)
+  - `src/healing/adapters/`: Abstract interfaces and implementations
+    - `StorageAdapter`: File operations (LocalStorageAdapter, GitHubStorageAdapter)
+    - `GitAdapter`: Git operations (LocalGitAdapter, GitHubAPIAdapter)
+    - `CacheAdapter`: Caching (LocalSQLiteCache, InMemoryCache)
+    - `ExecutionAdapter`: Command execution (LocalExecutionAdapter, GitHubActionsAdapter)
+  - `AdapterFactory`: Creates appropriate adapters based on detected environment
+  - Foundation layer for self-healing features in future phases
+  - 76 unit tests for full adapter coverage
 - **Zero-Human Mode with Minds Proxy (#39)**: Multi-model consensus for autonomous gate decisions
   - `MindsGateProxy` class orchestrates multi-model voting for gate decisions
   - Weighted voting: ChatGPT/Claude (2.0), Gemini (1.5), Grok (1.0), DeepSeek (0.5)

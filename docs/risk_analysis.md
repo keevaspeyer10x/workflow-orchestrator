@@ -1,104 +1,116 @@
-# Risk Analysis: ai-tool.yaml Architecture
+# Phase 0: Abstraction Layer - Risk Analysis
+
+**Task:** Implement Phase 0 of Self-Healing Infrastructure
+**Date:** 2026-01-16
+
+---
 
 ## Risk Summary
 
-| Risk | Likelihood | Impact | Severity | Mitigation |
-|------|------------|--------|----------|------------|
-| Schema versioning conflicts | Low | Medium | Low | Include schema_version field, validate on load |
-| Missing ai-tool.yaml in tool repos | Medium | High | Medium | Fallback to CLAUDE.md, warn user |
-| YAML parsing errors | Low | Medium | Low | Validate schema, clear error messages |
-| Install command failures | Medium | Medium | Medium | Include fallback pip commands |
-| AI misinterprets triggers | Medium | Low | Low | Test triggers, refine based on feedback |
+| Risk | Impact | Likelihood | Mitigation |
+|------|--------|------------|------------|
+| GitHub API rate limits | Medium | Medium | Implement caching, respect X-RateLimit headers |
+| Credential exposure in logs | High | Low | SecurityScrubber (Phase 2), careful logging |
+| Async/sync mismatch | Medium | Medium | Consistent async throughout, no mixed patterns |
+| SQLite concurrent access | Low | Medium | Use aiosqlite with proper connection management |
+| GitHub Actions timeout | Medium | Low | Configurable timeout with sensible defaults |
 
-## Detailed Analysis
+---
 
-### R1: Schema Versioning Conflicts
-**Risk:** Future schema changes break existing manifests
-**Likelihood:** Low (schema is simple, unlikely to change frequently)
-**Impact:** Medium (tools won't be discovered if schema incompatible)
+## Detailed Risk Analysis
+
+### 1. GitHub API Rate Limits
+
+**Risk:** GitHub API has rate limits (5000/hour authenticated, 60/hour unauthenticated). Heavy usage could hit limits.
+
+**Impact:** Medium - operations would fail until rate limit resets
+
+**Likelihood:** Medium - depends on usage patterns
+
 **Mitigation:**
-- Include `schema_version: "1.0"` in all manifests
-- ai-tool-bridge validates schema version before loading
-- Document upgrade path when schema changes
+- Implement request caching in CacheAdapter
+- Read and respect `X-RateLimit-Remaining` headers
+- Implement exponential backoff on 429 responses
+- Log warnings when approaching limits
 
-### R2: Missing ai-tool.yaml in Tool Repos
-**Risk:** Tool doesn't have ai-tool.yaml, AI can't discover it
-**Likelihood:** Medium (new tools may not include manifest)
-**Impact:** High (tool unusable without discovery)
+### 2. Credential Exposure
+
+**Risk:** GitHub tokens, API keys could be logged or exposed in error messages.
+
+**Impact:** High - security breach
+
+**Likelihood:** Low - if careful with logging
+
 **Mitigation:**
-- CLAUDE.md serves as minimal fallback
-- ai-tool-bridge warns when expected manifest missing
-- Bootstrap script checks for manifests after install
+- Never log raw credentials
+- Use `***` masking for tokens in any output
+- Phase 2 adds SecurityScrubber for comprehensive protection
+- Minimal credential scope (only repo access needed)
 
-### R3: YAML Parsing Errors
-**Risk:** Malformed YAML causes loader to fail
-**Likelihood:** Low (YAML is standard, tools exist to validate)
-**Impact:** Medium (tool not discoverable)
+### 3. Async/Sync Mismatch
+
+**Risk:** Mixing sync and async code can cause event loop issues, deadlocks.
+
+**Impact:** Medium - runtime errors, hangs
+
+**Likelihood:** Medium - common mistake
+
 **Mitigation:**
-- Use PyYAML with strict parsing
-- Provide clear error messages with line numbers
-- Include example template in documentation
+- All adapter methods are async
+- Use `asyncio.run()` at CLI entry points only
+- No `asyncio.get_event_loop().run_until_complete()` patterns
+- Add linting rules for sync/async consistency
 
-### R4: Install Command Failures
-**Risk:** `pip install` from manifest fails
-**Likelihood:** Medium (network issues, GitHub rate limits)
-**Impact:** Medium (tool not installed, but error is recoverable)
+### 4. SQLite Concurrent Access
+
+**Risk:** Multiple processes accessing same SQLite file can cause locking issues.
+
+**Impact:** Low - cache misses, not data loss
+
+**Likelihood:** Medium - parallel workflows
+
 **Mitigation:**
-- Include fallback commands in manifest
-- ai-tool-bridge retries with alternate sources
-- Clear error messages guide manual install
+- Use aiosqlite for proper async handling
+- Set `timeout` parameter for busy waiting
+- Use WAL mode for better concurrency
+- Cache is optimization, not critical path
 
-### R5: AI Misinterprets Triggers
-**Risk:** AI maps user request to wrong command
-**Likelihood:** Medium (natural language is ambiguous)
-**Impact:** Low (user can correct, no data loss)
+### 5. GitHub Actions Timeout
+
+**Risk:** Workflow dispatch waits for completion, could hang if workflow takes too long.
+
+**Impact:** Medium - blocked operations
+
+**Likelihood:** Low - most workflows complete quickly
+
 **Mitigation:**
-- Test triggers during development
-- Include multiple trigger variations
-- Add `examples` field to clarify intent
+- Configurable timeout (default 10 minutes)
+- Poll with backoff, not tight loop
+- Return partial result on timeout
+- Document expected workflow duration
 
-## Security Considerations
+---
 
-### No Arbitrary Code Execution
-The ai-tool.yaml manifest does NOT include:
-- `run_command` fields (security risk)
-- Arbitrary shell execution
-- Eval or dynamic code loading
+## Breaking Change Analysis
 
-Commands are executed by the AI, not by ai-tool-bridge automatically.
+**Impact:** None
 
-### Sensitive Data
-ai-tool.yaml files should NOT contain:
-- API keys or credentials
-- Internal URLs or endpoints
-- User-specific configuration
+This is a new module (`src/healing/`) with no existing code to break. No changes to existing APIs or behaviors.
 
-Install commands reference public GitHub repos only.
-
-## Dependencies and External Factors
-
-### PyYAML Dependency
-- Standard Python package, well-maintained
-- No known security vulnerabilities in current version
-- Fallback: Could use `ruamel.yaml` if needed
-
-### GitHub Availability
-- Tool repos hosted on GitHub
-- Risk: GitHub outage prevents installation
-- Mitigation: Can install from local clones
+---
 
 ## Rollback Plan
 
-If implementation causes issues:
-1. Remove ai-tool.yaml files from tool repos
-2. Revert ai-tool-bridge changes
-3. Restore full CLAUDE.md content
-4. Bootstrap continues working (just without aggregation)
+If issues discovered after merge:
+1. Remove `src/healing/` directory
+2. Remove dependencies from `pyproject.toml`
+3. No database migrations to rollback
 
-No data migration required - all changes are additive.
+---
 
-## Conclusion
+## Security Considerations
 
-Overall risk level: **LOW**
-
-The architecture is additive (doesn't remove existing functionality), has clear fallbacks (CLAUDE.md), and doesn't involve security-sensitive operations. Implementation can proceed.
+1. **GitHub Token Scope:** Minimal - only `repo` scope needed for Contents/Refs/Pulls API
+2. **No User Input Execution:** ExecutionAdapter commands are predefined, not user-supplied
+3. **File Path Validation:** StorageAdapter should validate paths are within repo
+4. **Rate Limiting:** Built-in protection against runaway API calls
