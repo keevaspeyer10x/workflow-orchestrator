@@ -27,6 +27,15 @@ This project uses **workflow-orchestrator** (we call it "orchestrator" for short
 curl -sSL https://raw.githubusercontent.com/keevaspeyer10x/workflow-orchestrator/main/install.sh | bash
 ```
 
+### Lazy Installation Pattern
+In ephemeral environments where tools do not persist, use just-in-time installation:
+```bash
+if ! command -v orchestrator &>/dev/null; then
+    pip install -q git+https://github.com/keevaspeyer10x/workflow-orchestrator.git
+fi
+orchestrator status
+```
+
 ### Usage
 Say things like:
 - "Use orchestrator to implement feature X"
