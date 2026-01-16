@@ -185,27 +185,155 @@ class HealingSupabaseClient:
         self,
         fingerprint: str,
         success: bool,
+        context: Optional[dict] = None,
     ) -> None:
         """Record the result of applying a fix.
 
         Args:
             fingerprint: The pattern fingerprint
             success: Whether the fix was successful
+            context: Optional PatternContext dict for per-project tracking
         """
-        column = "success_count" if success else "failure_count"
-
+        # Record via the new RPC function for per-project tracking
         try:
             await self.client.rpc(
-                "increment_pattern_stat",
+                "record_pattern_application",
                 {
                     "p_fingerprint": fingerprint,
                     "p_project_id": self.project_id,
-                    "p_column": column,
+                    "p_success": success,
+                    "p_context": context or {},
                 },
             ).execute()
         except Exception as e:
-            logger.error(f"Failed to record fix result: {e}")
-            raise
+            # Fallback to old method if new RPC doesn't exist
+            logger.warning(f"record_pattern_application failed, using fallback: {e}")
+            column = "success_count" if success else "failure_count"
+            try:
+                await self.client.rpc(
+                    "increment_pattern_stat",
+                    {
+                        "p_fingerprint": fingerprint,
+                        "p_project_id": self.project_id,
+                        "p_column": column,
+                    },
+                ).execute()
+            except Exception as e2:
+                logger.error(f"Failed to record fix result: {e2}")
+                raise
+
+    # ==================
+    # Phase 6: Intelligent Pattern Filtering
+    # ==================
+
+    async def lookup_patterns_scored(
+        self,
+        fingerprint: str,
+        language: Optional[str] = None,
+        error_category: Optional[str] = None,
+    ) -> list[dict]:
+        """Look up patterns with relevance scoring.
+
+        Calls the lookup_patterns_scored RPC function which returns
+        patterns ordered by score, considering:
+        - Wilson score for success rate
+        - Context overlap
+        - Universality (project count)
+        - Recency
+
+        Args:
+            fingerprint: The error fingerprint
+            language: Optional language filter
+            error_category: Optional error category filter
+
+        Returns:
+            List of scored pattern dicts
+        """
+        try:
+            result = await self.client.rpc(
+                "lookup_patterns_scored",
+                {
+                    "p_fingerprint": fingerprint,
+                    "p_project_id": self.project_id,
+                    "p_language": language,
+                    "p_error_category": error_category,
+                },
+            ).execute()
+            return result.data or []
+        except Exception as e:
+            logger.warning(f"Scored lookup failed: {e}")
+            return []
+
+    async def record_pattern_application(
+        self,
+        fingerprint: str,
+        project_id: str,
+        success: bool,
+        context: dict,
+    ) -> None:
+        """Record pattern application for per-project tracking.
+
+        Args:
+            fingerprint: Pattern fingerprint
+            project_id: Project where pattern was applied
+            success: Whether fix was successful
+            context: PatternContext dict
+        """
+        try:
+            await self.client.rpc(
+                "record_pattern_application",
+                {
+                    "p_fingerprint": fingerprint,
+                    "p_project_id": project_id,
+                    "p_success": success,
+                    "p_context": context,
+                },
+            ).execute()
+        except Exception as e:
+            # Log warning but don't raise - consistent with record_fix_result fallback
+            logger.warning(f"Failed to record pattern application: {e}")
+
+    async def get_pattern_project_ids(self, fingerprint: str) -> list[str]:
+        """Get list of projects where pattern has been applied.
+
+        Args:
+            fingerprint: Pattern fingerprint
+
+        Returns:
+            List of project IDs
+        """
+        try:
+            result = await self.client.rpc(
+                "get_pattern_project_ids",
+                {"p_fingerprint": fingerprint},
+            ).execute()
+            return result.data or []
+        except Exception as e:
+            logger.warning(f"Failed to get pattern project IDs: {e}")
+            return []
+
+    async def get_project_share_setting(self, project_id: str) -> bool:
+        """Check if project has opted out of pattern sharing.
+
+        Args:
+            project_id: Project to check
+
+        Returns:
+            True if sharing is enabled (default), False if opted out
+        """
+        try:
+            result = await (
+                self.client.table("healing_config")
+                .select("share_patterns")
+                .eq("project_id", project_id)
+                .single()
+                .execute()
+            )
+            if result.data and "share_patterns" in result.data:
+                return result.data["share_patterns"]
+            return True  # Default to sharing enabled
+        except Exception:
+            return True  # Default to sharing enabled on error
 
     async def audit_log(self, action: str, details: dict) -> None:
         """Write an entry to the audit log.

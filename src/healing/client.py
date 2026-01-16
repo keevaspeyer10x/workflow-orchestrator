@@ -1,11 +1,14 @@
 """Healing Client - Phase 2 Pattern Memory & Lookup.
 
 Unified client that provides three-tier lookup for error patterns.
+Enhanced in Phase 6 with intelligent pattern filtering and cross-project support.
 """
 
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Optional, TYPE_CHECKING
+
+from .context_extraction import is_eligible_for_cross_project
 
 if TYPE_CHECKING:
     from .supabase_client import HealingSupabaseClient
@@ -15,6 +18,10 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+# Phase 6: Score thresholds for pattern matching
+SAME_PROJECT_THRESHOLD = 0.6
+CROSS_PROJECT_THRESHOLD = 0.75
 
 
 @dataclass
@@ -72,12 +79,14 @@ class HealingClient:
         self.embeddings = embeddings
 
     async def lookup(self, error: "ErrorEvent") -> LookupResult:
-        """Perform three-tier lookup for an error.
+        """Perform tiered lookup for an error with intelligent filtering.
 
         This method tries each tier in order:
-        1. Check cache, then Supabase for exact fingerprint match
-        2. Generate embedding and search for similar patterns
-        3. Query causality edges
+        1a. Scored lookup (same-project matches with score >= 0.6)
+        1b. Scored lookup (cross-project matches with score >= 0.75 + guardrails)
+        1c. Exact fingerprint match (cache → Supabase) as fallback
+        2. RAG semantic search using embeddings
+        3. Causality analysis (for investigation)
 
         Args:
             error: The error to look up
@@ -85,7 +94,12 @@ class HealingClient:
         Returns:
             LookupResult with the best match found
         """
-        # Tier 1: Exact match
+        # Phase 6: Try scored lookup first (same-project and cross-project)
+        scored_result = await self._lookup_scored(error)
+        if scored_result.pattern:
+            return scored_result
+
+        # Fallback to Tier 1: Exact fingerprint match
         tier1_result = await self._lookup_tier1(error)
         if tier1_result.pattern:
             return tier1_result
@@ -98,6 +112,78 @@ class HealingClient:
         # Tier 3: Causality
         tier3_result = await self._lookup_tier3(error)
         return tier3_result
+
+    async def _lookup_scored(self, error: "ErrorEvent") -> LookupResult:
+        """Phase 6: Scored pattern lookup with intelligent filtering.
+
+        Uses Wilson score, context overlap, and cross-project guardrails.
+        """
+        fingerprint = error.fingerprint
+        if not fingerprint:
+            return LookupResult(tier=None, pattern=None, source="none")
+
+        # Get context for filtering
+        context = error.context
+        language = context.language if context else None
+        error_category = context.error_category if context else None
+
+        try:
+            # Get scored patterns from Supabase
+            patterns = await self.supabase.lookup_patterns_scored(
+                fingerprint, language, error_category
+            )
+
+            if not patterns:
+                return LookupResult(tier=None, pattern=None, source="none")
+
+            # Current project ID from supabase client
+            current_project = getattr(self.supabase, 'project_id', None)
+
+            for pattern in patterns:
+                score = pattern.get("score", 0)
+                pattern_project = pattern.get("project_id")
+
+                # Same-project match: lower threshold
+                if pattern_project == current_project:
+                    if score >= SAME_PROJECT_THRESHOLD:
+                        logger.info(
+                            f"Scored lookup: same-project match (score={score:.2f})"
+                        )
+                        return LookupResult(tier=1, pattern=pattern, source="scored")
+
+                # Cross-project match: higher threshold + guardrails
+                else:
+                    if score >= CROSS_PROJECT_THRESHOLD:
+                        # Check guardrails
+                        if not is_eligible_for_cross_project(pattern):
+                            logger.debug(
+                                f"Skipping cross-project pattern: failed guardrails"
+                            )
+                            continue
+
+                        # Check opt-out
+                        if pattern_project:
+                            try:
+                                shares = await self.supabase.get_project_share_setting(
+                                    pattern_project
+                                )
+                                if not shares:
+                                    logger.debug(
+                                        f"Skipping pattern from opted-out project"
+                                    )
+                                    continue
+                            except Exception:
+                                pass  # Default to allowing if check fails
+
+                        logger.info(
+                            f"Scored lookup: cross-project match (score={score:.2f})"
+                        )
+                        return LookupResult(tier=1, pattern=pattern, source="scored")
+
+        except Exception as e:
+            logger.warning(f"Scored lookup failed, falling back: {e}")
+
+        return LookupResult(tier=None, pattern=None, source="none")
 
     async def _lookup_tier1(self, error: "ErrorEvent") -> LookupResult:
         """Tier 1: Exact fingerprint match.
@@ -199,7 +285,7 @@ class HealingClient:
     ) -> None:
         """Record the result of applying a fix.
 
-        This updates pattern statistics in Supabase.
+        This updates pattern statistics in Supabase with per-project tracking.
 
         Args:
             error: The error that was fixed
@@ -208,8 +294,13 @@ class HealingClient:
         if not error.fingerprint:
             return
 
+        # Get context dict for per-project tracking
+        context_dict = error.context.to_dict() if error.context else None
+
         try:
-            await self.supabase.record_fix_result(error.fingerprint, success)
+            await self.supabase.record_fix_result(
+                error.fingerprint, success, context=context_dict
+            )
         except Exception as e:
             logger.error(f"Failed to record fix result: {e}")
 

@@ -5,6 +5,32 @@ All notable changes to the workflow-orchestrator.
 ## [Unreleased]
 
 ### Added
+- **Self-Healing Infrastructure Phase 6**: Intelligent Pattern Filtering
+  - Cross-project pattern relevance scoring with Wilson score
+  - `src/healing/context_extraction.py`: Context extraction module
+    - `detect_language()`: Detects Python, JavaScript, Go, Rust from error patterns/file paths
+    - `detect_error_category()`: Classifies errors (dependency, syntax, runtime, network, permission)
+    - `detect_framework()`: Detects React, Django, pytest, express, etc.
+    - `wilson_score()`: Wilson score lower bound for success rate confidence
+    - `calculate_recency_score()`: Exponential decay scoring (30-day half-life)
+    - `calculate_context_overlap()`: Hierarchical context matching
+    - `calculate_relevance_score()`: Combined scoring with all factors
+    - `is_eligible_for_cross_project()`: Guardrails (3+ projects, 5+ successes, 0.7+ Wilson)
+    - `extract_context()`: Main function to extract PatternContext from errors
+  - `src/healing/supabase_client.py`: New scoring methods
+    - `lookup_patterns_scored()`: RPC call for scored pattern lookup
+    - `record_pattern_application()`: Per-project usage tracking
+    - `get_pattern_project_ids()`: List projects using a pattern
+    - `get_project_share_setting()`: Check opt-out status
+  - `src/healing/client.py`: Phase 6 integration
+    - `_lookup_scored()`: Scored lookup with tiered matching (same-project 0.6, cross-project 0.75)
+    - `SAME_PROJECT_THRESHOLD` and `CROSS_PROJECT_THRESHOLD` constants
+    - Updated `record_fix_result()` to pass context for per-project tracking
+  - All 4 detectors (workflow_log, subprocess, transcript, hook) now extract context
+  - Backfill module updated to extract context for historical errors
+  - Project opt-out support: `share_patterns: false` in healing_config
+  - 62 new tests for context extraction and scored lookup
+
 - **Self-Healing Infrastructure Phase 4**: CLI & Workflow Integration
   - `src/healing/cli_heal.py`: CLI commands for healing system
     - `orchestrator heal status`: Show healing system status (environment, kill switch, costs, patterns)

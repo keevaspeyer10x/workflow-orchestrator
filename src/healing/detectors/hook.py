@@ -10,6 +10,7 @@ import uuid
 from .base import BaseDetector
 from ..fingerprint import Fingerprinter
 from ..models import ErrorEvent
+from ..context_extraction import extract_context
 
 
 class HookDetector(BaseDetector):
@@ -59,16 +60,23 @@ class HookDetector(BaseDetector):
 
         # Combine output
         output = stderr.strip() or stdout.strip() or f"Hook {hook_name} failed"
+        description = output[:500]  # Limit length
+
+        context = extract_context(
+            description=description,
+            workflow_phase=self.phase_id,
+        )
 
         error = ErrorEvent(
             error_id=f"hk-{uuid.uuid4().hex[:8]}",
             timestamp=datetime.utcnow(),
             source="hook",
-            description=output[:500],  # Limit length
+            description=description,
             command=hook_name,
             exit_code=exit_code,
             workflow_id=self.workflow_id,
             phase_id=self.phase_id,
+            context=context,
         )
 
         return [self._fingerprint(error)]

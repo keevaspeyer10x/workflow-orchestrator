@@ -177,7 +177,7 @@ class TestHealingSupabaseClient:
 
     @pytest.mark.asyncio
     async def test_record_fix_result_success(self, mock_supabase):
-        """Increments success_count."""
+        """Records successful fix via record_pattern_application RPC."""
         from src.healing.supabase_client import HealingSupabaseClient
 
         mock_supabase.rpc.return_value.execute = AsyncMock()
@@ -187,13 +187,15 @@ class TestHealingSupabaseClient:
 
         mock_supabase.rpc.assert_called_once()
         call_args = mock_supabase.rpc.call_args
-        # call_args[0] is positional args, [0][1] is the params dict
+        # Verify the new RPC is called with p_success=True
+        assert call_args[0][0] == "record_pattern_application"
         params = call_args[0][1] if len(call_args[0]) > 1 else call_args[1]
-        assert params.get("p_column") == "success_count"
+        assert params.get("p_success") is True
+        assert params.get("p_fingerprint") == "error-fp"
 
     @pytest.mark.asyncio
     async def test_record_fix_result_failure(self, mock_supabase):
-        """Increments failure_count."""
+        """Records failed fix via record_pattern_application RPC."""
         from src.healing.supabase_client import HealingSupabaseClient
 
         mock_supabase.rpc.return_value.execute = AsyncMock()
@@ -203,9 +205,11 @@ class TestHealingSupabaseClient:
 
         mock_supabase.rpc.assert_called_once()
         call_args = mock_supabase.rpc.call_args
-        # call_args[0] is positional args, [0][1] is the params dict
+        # Verify the new RPC is called with p_success=False
+        assert call_args[0][0] == "record_pattern_application"
         params = call_args[0][1] if len(call_args[0]) > 1 else call_args[1]
-        assert params.get("p_column") == "failure_count"
+        assert params.get("p_success") is False
+        assert params.get("p_fingerprint") == "error-fp"
 
     @pytest.mark.asyncio
     async def test_audit_log(self, mock_supabase):

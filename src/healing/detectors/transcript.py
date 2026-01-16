@@ -11,6 +11,7 @@ import uuid
 from .base import BaseDetector
 from ..fingerprint import Fingerprinter
 from ..models import ErrorEvent
+from ..context_extraction import extract_context
 
 
 class TranscriptDetector(BaseDetector):
@@ -74,6 +75,11 @@ class TranscriptDetector(BaseDetector):
                 continue
             seen_descriptions.add(description)
 
+            context = extract_context(
+                description=description,
+                error_type=error_type,
+                workflow_phase=self.phase_id,
+            )
             errors.append(
                 self._fingerprint(
                     ErrorEvent(
@@ -84,6 +90,7 @@ class TranscriptDetector(BaseDetector):
                         error_type=error_type,
                         workflow_id=self.workflow_id,
                         phase_id=self.phase_id,
+                        context=context,
                     )
                 )
             )
@@ -107,6 +114,14 @@ class TranscriptDetector(BaseDetector):
             file_path = file_match.group(1) if file_match else None
             line_number = int(file_match.group(2)) if file_match else None
 
+            full_stack_trace = f"Traceback (most recent call last):{stack_trace}"
+            context = extract_context(
+                description=description,
+                error_type=error_type,
+                file_path=file_path,
+                stack_trace=full_stack_trace,
+                workflow_phase=self.phase_id,
+            )
             errors.append(
                 self._fingerprint(
                     ErrorEvent(
@@ -117,9 +132,10 @@ class TranscriptDetector(BaseDetector):
                         error_type=error_type,
                         file_path=file_path,
                         line_number=line_number,
-                        stack_trace=f"Traceback (most recent call last):{stack_trace}",
+                        stack_trace=full_stack_trace,
                         workflow_id=self.workflow_id,
                         phase_id=self.phase_id,
+                        context=context,
                     )
                 )
             )

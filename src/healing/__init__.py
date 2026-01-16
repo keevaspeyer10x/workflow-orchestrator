@@ -48,8 +48,16 @@ Phase 5: Observability & Hardening (complete)
 
 from .environment import Environment, detect_environment, ENVIRONMENT, get_environment
 from .config import HealingConfig, get_config, reset_config
-from .models import ErrorEvent, FixAction
+from .models import ErrorEvent, FixAction, PatternContext
 from .fingerprint import Fingerprinter, FingerprintConfig
+from .context_extraction import (
+    extract_context,
+    detect_language,
+    detect_error_category,
+    wilson_score,
+    calculate_relevance_score,
+    is_eligible_for_cross_project,
+)
 from .accumulator import ErrorAccumulator
 from .detectors import (
     BaseDetector,
@@ -64,7 +72,7 @@ from .security import SecurityScrubber
 from .embeddings import EmbeddingService
 from .supabase_client import HealingSupabaseClient
 from .pattern_generator import PatternGenerator
-from .client import HealingClient, LookupResult
+from .client import HealingClient, LookupResult, SAME_PROJECT_THRESHOLD, CROSS_PROJECT_THRESHOLD
 from .preseeded_patterns import PRESEEDED_PATTERNS, seed_patterns, match_preseeded
 
 # Phase 3a imports
@@ -107,9 +115,17 @@ __all__ = [
     # Phase 1 - Models
     "ErrorEvent",
     "FixAction",
+    "PatternContext",
     # Phase 1 - Fingerprinting
     "Fingerprinter",
     "FingerprintConfig",
+    # Phase 6 - Context Extraction
+    "extract_context",
+    "detect_language",
+    "detect_error_category",
+    "wilson_score",
+    "calculate_relevance_score",
+    "is_eligible_for_cross_project",
     # Phase 1 - Detectors
     "BaseDetector",
     "WorkflowLogDetector",
@@ -129,6 +145,8 @@ __all__ = [
     # Phase 2 - Healing Client
     "HealingClient",
     "LookupResult",
+    "SAME_PROJECT_THRESHOLD",
+    "CROSS_PROJECT_THRESHOLD",
     # Phase 2 - Pre-seeded Patterns
     "PRESEEDED_PATTERNS",
     "seed_patterns",

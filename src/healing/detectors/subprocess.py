@@ -11,6 +11,7 @@ import uuid
 from .base import BaseDetector
 from ..fingerprint import Fingerprinter
 from ..models import ErrorEvent
+from ..context_extraction import extract_context
 
 
 class SubprocessDetector(BaseDetector):
@@ -103,17 +104,23 @@ class SubprocessDetector(BaseDetector):
 
         # If no specific pattern matched, create a generic error
         if not errors and stderr.strip():
+            description = stderr.strip()[:500]  # Limit length
+            context = extract_context(
+                description=description,
+                workflow_phase=self.phase_id,
+            )
             errors.append(
                 self._fingerprint(
                     ErrorEvent(
                         error_id=f"sub-{uuid.uuid4().hex[:8]}",
                         timestamp=datetime.utcnow(),
                         source="subprocess",
-                        description=stderr.strip()[:500],  # Limit length
+                        description=description,
                         command=command,
                         exit_code=exit_code,
                         workflow_id=self.workflow_id,
                         phase_id=self.phase_id,
+                        context=context,
                     )
                 )
             )
@@ -150,11 +157,20 @@ class SubprocessDetector(BaseDetector):
             file_path = file_match.group(1) if file_match else None
             line_number = int(file_match.group(2)) if file_match else None
 
+            description = f"{error_type}: {message}"
+            context = extract_context(
+                description=description,
+                error_type=error_type,
+                file_path=file_path,
+                stack_trace=stack_trace,
+                workflow_phase=self.phase_id,
+            )
+
             return ErrorEvent(
                 error_id=f"sub-{uuid.uuid4().hex[:8]}",
                 timestamp=datetime.utcnow(),
                 source="subprocess",
-                description=f"{error_type}: {message}",
+                description=description,
                 error_type=error_type,
                 file_path=file_path,
                 line_number=line_number,
@@ -162,6 +178,7 @@ class SubprocessDetector(BaseDetector):
                 command=command,
                 workflow_id=self.workflow_id,
                 phase_id=self.phase_id,
+                context=context,
             )
 
         return None
@@ -212,6 +229,12 @@ class SubprocessDetector(BaseDetector):
             description = match.group(0)
             error_type = fixed_type or "UnknownError"
 
+        context = extract_context(
+            description=description,
+            error_type=error_type,
+            workflow_phase=self.phase_id,
+        )
+
         return ErrorEvent(
             error_id=f"sub-{uuid.uuid4().hex[:8]}",
             timestamp=datetime.utcnow(),
@@ -221,4 +244,5 @@ class SubprocessDetector(BaseDetector):
             command=command,
             workflow_id=self.workflow_id,
             phase_id=self.phase_id,
+            context=context,
         )

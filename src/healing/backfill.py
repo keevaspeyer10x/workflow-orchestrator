@@ -15,6 +15,7 @@ from typing import Optional, TYPE_CHECKING
 from .fingerprint import Fingerprinter
 from .models import ErrorEvent
 from .costs import get_cost_tracker
+from .context_extraction import extract_context
 
 if TYPE_CHECKING:
     from .client import HealingClient
@@ -133,20 +134,35 @@ class HistoricalBackfill:
         else:
             timestamp = datetime.utcnow()
 
+        error_type = event.get("error_type")
+        file_path = event.get("file_path") or event.get("file")
+        stack_trace = event.get("stack_trace") or event.get("traceback")
+        phase_id = event.get("phase_id")
+
+        # Extract context for intelligent pattern filtering
+        context = extract_context(
+            description=description,
+            error_type=error_type,
+            file_path=file_path,
+            stack_trace=stack_trace,
+            workflow_phase=phase_id,
+        )
+
         error = ErrorEvent(
             error_id=event.get("id") or f"backfill-{timestamp.isoformat()}",
             timestamp=timestamp,
             source="backfill",
             description=description,
-            error_type=event.get("error_type"),
-            file_path=event.get("file_path") or event.get("file"),
+            error_type=error_type,
+            file_path=file_path,
             line_number=event.get("line_number") or event.get("line"),
-            stack_trace=event.get("stack_trace") or event.get("traceback"),
+            stack_trace=stack_trace,
             command=event.get("command"),
             exit_code=event.get("exit_code"),
             workflow_id=event.get("workflow_id"),
-            phase_id=event.get("phase_id"),
+            phase_id=phase_id,
             project_id=event.get("project_id"),
+            context=context,
         )
 
         # Add fingerprints

@@ -12,6 +12,7 @@ import uuid
 from .base import BaseDetector
 from ..fingerprint import Fingerprinter
 from ..models import ErrorEvent
+from ..context_extraction import extract_context
 
 
 class WorkflowLogDetector(BaseDetector):
@@ -100,15 +101,31 @@ class WorkflowLogDetector(BaseDetector):
         else:
             timestamp = datetime.utcnow()
 
+        description = event.get("description", event.get("message", "Unknown error"))
+        error_type = event.get("error_type")
+        file_path = event.get("file_path")
+        stack_trace = event.get("stack_trace")
+        phase_id = event.get("phase_id", self.phase_id)
+
+        # Extract context for intelligent pattern filtering
+        context = extract_context(
+            description=description,
+            error_type=error_type,
+            file_path=file_path,
+            stack_trace=stack_trace,
+            workflow_phase=phase_id,
+        )
+
         return ErrorEvent(
             error_id=event.get("error_id", f"wfl-{uuid.uuid4().hex[:8]}"),
             timestamp=timestamp,
             source="workflow_log",
-            description=event.get("description", event.get("message", "Unknown error")),
-            error_type=event.get("error_type"),
-            file_path=event.get("file_path"),
+            description=description,
+            error_type=error_type,
+            file_path=file_path,
             line_number=event.get("line_number"),
-            stack_trace=event.get("stack_trace"),
+            stack_trace=stack_trace,
             workflow_id=event.get("workflow_id", self.workflow_id),
-            phase_id=event.get("phase_id", self.phase_id),
+            phase_id=phase_id,
+            context=context,
         )
