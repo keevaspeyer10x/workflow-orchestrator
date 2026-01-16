@@ -6189,6 +6189,101 @@ def cmd_task_show(args):
         sys.exit(1)
 
 
+def cmd_heal(args):
+    """Handle heal subcommand."""
+    from src.healing.cli_heal import (
+        heal_status,
+        heal_apply,
+        heal_ignore,
+        heal_unquarantine,
+        heal_explain,
+        heal_export,
+        heal_backfill,
+    )
+
+    heal_action = args.heal_action
+
+    if heal_action == 'status':
+        sys.exit(heal_status())
+
+    elif heal_action == 'apply':
+        if not args.fix_id:
+            print("Error: fix_id is required")
+            sys.exit(1)
+        sys.exit(heal_apply(
+            args.fix_id,
+            force=getattr(args, 'force', False),
+            dry_run=getattr(args, 'dry_run', False)
+        ))
+
+    elif heal_action == 'ignore':
+        if not args.fingerprint:
+            print("Error: fingerprint is required")
+            sys.exit(1)
+        reason = getattr(args, 'reason', None)
+        if not reason:
+            print("Error: --reason is required for ignore")
+            sys.exit(1)
+        sys.exit(heal_ignore(args.fingerprint, reason))
+
+    elif heal_action == 'unquarantine':
+        if not args.fingerprint:
+            print("Error: fingerprint is required")
+            sys.exit(1)
+        reason = getattr(args, 'reason', None)
+        if not reason:
+            print("Error: --reason is required for unquarantine")
+            sys.exit(1)
+        sys.exit(heal_unquarantine(args.fingerprint, reason))
+
+    elif heal_action == 'explain':
+        if not args.fingerprint:
+            print("Error: fingerprint is required")
+            sys.exit(1)
+        sys.exit(heal_explain(args.fingerprint))
+
+    elif heal_action == 'export':
+        sys.exit(heal_export(
+            format=getattr(args, 'format', 'yaml'),
+            output=getattr(args, 'output', None)
+        ))
+
+    elif heal_action == 'backfill':
+        sys.exit(heal_backfill(
+            log_dir=getattr(args, 'log_dir', None),
+            dry_run=getattr(args, 'dry_run', False),
+            limit=getattr(args, 'limit', None)
+        ))
+
+    else:
+        print(f"Unknown heal action: {heal_action}")
+        sys.exit(1)
+
+
+def cmd_issues(args):
+    """Handle issues subcommand."""
+    from src.healing.cli_issues import (
+        issues_list,
+        issues_review,
+    )
+
+    issues_action = args.issues_action
+
+    if issues_action == 'list':
+        sys.exit(issues_list(
+            status=getattr(args, 'status', None),
+            severity=getattr(args, 'severity', None),
+            limit=getattr(args, 'limit', 20)
+        ))
+
+    elif issues_action == 'review':
+        sys.exit(issues_review())
+
+    else:
+        print(f"Unknown issues action: {issues_action}")
+        sys.exit(1)
+
+
 def main():
     # V3 Phase 0: Log operator mode for audit
     log_mode_detection()
@@ -6772,6 +6867,34 @@ Examples:
     task_show.set_defaults(func=cmd_task_show)
 
     task_parser.set_defaults(func=lambda args: task_parser.print_help() if not args.task_command else None)
+
+    # Heal command (Self-Healing Phase 4)
+    heal_parser = subparsers.add_parser('heal', help='Self-healing system commands (Phase 4)')
+    heal_parser.add_argument('heal_action',
+                             choices=['status', 'apply', 'ignore', 'unquarantine', 'explain', 'export', 'backfill'],
+                             help='Heal action')
+    heal_parser.add_argument('fix_id', nargs='?', help='Fix ID (for apply)')
+    heal_parser.add_argument('fingerprint', nargs='?', help='Pattern fingerprint (for ignore/unquarantine/explain)')
+    heal_parser.add_argument('--reason', help='Reason for ignore/unquarantine')
+    heal_parser.add_argument('--force', action='store_true', help='Force apply (bypass safety checks)')
+    heal_parser.add_argument('--dry-run', action='store_true', help='Preview without applying')
+    heal_parser.add_argument('--format', choices=['yaml', 'json'], default='yaml', help='Export format')
+    heal_parser.add_argument('--output', '-o', help='Output file for export')
+    heal_parser.add_argument('--log-dir', help='Log directory for backfill')
+    heal_parser.add_argument('--limit', type=int, help='Limit for backfill')
+    heal_parser.add_argument('-d', '--dir', help='Working directory')
+    heal_parser.set_defaults(func=cmd_heal)
+
+    # Issues command (Self-Healing Phase 4)
+    issues_parser = subparsers.add_parser('issues', help='Issue management commands (Phase 4)')
+    issues_parser.add_argument('issues_action',
+                               choices=['list', 'review'],
+                               help='Issues action')
+    issues_parser.add_argument('--status', choices=['open', 'resolved', 'ignored'], help='Filter by status')
+    issues_parser.add_argument('--severity', choices=['high', 'medium', 'low'], help='Filter by severity')
+    issues_parser.add_argument('--limit', type=int, default=20, help='Max results (default: 20)')
+    issues_parser.add_argument('-d', '--dir', help='Working directory')
+    issues_parser.set_defaults(func=cmd_issues)
 
     # Natural language command (Issue #60)
     if NL_AVAILABLE:

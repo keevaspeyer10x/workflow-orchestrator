@@ -308,3 +308,375 @@ class HealingSupabaseClient:
         except Exception as e:
             logger.error(f"Failed to unquarantine pattern: {e}")
             raise
+
+    async def get_all_patterns(self) -> list[dict]:
+        """Get all patterns for this project.
+
+        Returns:
+            List of all pattern dicts
+        """
+        try:
+            result = await (
+                self.client.table("error_patterns")
+                .select("*")
+                .eq("project_id", self.project_id)
+                .execute()
+            )
+            return result.data or []
+        except Exception as e:
+            logger.warning(f"Failed to get all patterns: {e}")
+            return []
+
+    async def list_issues(
+        self,
+        status: Optional[str] = None,
+        severity: Optional[str] = None,
+        has_fix: Optional[bool] = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        """List accumulated issues.
+
+        Args:
+            status: Filter by status (open, resolved, ignored)
+            severity: Filter by severity (high, medium, low)
+            has_fix: Filter by whether fix is available
+            limit: Maximum number of results
+
+        Returns:
+            List of issue dicts
+        """
+        try:
+            query = (
+                self.client.table("error_patterns")
+                .select("fingerprint, description, status, severity, has_fix, count:occurrence_count")
+                .eq("project_id", self.project_id)
+                .limit(limit)
+            )
+
+            if status:
+                query = query.eq("status", status)
+            if severity:
+                query = query.eq("severity", severity)
+            if has_fix is not None:
+                query = query.eq("has_fix", has_fix)
+
+            result = await query.execute()
+            return result.data or []
+        except Exception as e:
+            logger.warning(f"Failed to list issues: {e}")
+            return []
+
+    # ==================
+    # Phase 5: Metrics
+    # ==================
+
+    async def get_error_counts(self, start_date) -> dict:
+        """Get error detection counts since start_date.
+
+        Args:
+            start_date: Start of the analysis period
+
+        Returns:
+            Dict with detected and total_failures counts
+        """
+        try:
+            result = await self.client.rpc(
+                "get_error_counts",
+                {
+                    "p_project_id": self.project_id,
+                    "p_start_date": start_date.isoformat(),
+                },
+            ).execute()
+            return result.data or {"detected": 0, "total_failures": 0}
+        except Exception as e:
+            logger.warning(f"Failed to get error counts: {e}")
+            return {"detected": 0, "total_failures": 0}
+
+    async def get_fix_counts(self, start_date) -> dict:
+        """Get fix application counts since start_date.
+
+        Args:
+            start_date: Start of the analysis period
+
+        Returns:
+            Dict with applied and successful counts
+        """
+        try:
+            result = await self.client.rpc(
+                "get_fix_counts",
+                {
+                    "p_project_id": self.project_id,
+                    "p_start_date": start_date.isoformat(),
+                },
+            ).execute()
+            return result.data or {"applied": 0, "successful": 0}
+        except Exception as e:
+            logger.warning(f"Failed to get fix counts: {e}")
+            return {"applied": 0, "successful": 0}
+
+    async def get_cost_data(self, start_date) -> dict:
+        """Get cost tracking data since start_date.
+
+        Args:
+            start_date: Start of the analysis period
+
+        Returns:
+            Dict with total and daily_avg cost
+        """
+        try:
+            result = await self.client.rpc(
+                "get_cost_data",
+                {
+                    "p_project_id": self.project_id,
+                    "p_start_date": start_date.isoformat(),
+                },
+            ).execute()
+            return result.data or {"total": 0.0, "daily_avg": 0.0}
+        except Exception as e:
+            logger.warning(f"Failed to get cost data: {e}")
+            return {"total": 0.0, "daily_avg": 0.0}
+
+    async def get_pattern_counts(self, start_date) -> dict:
+        """Get pattern counts since start_date.
+
+        Args:
+            start_date: Start of the analysis period
+
+        Returns:
+            Dict with total and new pattern counts
+        """
+        try:
+            # Total patterns
+            total_result = await (
+                self.client.table("error_patterns")
+                .select("id", count="exact")
+                .eq("project_id", self.project_id)
+                .execute()
+            )
+            total = total_result.count or 0
+
+            # New patterns since start_date
+            new_result = await (
+                self.client.table("error_patterns")
+                .select("id", count="exact")
+                .eq("project_id", self.project_id)
+                .gte("created_at", start_date.isoformat())
+                .execute()
+            )
+            new = new_result.count or 0
+
+            return {"total": total, "new": new}
+        except Exception as e:
+            logger.warning(f"Failed to get pattern counts: {e}")
+            return {"total": 0, "new": 0}
+
+    async def get_top_errors(self, start_date, limit: int = 10) -> list[dict]:
+        """Get most frequent error patterns.
+
+        Args:
+            start_date: Start of the analysis period
+            limit: Maximum number of results
+
+        Returns:
+            List of top error patterns
+        """
+        try:
+            result = await (
+                self.client.table("error_patterns")
+                .select("fingerprint, description, occurrence_count")
+                .eq("project_id", self.project_id)
+                .order("occurrence_count", desc=True)
+                .limit(limit)
+                .execute()
+            )
+            return result.data or []
+        except Exception as e:
+            logger.warning(f"Failed to get top errors: {e}")
+            return []
+
+    async def get_daily_costs(self, start_date) -> list[dict]:
+        """Get daily cost history.
+
+        Args:
+            start_date: Start of the analysis period
+
+        Returns:
+            List of {date, cost_usd} dicts
+        """
+        try:
+            result = await self.client.rpc(
+                "get_daily_costs",
+                {
+                    "p_project_id": self.project_id,
+                    "p_start_date": start_date.isoformat(),
+                },
+            ).execute()
+            return result.data or []
+        except Exception as e:
+            logger.warning(f"Failed to get daily costs: {e}")
+            return []
+
+    async def get_pattern_growth(self, start_date) -> list[dict]:
+        """Get pattern growth over time.
+
+        Args:
+            start_date: Start of the analysis period
+
+        Returns:
+            List of {date, count} dicts
+        """
+        try:
+            result = await self.client.rpc(
+                "get_pattern_growth",
+                {
+                    "p_project_id": self.project_id,
+                    "p_start_date": start_date.isoformat(),
+                },
+            ).execute()
+            return result.data or []
+        except Exception as e:
+            logger.warning(f"Failed to get pattern growth: {e}")
+            return []
+
+    async def get_top_patterns(self, limit: int = 100) -> list[dict]:
+        """Get top patterns by usage frequency (for cache warming).
+
+        Args:
+            limit: Maximum number of patterns
+
+        Returns:
+            List of most frequently used patterns
+        """
+        try:
+            result = await (
+                self.client.table("error_patterns")
+                .select("*")
+                .eq("project_id", self.project_id)
+                .eq("quarantined", False)
+                .order("occurrence_count", desc=True)
+                .limit(limit)
+                .execute()
+            )
+            return result.data or []
+        except Exception as e:
+            logger.warning(f"Failed to get top patterns: {e}")
+            return []
+
+    # ==================
+    # Phase 5: Circuit Breaker
+    # ==================
+
+    async def get_circuit_state(self) -> Optional[dict]:
+        """Get circuit breaker state from config.
+
+        Returns:
+            Circuit state dict or None
+        """
+        try:
+            result = await (
+                self.client.table("healing_config")
+                .select("circuit_state, circuit_opened_at, circuit_reverts")
+                .eq("project_id", self.project_id)
+                .single()
+                .execute()
+            )
+            if result.data:
+                return {
+                    "state": result.data.get("circuit_state", "closed"),
+                    "opened_at": result.data.get("circuit_opened_at"),
+                    "reverts": result.data.get("circuit_reverts", []),
+                }
+            return None
+        except Exception:
+            return None
+
+    async def save_circuit_state(self, state_data: dict) -> None:
+        """Save circuit breaker state to config.
+
+        Args:
+            state_data: Circuit state dict
+        """
+        try:
+            await (
+                self.client.table("healing_config")
+                .upsert({
+                    "project_id": self.project_id,
+                    "circuit_state": state_data.get("state"),
+                    "circuit_opened_at": state_data.get("opened_at"),
+                    "circuit_reverts": state_data.get("reverts", []),
+                })
+                .execute()
+            )
+        except Exception as e:
+            logger.warning(f"Failed to save circuit state: {e}")
+
+    # ==================
+    # Phase 5: Flakiness Detection
+    # ==================
+
+    async def get_error_occurrences(
+        self,
+        fingerprint: str,
+        start_time,
+    ) -> list:
+        """Get occurrence timestamps for an error.
+
+        Args:
+            fingerprint: Error fingerprint
+            start_time: Start of analysis window
+
+        Returns:
+            List of occurrence timestamps
+        """
+        try:
+            result = await (
+                self.client.table("healing_audit")
+                .select("created_at")
+                .eq("project_id", self.project_id)
+                .eq("details->>fingerprint", fingerprint)
+                .gte("created_at", start_time.isoformat())
+                .order("created_at")
+                .execute()
+            )
+            return [r["created_at"] for r in (result.data or [])]
+        except Exception as e:
+            logger.warning(f"Failed to get error occurrences: {e}")
+            return []
+
+    # ==================
+    # Phase 5: Backfill
+    # ==================
+
+    async def record_historical_error(self, error) -> None:
+        """Record a historical error from backfill.
+
+        Args:
+            error: ErrorEvent to record
+        """
+        try:
+            # Check if pattern already exists
+            existing = await self.lookup_pattern(error.fingerprint)
+
+            if existing:
+                # Update occurrence count
+                await self.client.rpc(
+                    "increment_pattern_stat",
+                    {
+                        "p_fingerprint": error.fingerprint,
+                        "p_project_id": self.project_id,
+                        "p_column": "occurrence_count",
+                    },
+                ).execute()
+            else:
+                # Create new pattern
+                pattern = {
+                    "fingerprint": error.fingerprint,
+                    "fingerprint_coarse": error.fingerprint_coarse,
+                    "description": self.scrubber.scrub(error.description),
+                    "project_id": self.project_id,
+                    "source": "backfill",
+                    "occurrence_count": 1,
+                }
+                await self.record_pattern(pattern)
+        except Exception as e:
+            logger.warning(f"Failed to record historical error: {e}")

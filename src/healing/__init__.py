@@ -32,6 +32,18 @@ Phase 3a: Validation Logic (complete)
 Phase 3b: Fix Application (complete)
 - ContextRetriever: Get file context for fixes
 - FixApplicator: Environment-aware fix application
+
+Phase 4: CLI & Workflow Integration (complete)
+- cli_heal: CLI commands for healing system
+- cli_issues: CLI commands for issue management
+- hooks: Workflow engine integration hooks
+
+Phase 5: Observability & Hardening (complete)
+- metrics: Dashboard metrics collection
+- circuit_breaker: Prevent runaway auto-fixing
+- flakiness: Detect intermittent errors
+- cache_optimizer: Local cache optimization
+- backfill: Historical log processing
 """
 
 from .environment import Environment, detect_environment, ENVIRONMENT, get_environment
@@ -71,6 +83,16 @@ from .validation import (
 # Phase 3b imports
 from .context import ContextRetriever, FileContext, ContextBundle
 from .applicator import FixApplicator, ApplyResult, VerifyResult
+
+# Phase 4 imports
+from .hooks import HealingHooks, get_hooks, reset_hooks, init_hooks
+
+# Phase 5 imports
+from .circuit_breaker import CircuitBreaker, CircuitState, CircuitBreakerConfig, get_circuit_breaker, reset_circuit_breaker
+from .metrics import HealingMetrics, DashboardMetrics
+from .flakiness import FlakinessDetector, FlakinessResult
+from .cache_optimizer import CacheOptimizer
+from .backfill import HistoricalBackfill
 
 __all__ = [
     # Phase 0
@@ -146,4 +168,25 @@ __all__ = [
     "FixApplicator",
     "ApplyResult",
     "VerifyResult",
+    # Phase 4 - Hooks
+    "HealingHooks",
+    "get_hooks",
+    "reset_hooks",
+    "init_hooks",
+    # Phase 5 - Circuit Breaker
+    "CircuitBreaker",
+    "CircuitState",
+    "CircuitBreakerConfig",
+    "get_circuit_breaker",
+    "reset_circuit_breaker",
+    # Phase 5 - Metrics
+    "HealingMetrics",
+    "DashboardMetrics",
+    # Phase 5 - Flakiness Detection
+    "FlakinessDetector",
+    "FlakinessResult",
+    # Phase 5 - Cache Optimizer
+    "CacheOptimizer",
+    # Phase 5 - Backfill
+    "HistoricalBackfill",
 ]

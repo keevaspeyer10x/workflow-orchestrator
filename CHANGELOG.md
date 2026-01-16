@@ -4,6 +4,58 @@ All notable changes to the workflow-orchestrator.
 
 ## [Unreleased]
 
+### Added
+- **Self-Healing Infrastructure Phase 4**: CLI & Workflow Integration
+  - `src/healing/cli_heal.py`: CLI commands for healing system
+    - `orchestrator heal status`: Show healing system status (environment, kill switch, costs, patterns)
+    - `orchestrator heal apply <fix-id>`: Apply a fix with optional `--dry-run`
+    - `orchestrator heal ignore <fingerprint>`: Mark error as false positive
+    - `orchestrator heal unquarantine <fingerprint>`: Remove from quarantine list
+    - `orchestrator heal explain <fingerprint>`: Explain error and fix rationale
+    - `orchestrator heal export`: Export patterns/fixes to JSON/YAML/CSV
+    - `orchestrator heal backfill`: Backfill historical logs into pattern database
+  - `src/healing/cli_issues.py`: CLI commands for issue management
+    - `orchestrator issues list`: List accumulated issues with filters
+    - `orchestrator issues review`: Interactive review of pending issues
+  - `src/healing/hooks.py`: HealingHooks for workflow integration
+    - `on_phase_complete()`: Hook for phase completion events
+    - `on_subprocess_complete()`: Hook for command execution events
+    - `on_workflow_complete()`: Hook for workflow completion
+    - `on_learn_phase_complete()`: Hook for LEARN phase learnings capture
+  - CLI integrated into `src/cli.py` with argparse subparsers
+  - 11 unit tests for CLI commands in `tests/healing/test_cli_heal.py`
+
+- **Self-Healing Infrastructure Phase 5**: Observability & Hardening
+  - `src/healing/circuit_breaker.py`: Circuit breaker pattern for fix safety
+    - CircuitState enum: CLOSED (normal), OPEN (blocked), HALF_OPEN (testing)
+    - Trips after 2 reverts within 1 hour, 30-minute cooldown
+    - State persistence to Supabase via `load_state()`/`save_state()`
+    - Global instance via `get_circuit_breaker()`/`reset_circuit_breaker()`
+  - `src/healing/metrics.py`: Metrics collection and dashboard
+    - DashboardMetrics dataclass: detection_rate, auto_fix_rate, success_rate
+    - HealingMetrics class: `get_dashboard_data()` for metrics retrieval
+    - Cost tracking, pattern counts, top errors
+  - `src/healing/flakiness.py`: Flakiness detection for intermittent errors
+    - FlakinessDetector class: variance-based analysis of error timing
+    - FlakinessResult dataclass with determinism_score (0.0=flaky, 1.0=deterministic)
+    - Configurable variance threshold (default: 1 hour) and min occurrences (3)
+  - `src/healing/cache_optimizer.py`: Cache warming for pattern pre-loading
+    - CacheOptimizer class: `warm_cache()` for LOCAL environment
+    - Configurable cache limit and TTL (24 hours default)
+  - `src/healing/backfill.py`: Historical log backfill
+    - HistoricalBackfill class: `backfill_workflow_logs()` for .workflow_log.jsonl
+    - Processes error events and records to Supabase
+  - `src/healing/supabase_client.py`: Extended with 15+ new methods
+    - Pattern methods: `get_all_patterns()`, `get_top_patterns()`, `get_pattern_counts()`, `get_pattern_growth()`
+    - Issue methods: `list_issues()`, `get_error_counts()`, `get_fix_counts()`
+    - Cost methods: `get_cost_data()`, `get_daily_costs()`
+    - Circuit breaker: `get_circuit_state()`, `save_circuit_state()`
+    - Flakiness: `get_error_occurrences()`
+    - Backfill: `record_historical_error()`
+  - 19 unit tests in `tests/healing/test_circuit_breaker.py`
+  - 7 unit tests in `tests/healing/test_flakiness.py`
+  - All 376 healing tests pass (Phases 0-5 complete)
+
 ### Fixed
 - **State file integrity warnings (#94)**: Fixed false-positive integrity check warnings
   - Root cause: `_version` field included in checksum on save but removed before verification on load
