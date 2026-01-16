@@ -1,1 +1,0 @@
-{"timestamp": "2026-01-16T09:59:14.552651+00:00", "event": "workflow_finish", "hash": "75ec98d335bc7e9e49034d6e466d49e8", "data": {"workflow_id": "<MagicMock name='get_engine().state.workflow_id' id='123584003393776'>", "status": "completed"}}

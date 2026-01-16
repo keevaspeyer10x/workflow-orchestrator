@@ -11,6 +11,38 @@ All notable changes to the workflow-orchestrator.
   - Added 6 unit tests for checksum computation in `tests/test_state_version.py`
 
 ### Added
+- **Self-Healing Infrastructure Phase 2**: Pattern Memory, Lookup & Security
+  - `src/healing/security.py`: SecurityScrubber removes secrets/PII before storage
+    - 13 regex patterns: API keys, bearer tokens, passwords, AWS keys, PEM, connection strings, emails, GitHub/Slack tokens
+    - Methods: `scrub()`, `scrub_error()`, `scrub_dict()`
+  - `src/healing/embeddings.py`: OpenAI embedding service for RAG semantic search
+    - Uses `text-embedding-ada-002` model (1536 dimensions)
+    - Graceful degradation when API key unavailable
+  - `src/healing/preseeded_patterns.py`: 30 pre-built patterns for common errors
+    - Python: ModuleNotFoundError, SyntaxError, ImportError, PermissionError, FileNotFoundError, AssertionError, pytest, type errors
+    - Node.js: Cannot find module, ENOENT, EACCES, SyntaxError, TypeError
+    - Go: undefined, cannot find package, permission denied
+    - Rust: cannot find, unresolved import, mismatched types, borrow checker
+    - `match_preseeded()` for local pattern matching
+  - `src/healing/supabase_client.py`: HealingSupabaseClient for pattern storage
+    - Tier 1: Exact fingerprint lookup with project_id filtering
+    - Tier 2: RAG semantic search via `match_learnings` RPC (0.7 threshold)
+    - Tier 3: Causality traversal via `get_error_causes` RPC (depth parameter)
+    - Methods: `lookup_pattern()`, `lookup_similar()`, `get_causes()`, `record_pattern()`, `record_fix_result()`, `audit_log()`
+  - `src/healing/pattern_generator.py`: LLM-based pattern generation
+    - Uses Claude Sonnet for fix extraction from diffs
+    - Methods: `generate_from_diff()`, `extract_from_transcript()`
+  - `src/healing/client.py`: Unified HealingClient with three-tier lookup
+    - `LookupResult` dataclass with tier, pattern, source, causes
+    - Cascade: Cache → Supabase exact → RAG semantic → Causality
+    - 0.85 similarity threshold for RAG matches
+  - `migrations/001_healing_schema.sql`: Supabase schema
+    - Tables: `healing_config`, `error_patterns`, `learnings`, `causality_edges`, `healing_audit`
+    - pgvector for semantic search with IVFFlat index
+    - RPC functions: `match_learnings`, `get_error_causes`, `increment_pattern_stat`
+    - Row Level Security policies
+  - 93 unit tests for Phase 2 components
+  - All 240 healing tests pass (147 Phase 1 + 93 Phase 2)
 - **Self-Healing Infrastructure Phase 1**: Detection, Fingerprinting & Config
   - `src/healing/config.py`: HealingConfig from environment variables (Supabase in Phase 2)
     - Kill switch support, cost controls, protected paths, timeouts

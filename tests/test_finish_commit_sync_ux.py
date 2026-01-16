@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 from unittest.mock import MagicMock, patch, ANY
 from src.cli import cmd_finish
 from src.schema import ItemStatus
@@ -49,6 +50,9 @@ class TestFinishCommitSyncUX:
     @patch('src.cli.OrchestratorPaths')
     def test_finish_updates_skipped_item_on_success(self, mock_paths, mock_session, mock_sync_cls, mock_get_engine, mock_engine, mock_args):
         """Should update commit_and_sync status to COMPLETED if auto-sync succeeds."""
+        # Configure mock paths to avoid MagicMock directory creation
+        mock_paths.return_value.orchestrator_dir = Path("mock_orch_dir")
+        
         mock_get_engine.return_value = mock_engine
         
         # Setup sync success
@@ -74,6 +78,9 @@ class TestFinishCommitSyncUX:
     @patch('src.cli.OrchestratorPaths')
     def test_finish_keeps_skipped_on_sync_failure(self, mock_paths, mock_session, mock_sync_cls, mock_get_engine, mock_engine, mock_args):
         """Should keep commit_and_sync as SKIPPED if auto-sync fails."""
+        # Configure mock paths to avoid MagicMock directory creation
+        mock_paths.return_value.orchestrator_dir = Path("mock_orch_dir")
+
         mock_get_engine.return_value = mock_engine
         
         # Setup sync failure
@@ -98,6 +105,9 @@ class TestFinishCommitSyncUX:
     @patch('src.cli.OrchestratorPaths')
     def test_finish_keeps_skipped_on_no_push(self, mock_paths, mock_session, mock_sync_cls, mock_get_engine, mock_engine, mock_args):
         """Should keep commit_and_sync as SKIPPED if --no-push is used."""
+        # Configure mock paths to avoid MagicMock directory creation
+        mock_paths.return_value.orchestrator_dir = Path("mock_orch_dir")
+
         mock_get_engine.return_value = mock_engine
         mock_args.no_push = True
         
@@ -120,6 +130,9 @@ class TestFinishCommitSyncUX:
     @patch('src.cli.OrchestratorPaths')
     def test_finish_ignores_already_completed(self, mock_paths, mock_session, mock_sync_cls, mock_get_engine, mock_engine, mock_args):
         """Should not modify status if already COMPLETED."""
+        # Configure mock paths to avoid MagicMock directory creation
+        mock_paths.return_value.orchestrator_dir = Path("mock_orch_dir")
+
         mock_get_engine.return_value = mock_engine
         
         # Setup sync success
