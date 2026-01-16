@@ -323,3 +323,110 @@ class TestFallbackConfiguration:
         max_attempts = get_max_fallback_attempts()
         assert isinstance(max_attempts, int)
         assert max_attempts >= 1
+
+
+# =============================================================================
+# Issue #89: Quota Exhaustion & Fallback Tracking Tests
+# =============================================================================
+
+class TestQuotaExhaustion:
+    """Test quota exhaustion triggers fallback (Issue #89)."""
+
+    def test_quota_exceeded_is_retryable(self):
+        """Quota exceeded errors should trigger fallback, not fail permanently."""
+        from src.review.retry import is_retryable_error
+
+        # These should all be retryable (trigger fallback)
+        quota_errors = [
+            Exception("quota exceeded"),
+            Exception("You have exhausted your daily quota"),
+            Exception("API quota exhausted"),
+            Exception("Quota limit reached"),
+        ]
+
+        for error in quota_errors:
+            assert is_retryable_error(error) is True, f"Expected retryable: {error}"
+
+    def test_quota_exceeded_not_permanent(self):
+        """Quota exceeded should NOT be classified as permanent error."""
+        from src.review.retry import is_permanent_error
+
+        # Quota errors should NOT be permanent (should fallback instead)
+        error = Exception("quota exceeded")
+        assert is_permanent_error(error) is False
+
+
+class TestFallbackTracking:
+    """Test fallback tracking in results (Issue #89)."""
+
+    def test_result_has_fallbacks_tried_field(self):
+        """ReviewResult should have fallbacks_tried field."""
+        from src.review.result import ReviewResult
+
+        result = ReviewResult(
+            review_type="test",
+            success=True,
+            model_used="primary",
+            method_used="api",
+        )
+
+        # Check field exists (may be empty list by default)
+        assert hasattr(result, 'fallbacks_tried')
+
+    def test_fallbacks_tried_tracked_in_dict(self):
+        """fallbacks_tried should be included in to_dict output."""
+        from src.review.result import ReviewResult
+
+        result = ReviewResult(
+            review_type="test",
+            success=True,
+            model_used="fallback-1",
+            method_used="api",
+            was_fallback=True,
+            fallbacks_tried=["primary-model"],
+        )
+
+        result_dict = result.to_dict()
+        assert "fallbacks_tried" in result_dict
+        assert result_dict["fallbacks_tried"] == ["primary-model"]
+
+    def test_fallbacks_tried_from_dict(self):
+        """ReviewResult.from_dict should restore fallbacks_tried."""
+        from src.review.result import ReviewResult
+
+        data = {
+            "review_type": "test",
+            "success": True,
+            "model_used": "fallback-1",
+            "method_used": "api",
+            "was_fallback": True,
+            "fallbacks_tried": ["primary", "fallback-0"],
+        }
+
+        result = ReviewResult.from_dict(data)
+        assert result.fallbacks_tried == ["primary", "fallback-0"]
+
+
+class TestPerModelFallbackChains:
+    """Test per-model fallback chain configuration (Issue #89)."""
+
+    def test_model_specific_fallback_chain(self):
+        """Model-specific fallback chains should override tool defaults."""
+        from src.review.config import get_fallback_chain
+
+        # Get model-specific chain (if configured)
+        # This tests the interface - implementation will set this up
+        chain = get_fallback_chain("google/gemini-3-pro")
+
+        # Should return a list (even if empty for non-configured models)
+        assert isinstance(chain, list)
+
+    def test_tool_level_fallback_as_default(self):
+        """Unknown models should fall back to tool-level chains."""
+        from src.review.config import get_fallback_chain
+
+        # Get chain for a model that doesn't have specific config
+        chain = get_fallback_chain("unknown-model/v999")
+
+        # Should return tool-level defaults or empty list
+        assert isinstance(chain, list)

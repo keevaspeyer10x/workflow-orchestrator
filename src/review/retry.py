@@ -81,8 +81,7 @@ def is_permanent_error(error: Exception) -> bool:
         "safety",
         "blocked",
         "harmful",
-        # Quota/billing (not transient rate limits)
-        "quota exceeded",
+        # Billing (not quota - quota should trigger fallback per Issue #89)
         "billing",
         "payment required",
         "402",
@@ -158,6 +157,11 @@ def is_retryable_error(error: Exception) -> bool:
         "overloaded",
         "capacity",
         "try again",
+        # Issue #89: Quota exhaustion should trigger fallback, not fail permanently
+        "quota exceeded",
+        "quota exhausted",
+        "exhausted your daily quota",
+        "quota limit",
     ]
 
     # If error message contains transient patterns, retry

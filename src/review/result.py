@@ -150,9 +150,10 @@ class ReviewResult:
     error: Optional[str] = None
     duration_seconds: Optional[float] = None
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    # WF-035 Phase 4: Fallback tracking
+    # WF-035 Phase 4 + Issue #89: Enhanced fallback tracking
     was_fallback: bool = False  # True if a fallback model was used instead of primary
     fallback_reason: Optional[str] = None  # Why fallback was needed (e.g., "Primary rate limited")
+    fallbacks_tried: list[str] = field(default_factory=list)  # Issue #89: Models attempted before success
     # CORE-026: Error type classification for recovery guidance
     error_type: ReviewErrorType = ReviewErrorType.NONE
 
@@ -180,9 +181,10 @@ class ReviewResult:
             "duration_seconds": self.duration_seconds,
             "timestamp": self.timestamp.isoformat(),
             "blocking_count": self.blocking_count,
-            # WF-035 Phase 4: Fallback tracking
+            # WF-035 Phase 4 + Issue #89: Enhanced fallback tracking
             "was_fallback": self.was_fallback,
             "fallback_reason": self.fallback_reason,
+            "fallbacks_tried": self.fallbacks_tried,  # Issue #89
             # CORE-026: Error type classification
             "error_type": self.error_type.value,
         }
@@ -209,9 +211,10 @@ class ReviewResult:
             error=data.get("error"),
             duration_seconds=data.get("duration_seconds"),
             timestamp=timestamp,
-            # WF-035 Phase 4: Fallback tracking
+            # WF-035 Phase 4 + Issue #89: Enhanced fallback tracking
             was_fallback=data.get("was_fallback", False),
             fallback_reason=data.get("fallback_reason"),
+            fallbacks_tried=data.get("fallbacks_tried", []),  # Issue #89
             # CORE-026: Error type classification
             error_type=ReviewErrorType.from_string(data.get("error_type", "")),
         )

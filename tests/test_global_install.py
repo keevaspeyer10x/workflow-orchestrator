@@ -198,7 +198,7 @@ class TestPackageStructure:
         """Version is defined in cli.py."""
         from src.cli import VERSION
         assert VERSION is not None
-        assert VERSION == "2.0.0"
+        assert VERSION == "3.0.0"
 
 
 class TestBackwardCompatibility:

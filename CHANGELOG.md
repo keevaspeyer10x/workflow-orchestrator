@@ -5,6 +5,22 @@ All notable changes to the workflow-orchestrator.
 ## [Unreleased]
 
 ### Added
+- **Zero-Human Mode with Minds Proxy (#39)**: Multi-model consensus for autonomous gate decisions
+  - `MindsGateProxy` class orchestrates multi-model voting for gate decisions
+  - Weighted voting: ChatGPT/Claude (2.0), Gemini (1.5), Grok (1.0), DeepSeek (0.5)
+  - Re-deliberation feature: dissenting models see other reasoning before final vote
+  - Certainty-based escalation: high certainty (>=0.95) proceeds even on CRITICAL
+  - Full decision audit trail with rollback commands in `minds_decisions.jsonl`
+  - Configurable via `workflow.yaml` supervision settings
+- **Model Fallback on Quota Exhaustion (#89)**: Automatic fallback to alternative models
+  - Quota errors now trigger fallback chain instead of permanent failure
+  - `ReviewResult.fallbacks_tried` tracks attempted models
+  - Moved quota patterns to transient errors in `retry.py`
+- **Automated Design Validation (#91)**: Compare implementation against plan
+  - `DesignValidationResult` with status: PASS, PASS_WITH_NOTES, NEEDS_REVISION, SKIP
+  - Lenient mode (default): only flags major scope creep, not minor additions
+  - Tracks: planned items implemented, unplanned additions, deviations
+  - Uses LLM fallback chain for resilience
 - **Plan Validation Review (#88)**: Pre-implementation review in PLAN phase
   - Reviews `docs/plan.md` BEFORE implementation to catch flawed designs while changes are cheap
   - 10 checkpoints: Request Completeness, Requirements Alignment, Security & Compliance,
