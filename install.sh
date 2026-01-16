@@ -11,6 +11,44 @@ pip install -q aider-chat 2>/dev/null || echo "Note: aider-chat install skipped 
 echo "Enabling automatic updates for this repo..."
 orchestrator setup
 
+echo "Adding orchestrator instructions to CLAUDE.md..."
+ORCHESTRATOR_SECTION='
+## Workflow Orchestrator
+
+This project uses **workflow-orchestrator** (we call it "orchestrator" for short).
+
+### Quick Reference
+- `orchestrator status` - Check current workflow state
+- `orchestrator start "task"` - Start a new workflow
+- `orchestrator advance` - Move to next phase
+
+### Installation (for fresh environments like Claude Code Web)
+```bash
+curl -sSL https://raw.githubusercontent.com/keevaspeyer10x/workflow-orchestrator/main/install.sh | bash
+```
+
+### Usage
+Say things like:
+- "Use orchestrator to implement feature X"
+- "Start a workflow for fixing the bug"
+- "What'\''s the orchestrator status?"
+
+For full documentation, see: https://github.com/keevaspeyer10x/workflow-orchestrator
+'
+
+# Add to CLAUDE.md if not already present
+if [ -f "CLAUDE.md" ]; then
+    if ! grep -q "workflow-orchestrator" CLAUDE.md; then
+        echo "$ORCHESTRATOR_SECTION" >> CLAUDE.md
+        echo "  Added orchestrator section to existing CLAUDE.md"
+    else
+        echo "  CLAUDE.md already has orchestrator instructions"
+    fi
+else
+    echo "$ORCHESTRATOR_SECTION" > CLAUDE.md
+    echo "  Created CLAUDE.md with orchestrator instructions"
+fi
+
 echo ""
 echo "============================================================"
 echo "IMPORTANT: API Keys for External Reviews"
