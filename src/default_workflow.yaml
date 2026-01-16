@@ -184,6 +184,87 @@ phases:
           type: "file_exists"
           path: "{{docs_dir}}/risk_analysis.md"
 
+      - id: "plan_validation"
+        name: "Plan Validation Review"
+        description: |
+          Review docs/plan.md BEFORE implementation to catch flawed designs while changes are cheap.
+          Uses multi-model review (minds ask) to validate the plan is complete, optimal, and implementable.
+
+          Run: minds ask "<prompt below>" --file docs/plan.md
+
+          ## Pre-Check: Request Completeness
+          First, compare the plan against the original request/issue. List:
+          - Requirements ADDRESSED in plan (with section reference)
+          - Requirements MISSING from plan (flag for immediate fix)
+          - Requirements DEFERRED (must have strong justification + issue created)
+
+          ## Checkpoints (in priority order)
+
+          1. **Request Completeness** (Critical): Does plan address ALL items from original request?
+             Nothing missing or silently dropped? Deferred items have justification?
+
+          2. **Requirements Alignment** (Critical): All requirements traced to implementation steps?
+             Scope additions justified? (OK if: supports stated objectives, improves functionality/UX)
+             Testable acceptance criteria defined?
+
+          3. **Security & Compliance** (Critical): Auth/authz impacts? Data privacy?
+             Input validation? Threat considerations for this change?
+
+          4. **Risk Mitigation** (Critical): Each identified risk has CONCRETE mitigation (not vague)?
+             High-impact risks have rollback/disable plan?
+
+          5. **Objective-Driven Optimality** (High): Is this the optimal solution for the
+             UNDERLYING OBJECTIVE (not just simplest)? Were alternatives evaluated against
+             the actual goal? Trade-offs justified?
+
+          6. **Dependencies & Integration** (High): External services, APIs, libraries identified?
+             Version constraints? Breaking change risks? Integration points mapped?
+
+          7. **Edge Cases & Failure Modes** (High): Error scenarios identified WITH handling
+             strategies? Boundary conditions covered?
+
+          8. **Testing & Success Criteria** (High): How will success be measured?
+             Test approach defined? What does "done" look like?
+
+          9. **Implementability** (Medium): Steps clear and ordered? No TBD/TODO in critical
+             sections? Dependencies between steps identified?
+
+          10. **Operational Readiness** (Medium): Monitoring/logging needed? Rollout plan?
+              How to diagnose failures?
+
+          ## Output Format
+          For each issue found:
+          - **Section**: Quote from plan.md
+          - **Checkpoint**: Which checkpoint failed
+          - **Severity**: BLOCKING | SHOULD_FIX | CONSIDER
+          - **Gap**: What's wrong or missing
+          - **Fix**: The ACTUAL fix to apply (not vague "improve this") - provide specific text/changes
+
+          Then list what's done WELL (minimum 2 items) to prevent over-criticism bias.
+
+          ## Verdict
+          APPROVED - Plan is sound, proceed to implementation
+          APPROVED_WITH_NOTES - Minor suggestions, non-blocking, proceed
+          NEEDS_REVISION - Issues found; apply the fixes provided above, then re-validate (max 2 cycles)
+          BLOCKED - Cannot evaluate, missing critical information (specify what's needed)
+          ESCALATE - Fundamental gaps requiring human/architectural decision
+
+          Include: one-sentence rationale for verdict
+        required: true
+        skippable: true
+        skip_conditions:
+          - "trivial_change"           # <50 lines, ≤2 files, no logic/behavior change
+          - "simple_bug_fix"           # Isolated fix, root cause confirmed, <20 lines
+          - "well_understood_pattern"  # Standard boilerplate following existing template
+        notes:
+          - "[purpose] Catch flawed plans BEFORE implementation, when changes are cheap"
+          - "[checkpoints] 10 checkpoints: Request Completeness, Requirements, Security, Risk, Objective-Driven Optimality, Dependencies, Edge Cases, Testing, Implementability, Operational Readiness"
+          - "[verdicts] 5 verdicts: APPROVED, APPROVED_WITH_NOTES, NEEDS_REVISION (with fixes), BLOCKED, ESCALATE"
+          - "[fix-not-flag] When issues found, provide the ACTUAL fix to apply, not just flag the problem"
+          - "[never-skip] Security-sensitive, data migrations, breaking API changes, multi-system impact"
+          - "[completeness] Ensures nothing from original request is missing or silently dropped"
+          - "[minds] Designed with input from Claude, GPT, Grok, DeepSeek consensus (Issue #88)"
+
       - id: "define_test_cases"
         name: "Define Test Cases"
         description: "Outline the test cases that will be used to verify the feature in {{tests_dir}}/test_cases.md. For UI changes, include visual/screenshot test cases."
@@ -354,7 +435,7 @@ phases:
         notes:
           - "[purpose] Bridges design intent → implementation reality"
           - "[evidence] Require file:line citations, not assertions"
-          - "[scope] Flag undocumented features as potential scope creep"
+          - "[scope] Flag undocumented features - OK if justified (supports objectives, improves functionality/UX)"
           - "[action] On deviation: fix code OR update plan.md (document decision)"
           - "[minds] Designed with input from Claude, GPT, Grok, DeepSeek consensus"
 
