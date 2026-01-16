@@ -213,23 +213,12 @@ tests/healing/
 
 ## Execution Mode
 
-**SEQUENTIAL execution** - Decision documented:
-
-**Rationale:**
-1. Components have tight dependencies (each builds on previous)
-2. Shared data models require coordination that would add overhead
-3. Total implementation ~500 lines - not large enough for parallel benefit
-4. Verification between layers catches issues early
-
-**Order:**
-1. `config.py` + tests
-2. `models.py` + tests
-3. `fingerprint.py` + tests
-4. `detectors/base.py`
-5. `detectors/workflow_log.py` + `detectors/subprocess.py` + tests
-6. `detectors/transcript.py` + `detectors/hook.py` + tests
-7. `accumulator.py` + tests
-8. Integration tests
+**PARALLEL execution** - The following can be implemented independently:
+- `config.py` + tests
+- `models.py` + `fingerprint.py` + tests
+- `detectors/workflow_log.py` + `detectors/subprocess.py` + tests
+- `detectors/transcript.py` + `detectors/hook.py` + tests (after base)
+- `accumulator.py` + tests (after models)
 
 ## Success Criteria (Done Criteria from Plan)
 

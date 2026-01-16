@@ -1,191 +1,173 @@
-# Phase 0: Abstraction Layer - Test Cases
+# Test Cases: Phase 1 - Detection, Fingerprinting & Config
 
-**Task:** Implement Phase 0 of Self-Healing Infrastructure
 **Date:** 2026-01-16
 
 ---
 
-## Test Structure
+## 1. Configuration Tests (`tests/healing/test_config.py`)
 
-```
-tests/healing/
-├── __init__.py
-├── test_environment.py
-└── adapters/
-    ├── __init__.py
-    ├── test_storage_local.py
-    ├── test_storage_github.py
-    ├── test_git_local.py
-    ├── test_git_github.py
-    ├── test_cache_local.py
-    ├── test_cache_memory.py
-    ├── test_execution_local.py
-    ├── test_execution_github.py
-    └── test_factory.py
-```
+### 1.1 Environment Variable Loading
+- `test_config_from_environment_defaults` - Returns defaults when no env vars set
+- `test_config_from_environment_enabled` - Reads HEALING_ENABLED correctly
+- `test_config_from_environment_kill_switch` - Reads HEALING_KILL_SWITCH correctly
+- `test_config_from_environment_cost_limits` - Parses HEALING_MAX_DAILY_COST as float
+- `test_config_from_environment_protected_paths` - Parses comma-separated globs
+- `test_config_from_environment_invalid_float` - Falls back to default on invalid
+
+### 1.2 Kill Switch Behavior
+- `test_kill_switch_active` - Returns True when kill_switch_active=True
+- `test_kill_switch_inactive` - Returns False when kill_switch_active=False
+
+**Total: 8 tests**
 
 ---
 
-## Test Cases by Component
+## 2. Error Event Model Tests (`tests/healing/test_models.py`)
 
-### 1. Environment Detection (`test_environment.py`)
+### 2.1 ErrorEvent Creation
+- `test_error_event_required_fields` - Creates with required fields only
+- `test_error_event_all_fields` - Creates with all optional fields
+- `test_error_event_timestamp_default` - Uses provided timestamp
+- `test_error_event_source_literal` - Validates source is one of allowed values
 
-| ID | Test Case | Expected Result |
-|----|-----------|-----------------|
-| ENV-001 | `detect_environment()` with `CLAUDE_CODE_WEB=1` | Returns `Environment.CLOUD` |
-| ENV-002 | `detect_environment()` with `CI=true` | Returns `Environment.CI` |
-| ENV-003 | `detect_environment()` with `GITHUB_ACTIONS=true` | Returns `Environment.CI` |
-| ENV-004 | `detect_environment()` without special env vars | Returns `Environment.LOCAL` |
-| ENV-005 | `ENVIRONMENT` singleton is set on module import | Global is populated |
+**Total: 4 tests**
 
-### 2. Storage Adapter - Local (`test_storage_local.py`)
+---
 
-| ID | Test Case | Expected Result |
-|----|-----------|-----------------|
-| STL-001 | `read_file()` existing file | Returns file content |
-| STL-002 | `read_file()` non-existent file | Raises `FileNotFoundError` |
-| STL-003 | `write_file()` new file | Creates file with content |
-| STL-004 | `write_file()` existing file | Overwrites content |
-| STL-005 | `file_exists()` existing file | Returns `True` |
-| STL-006 | `file_exists()` non-existent file | Returns `False` |
-| STL-007 | `list_files()` with pattern | Returns matching files |
-| STL-008 | `list_files()` empty directory | Returns empty list |
+## 3. Fingerprinter Tests (`tests/healing/test_fingerprint.py`)
 
-### 3. Storage Adapter - GitHub (`test_storage_github.py`)
+### 3.1 Basic Fingerprinting
+- `test_fingerprint_same_error_same_hash` - Same error produces same fingerprint
+- `test_fingerprint_different_error_different_hash` - Different errors produce different fingerprints
+- `test_fingerprint_length` - Fingerprint is 16 hex characters
+- `test_fingerprint_coarse_length` - Coarse fingerprint is 8 hex characters
 
-| ID | Test Case | Expected Result |
-|----|-----------|-----------------|
-| STG-001 | `read_file()` existing file | Returns decoded content from API |
-| STG-002 | `read_file()` non-existent file | Raises appropriate error |
-| STG-003 | `write_file()` new file | Creates commit via API |
-| STG-004 | `write_file()` existing file | Updates file via API |
-| STG-005 | `file_exists()` existing file | Returns `True` |
-| STG-006 | `file_exists()` non-existent file | Returns `False` |
-| STG-007 | API rate limit handling | Retries with backoff on 429 |
-| STG-008 | Invalid token | Raises `AuthenticationError` |
+### 3.2 Normalization
+- `test_normalize_file_paths` - `/home/user/project/foo.py` → `<path>/foo.py`
+- `test_normalize_line_numbers` - `foo.py:123` → `foo.py:<line>`
+- `test_normalize_uuids` - UUIDs → `<uuid>`
+- `test_normalize_timestamps` - Various timestamp formats → `<timestamp>`
+- `test_normalize_memory_addresses` - `0x7fff12345678` → `<addr>`
+- `test_normalize_temp_paths` - `/tmp/xxx/` → `<tmpdir>/`
+- `test_normalize_pids` - `pid=12345` → `pid=<pid>`
+- `test_normalize_long_strings` - Long quoted strings → `"<string>"`
 
-### 4. Git Adapter - Local (`test_git_local.py`)
+### 3.3 Error Type Extraction
+- `test_extract_error_type_python` - `TypeError: ...` → `TypeError`
+- `test_extract_error_type_python_exception` - `ValueError: ...` → `ValueError`
+- `test_extract_error_type_node` - `Error: ...` → `Error`
+- `test_extract_error_type_rust` - `error[E0001]: ...` → `RustError_E0001`
+- `test_extract_error_type_go` - `panic: ...` → `GoPanic`
+- `test_extract_error_type_unknown` - Falls back to `UnknownError`
 
-| ID | Test Case | Expected Result |
-|----|-----------|-----------------|
-| GTL-001 | `create_branch()` new branch | Branch created from base |
-| GTL-002 | `create_branch()` existing branch | Raises error |
-| GTL-003 | `apply_diff()` valid diff | Commit created, returns SHA |
-| GTL-004 | `apply_diff()` invalid diff | Raises error |
-| GTL-005 | `create_pr()` | Not applicable (local-only) |
-| GTL-006 | `merge_branch()` clean merge | Merge succeeds |
-| GTL-007 | `merge_branch()` with conflicts | Raises `MergeConflictError` |
-| GTL-008 | `delete_branch()` existing | Branch deleted |
-| GTL-009 | `get_recent_commits()` | Returns commit list |
+### 3.4 Stack Frame Extraction
+- `test_extract_top_frame_python` - `File "foo.py", line 10, in main` → `foo.py:main`
+- `test_extract_top_frame_node` - `at foo (/path/bar.js:10:5)` → `bar.js:foo`
+- `test_extract_top_frame_none` - Returns None for unparseable traces
 
-### 5. Git Adapter - GitHub (`test_git_github.py`)
+### 3.5 Stability Tests (Comprehensive)
+- `test_fingerprint_stability_100_variations` - Same error with variations produces same fingerprint
+- `test_fingerprint_stability_cross_machine` - Different absolute paths, same relative → same fingerprint
+- `test_fingerprint_stability_timestamp_variation` - Different timestamps → same fingerprint
 
-| ID | Test Case | Expected Result |
-|----|-----------|-----------------|
-| GTG-001 | `create_branch()` new branch | Ref created via API |
-| GTG-002 | `create_branch()` existing branch | Raises error |
-| GTG-003 | `apply_diff()` | Commit created via Trees API |
-| GTG-004 | `create_pr()` valid params | PR created, returns URL |
-| GTG-005 | `create_pr()` invalid branch | Raises error |
-| GTG-006 | `merge_branch()` via API | Merge succeeds |
-| GTG-007 | `delete_branch()` | Ref deleted via API |
-| GTG-008 | API authentication failure | Raises `AuthenticationError` |
+**Total: 24 tests**
 
-### 6. Cache Adapter - Local SQLite (`test_cache_local.py`)
+---
 
-| ID | Test Case | Expected Result |
-|----|-----------|-----------------|
-| CAL-001 | `get()` existing key | Returns cached value |
-| CAL-002 | `get()` non-existent key | Returns `None` |
-| CAL-003 | `set()` new key with TTL | Value stored with expiry |
-| CAL-004 | `set()` existing key | Value updated |
-| CAL-005 | `get()` expired key | Returns `None` |
-| CAL-006 | `delete()` existing key | Key removed |
-| CAL-007 | `delete()` non-existent key | No error |
-| CAL-008 | Concurrent access | No deadlocks |
+## 4. Detector Tests
 
-### 7. Cache Adapter - In-Memory (`test_cache_memory.py`)
+### 4.1 Base Detector (`tests/healing/detectors/test_base.py`)
+- `test_base_detector_fingerprint_adds_hashes` - Adds both fingerprint and fingerprint_coarse
+- `test_base_detector_abstract_detect` - Cannot instantiate abstract class
 
-| ID | Test Case | Expected Result |
-|----|-----------|-----------------|
-| CAM-001 | `get()` existing key | Returns cached value |
-| CAM-002 | `get()` non-existent key | Returns `None` |
-| CAM-003 | `set()` new key with TTL | Value stored with expiry |
-| CAM-004 | `get()` expired key | Returns `None` |
-| CAM-005 | `delete()` existing key | Key removed |
-| CAM-006 | Memory cleanup on expiry | Old entries cleaned |
+**Total: 2 tests**
 
-### 8. Execution Adapter - Local (`test_execution_local.py`)
+### 4.2 Workflow Log Detector (`tests/healing/detectors/test_workflow_log.py`)
+- `test_detect_no_errors` - Empty errors list for successful workflow
+- `test_detect_single_error` - Parses single error event
+- `test_detect_multiple_errors` - Parses multiple error events
+- `test_detect_error_event_fields` - Correctly maps JSONL fields to ErrorEvent
+- `test_detect_file_not_found` - Handles missing log file gracefully
+- `test_detect_invalid_json` - Handles malformed JSONL lines
 
-| ID | Test Case | Expected Result |
-|----|-----------|-----------------|
-| EXL-001 | `run_command()` successful | Returns (0, stdout, "") |
-| EXL-002 | `run_command()` failure | Returns (non-zero, stdout, stderr) |
-| EXL-003 | `run_command()` timeout | Raises `ExecutionTimeoutError` |
-| EXL-004 | `run_tests()` all pass | Returns `TestResult(passed=True)` |
-| EXL-005 | `run_tests()` some fail | Returns `TestResult(passed=False)` |
-| EXL-006 | `run_build()` success | Returns `BuildResult(passed=True)` |
-| EXL-007 | `run_build()` failure | Returns `BuildResult(passed=False)` |
-| EXL-008 | `run_lint()` clean | Returns `LintResult(passed=True)` |
+**Total: 6 tests**
 
-### 9. Execution Adapter - GitHub Actions (`test_execution_github.py`)
+### 4.3 Subprocess Detector (`tests/healing/detectors/test_subprocess.py`)
+- `test_detect_success_no_errors` - Exit code 0 returns empty list
+- `test_detect_python_error` - Parses Python error from stderr
+- `test_detect_python_traceback` - Extracts stack trace
+- `test_detect_pytest_failure` - Parses pytest failure output
+- `test_detect_rust_error` - Parses Rust compiler error
+- `test_detect_go_panic` - Parses Go panic
+- `test_detect_node_error` - Parses Node.js error
+- `test_detect_unknown_error` - Returns generic error for unrecognized patterns
 
-| ID | Test Case | Expected Result |
-|----|-----------|-----------------|
-| EXG-001 | `run_tests()` triggers workflow | Workflow dispatched |
-| EXG-002 | `run_tests()` workflow success | Returns `TestResult(passed=True)` |
-| EXG-003 | `run_tests()` workflow failure | Returns `TestResult(passed=False)` |
-| EXG-004 | `run_tests()` workflow timeout | Raises `ExecutionTimeoutError` |
-| EXG-005 | `run_build()` triggers workflow | Workflow dispatched |
-| EXG-006 | Workflow polling with backoff | Respects rate limits |
+**Total: 8 tests**
 
-### 10. Adapter Factory (`test_factory.py`)
+### 4.4 Transcript Detector (`tests/healing/detectors/test_transcript.py`)
+- `test_detect_no_errors_in_transcript` - Clean conversation returns empty
+- `test_detect_error_mentioned` - Finds error in conversation text
+- `test_detect_error_with_context` - Extracts surrounding context
+- `test_detect_multiple_errors` - Finds all errors in transcript
+- `test_detect_associates_workflow_id` - Links to workflow context
 
-| ID | Test Case | Expected Result |
-|----|-----------|-----------------|
-| FAC-001 | `create_storage()` LOCAL env | Returns `LocalStorageAdapter` |
-| FAC-002 | `create_storage()` CLOUD env | Returns `GitHubStorageAdapter` |
-| FAC-003 | `create_git()` LOCAL env | Returns `LocalGitAdapter` |
-| FAC-004 | `create_git()` CLOUD env | Returns `GitHubAPIAdapter` |
-| FAC-005 | `create_cache()` LOCAL env | Returns `LocalSQLiteCache` |
-| FAC-006 | `create_cache()` CLOUD env | Returns `InMemoryCache` |
-| FAC-007 | `create_execution()` LOCAL env | Returns `LocalExecutionAdapter` |
-| FAC-008 | `create_execution()` CLOUD env | Returns `GitHubActionsAdapter` |
-| FAC-009 | Factory with missing credentials | Raises `ConfigurationError` |
+**Total: 5 tests**
+
+### 4.5 Hook Detector (`tests/healing/detectors/test_hook.py`)
+- `test_detect_from_hook_output` - Parses hook stdout/stderr
+- `test_detect_hook_exit_code` - Uses exit code in detection
+- `test_detect_hook_context` - Includes hook name in error context
+
+**Total: 3 tests**
+
+---
+
+## 5. Accumulator Tests (`tests/healing/test_accumulator.py`)
+
+### 5.1 Basic Operations
+- `test_add_new_error_returns_true` - First occurrence returns True
+- `test_add_duplicate_returns_false` - Duplicate fingerprint returns False
+- `test_get_unique_errors` - Returns deduplicated list
+- `test_get_count` - Returns occurrence count for fingerprint
+- `test_clear` - Empties all internal state
+
+### 5.2 Summary
+- `test_summary_unique_errors` - Correct unique count
+- `test_summary_total_occurrences` - Correct total count
+- `test_summary_by_type` - Groups by error type
+
+### 5.3 Edge Cases
+- `test_accumulator_empty` - Handles empty state gracefully
+- `test_accumulator_single_error` - Handles single error
+- `test_accumulator_many_duplicates` - Handles many duplicates efficiently
+
+**Total: 11 tests**
 
 ---
 
 ## Integration Tests
 
-| ID | Test Case | Expected Result |
-|----|-----------|-----------------|
-| INT-001 | Same code path works LOCAL | End-to-end storage/git ops |
-| INT-002 | Same code path works CLOUD | End-to-end with GitHub API |
-| INT-003 | Environment switch at runtime | Factory produces correct adapters |
+### 6.1 End-to-End Detection (`tests/healing/test_integration.py`)
+- `test_detect_errors_from_real_workflow_log` - Process actual workflow log fixture
+- `test_fingerprint_dedup_across_detectors` - Same error from different sources deduped
+- `test_config_controls_detection` - Kill switch stops detection
+
+**Total: 3 tests**
 
 ---
 
-## Test Fixtures Required
+## Test Summary
 
-1. **Temporary Git Repository** - For local git adapter tests
-2. **Mock HTTP Server** - For GitHub API adapter tests
-3. **Temporary SQLite Database** - For local cache tests
-4. **Environment Variable Context Manager** - For environment detection tests
-
----
-
-## Running Tests
-
-```bash
-# Run all Phase 0 tests
-pytest tests/healing/ -v
-
-# Run only unit tests (fast)
-pytest tests/healing/ -v -m "not integration"
-
-# Run integration tests (requires credentials)
-pytest tests/healing/ -v -m integration
-
-# Run with coverage
-pytest tests/healing/ --cov=src/healing --cov-report=term-missing
-```
+| Component | Test Count |
+|-----------|------------|
+| Config | 8 |
+| Models | 4 |
+| Fingerprinter | 24 |
+| Base Detector | 2 |
+| Workflow Log Detector | 6 |
+| Subprocess Detector | 8 |
+| Transcript Detector | 5 |
+| Hook Detector | 3 |
+| Accumulator | 11 |
+| Integration | 3 |
+| **Total** | **74** |

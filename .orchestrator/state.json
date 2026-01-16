@@ -1680,6 +1680,574 @@
       "phase": "PLAN",
       "claimed_at": "2026-01-15T12:54:28.798385+00:00",
       "transitions": []
+    },
+    "task-2440c28d": {
+      "agent_id": "test-agent-001",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T09:58:39.238564+00:00",
+      "transitions": []
+    },
+    "task-88aac2e6": {
+      "agent_id": "test-agent-001",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T09:58:39.292812+00:00",
+      "transitions": []
+    },
+    "task-23eaef59": {
+      "agent_id": "test-agent-001",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T09:58:39.341828+00:00",
+      "transitions": []
+    },
+    "task-2c747455": {
+      "agent_id": "test-agent-001",
+      "phase": "TDD",
+      "claimed_at": "2026-01-16T09:58:39.389049+00:00",
+      "transitions": [
+        {
+          "phase": "TDD",
+          "timestamp": "2026-01-16T09:58:39.400726+00:00"
+        }
+      ]
+    },
+    "task-a8b58a7b": {
+      "agent_id": "test-agent-001",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T09:58:39.449057+00:00",
+      "transitions": []
+    },
+    "task-cb5f77c5": {
+      "agent_id": "test-agent-001",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T09:58:39.552856+00:00",
+      "transitions": []
+    },
+    "task-4b99aa95": {
+      "agent_id": "test-agent-001",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T09:58:39.608014+00:00",
+      "transitions": []
+    },
+    "task-fa4dde0c": {
+      "agent_id": "test-agent-001",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T09:58:39.711041+00:00",
+      "transitions": []
+    },
+    "task-0475c6cd": {
+      "agent_id": "test-agent-001",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T09:58:39.762755+00:00",
+      "transitions": []
+    },
+    "task-a8bd9fad": {
+      "agent_id": "test-agent-001",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T09:58:39.865017+00:00",
+      "transitions": []
+    },
+    "task-6194b376": {
+      "agent_id": "test-agent-001",
+      "phase": "TDD",
+      "claimed_at": "2026-01-16T09:58:39.924296+00:00",
+      "transitions": [
+        {
+          "phase": "TDD",
+          "timestamp": "2026-01-16T09:58:39.933320+00:00"
+        }
+      ]
+    },
+    "task-98565477": {
+      "agent_id": "test-agent-001",
+      "phase": "TDD",
+      "claimed_at": "2026-01-16T09:58:39.989170+00:00",
+      "transitions": [
+        {
+          "phase": "TDD",
+          "timestamp": "2026-01-16T09:58:39.999115+00:00"
+        }
+      ]
+    },
+    "task-0d6cfce0": {
+      "agent_id": "test-agent-001",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T09:58:40.055219+00:00",
+      "transitions": []
+    },
+    "task-18e1bd6e": {
+      "agent_id": "test-agent-001",
+      "phase": "TDD",
+      "claimed_at": "2026-01-16T09:58:40.109397+00:00",
+      "transitions": [
+        {
+          "phase": "TDD",
+          "timestamp": "2026-01-16T09:58:40.130137+00:00"
+        }
+      ]
+    },
+    "task-dfcbb89f": {
+      "agent_id": "ctx-agent",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T09:58:40.218008+00:00",
+      "transitions": []
+    },
+    "task-1ce153ba": {
+      "agent_id": "agent-001",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T09:58:43.046468+00:00",
+      "transitions": []
+    },
+    "task-f5ec059e": {
+      "agent_id": "agent-002",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T09:58:43.061778+00:00",
+      "transitions": []
+    },
+    "task-dd659519": {
+      "agent_id": "agent-003",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T09:58:43.082708+00:00",
+      "transitions": []
+    },
+    "task-68a32584": {
+      "agent_id": "agent-004",
+      "phase": "TDD",
+      "claimed_at": "2026-01-16T09:58:43.110872+00:00",
+      "transitions": [
+        {
+          "phase": "TDD",
+          "timestamp": "2026-01-16T09:58:43.124960+00:00"
+        }
+      ]
+    },
+    "task-e885819c": {
+      "agent_id": "agent-005",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T09:58:43.150894+00:00",
+      "transitions": []
+    },
+    "task-9f26f088": {
+      "agent_id": "agent-006",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T09:58:43.176228+00:00",
+      "transitions": []
+    },
+    "task-b6f2e17a": {
+      "agent_id": "agent-007",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T09:58:43.230939+00:00",
+      "transitions": []
+    },
+    "task-ad9b9b22": {
+      "agent_id": "agent-008",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T09:58:43.250722+00:00",
+      "transitions": []
+    },
+    "task-9a87a2ca": {
+      "agent_id": "agent-009",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T09:58:43.271206+00:00",
+      "transitions": []
+    },
+    "task-685049ad": {
+      "agent_id": "agent-010",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T09:58:43.324932+00:00",
+      "transitions": []
+    },
+    "task-f60eebd9": {
+      "agent_id": "agent-e2e",
+      "phase": "TDD",
+      "claimed_at": "2026-01-16T09:58:43.361398+00:00",
+      "transitions": [
+        {
+          "phase": "TDD",
+          "timestamp": "2026-01-16T09:58:43.371261+00:00"
+        }
+      ]
+    },
+    "task-e4eec60a": {
+      "agent_id": "agent-001",
+      "phase": "TDD",
+      "claimed_at": "2026-01-16T09:58:43.866856+00:00",
+      "transitions": [
+        {
+          "phase": "TDD",
+          "timestamp": "2026-01-16T09:58:43.886108+00:00"
+        }
+      ]
+    },
+    "task-63d00fb0": {
+      "agent_id": "agent-001",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T09:58:43.910409+00:00",
+      "transitions": [],
+      "completed_at": "2026-01-16T09:58:43.918987+00:00"
+    },
+    "task-008e8b68": {
+      "agent_id": "agent-002",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T09:58:43.914777+00:00",
+      "transitions": []
+    },
+    "task-40fbc5c3": {
+      "agent_id": "agent-001",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T09:58:43.932820+00:00",
+      "transitions": []
+    },
+    "task-f53e9a61": {
+      "agent_id": "agent-001",
+      "phase": "TDD",
+      "claimed_at": "2026-01-16T09:58:43.957282+00:00",
+      "transitions": [
+        {
+          "phase": "TDD",
+          "timestamp": "2026-01-16T09:58:43.964237+00:00"
+        }
+      ]
+    },
+    "task-b8df887d": {
+      "agent_id": "agent-001",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T09:58:43.978619+00:00",
+      "transitions": []
+    },
+    "task-44925252": {
+      "agent_id": "agent-001",
+      "phase": "TDD",
+      "claimed_at": "2026-01-16T09:58:43.999116+00:00",
+      "transitions": [
+        {
+          "phase": "TDD",
+          "timestamp": "2026-01-16T09:58:44.006074+00:00"
+        }
+      ]
+    },
+    "task-c8fc301f": {
+      "agent_id": "agent-audit",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T09:58:44.024897+00:00",
+      "transitions": []
+    },
+    "task-716779c1": {
+      "agent_id": "agent-stats",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T09:58:44.050695+00:00",
+      "transitions": []
+    },
+    "task-094ff9f8": {
+      "agent_id": "agent-events",
+      "phase": "TDD",
+      "claimed_at": "2026-01-16T09:58:44.096056+00:00",
+      "transitions": [
+        {
+          "phase": "TDD",
+          "timestamp": "2026-01-16T09:58:44.106446+00:00"
+        }
+      ]
+    },
+    "task-e71d9194": {
+      "agent_id": "agent-history",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T09:58:44.127705+00:00",
+      "transitions": []
+    },
+    "task-ae56f6d9": {
+      "agent_id": "agent-consistency",
+      "phase": "TDD",
+      "claimed_at": "2026-01-16T09:58:44.147127+00:00",
+      "transitions": [
+        {
+          "phase": "TDD",
+          "timestamp": "2026-01-16T09:58:44.157045+00:00"
+        }
+      ]
+    },
+    "task-e3139657": {
+      "agent_id": "test-agent-001",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T10:12:59.397958+00:00",
+      "transitions": []
+    },
+    "task-79bcf965": {
+      "agent_id": "test-agent-001",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T10:12:59.444686+00:00",
+      "transitions": []
+    },
+    "task-4d7c8702": {
+      "agent_id": "test-agent-001",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T10:12:59.486524+00:00",
+      "transitions": []
+    },
+    "task-8b92db8c": {
+      "agent_id": "test-agent-001",
+      "phase": "TDD",
+      "claimed_at": "2026-01-16T10:12:59.527333+00:00",
+      "transitions": [
+        {
+          "phase": "TDD",
+          "timestamp": "2026-01-16T10:12:59.537354+00:00"
+        }
+      ]
+    },
+    "task-5f978e66": {
+      "agent_id": "test-agent-001",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T10:12:59.577100+00:00",
+      "transitions": []
+    },
+    "task-5e0a1489": {
+      "agent_id": "test-agent-001",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T10:12:59.653403+00:00",
+      "transitions": []
+    },
+    "task-a6431b57": {
+      "agent_id": "test-agent-001",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T10:12:59.694271+00:00",
+      "transitions": []
+    },
+    "task-c774cf80": {
+      "agent_id": "test-agent-001",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T10:12:59.768018+00:00",
+      "transitions": []
+    },
+    "task-ab45ac84": {
+      "agent_id": "test-agent-001",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T10:12:59.807509+00:00",
+      "transitions": []
+    },
+    "task-ae887085": {
+      "agent_id": "test-agent-001",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T10:12:59.875025+00:00",
+      "transitions": []
+    },
+    "task-a56aac21": {
+      "agent_id": "test-agent-001",
+      "phase": "TDD",
+      "claimed_at": "2026-01-16T10:12:59.918344+00:00",
+      "transitions": [
+        {
+          "phase": "TDD",
+          "timestamp": "2026-01-16T10:12:59.925866+00:00"
+        }
+      ]
+    },
+    "task-81ec114a": {
+      "agent_id": "test-agent-001",
+      "phase": "TDD",
+      "claimed_at": "2026-01-16T10:12:59.965373+00:00",
+      "transitions": [
+        {
+          "phase": "TDD",
+          "timestamp": "2026-01-16T10:12:59.971811+00:00"
+        }
+      ]
+    },
+    "task-7210f038": {
+      "agent_id": "test-agent-001",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T10:13:00.016285+00:00",
+      "transitions": []
+    },
+    "task-8fd7b49c": {
+      "agent_id": "test-agent-001",
+      "phase": "TDD",
+      "claimed_at": "2026-01-16T10:13:00.058033+00:00",
+      "transitions": [
+        {
+          "phase": "TDD",
+          "timestamp": "2026-01-16T10:13:00.071841+00:00"
+        }
+      ]
+    },
+    "task-b27a7c03": {
+      "agent_id": "ctx-agent",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T10:13:00.111425+00:00",
+      "transitions": []
+    },
+    "task-e0e505c9": {
+      "agent_id": "agent-001",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T10:13:16.570312+00:00",
+      "transitions": []
+    },
+    "task-e1d0f817": {
+      "agent_id": "agent-002",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T10:13:16.586239+00:00",
+      "transitions": []
+    },
+    "task-6b7ddf60": {
+      "agent_id": "agent-003",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T10:13:16.602118+00:00",
+      "transitions": []
+    },
+    "task-213542dc": {
+      "agent_id": "agent-004",
+      "phase": "TDD",
+      "claimed_at": "2026-01-16T10:13:16.618087+00:00",
+      "transitions": [
+        {
+          "phase": "TDD",
+          "timestamp": "2026-01-16T10:13:16.626278+00:00"
+        }
+      ]
+    },
+    "task-9dd6a349": {
+      "agent_id": "agent-005",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T10:13:16.642428+00:00",
+      "transitions": []
+    },
+    "task-e9043fb0": {
+      "agent_id": "agent-006",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T10:13:16.665399+00:00",
+      "transitions": []
+    },
+    "task-08494799": {
+      "agent_id": "agent-007",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T10:13:16.713242+00:00",
+      "transitions": []
+    },
+    "task-e851a7f8": {
+      "agent_id": "agent-008",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T10:13:16.729646+00:00",
+      "transitions": []
+    },
+    "task-269334d2": {
+      "agent_id": "agent-009",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T10:13:16.747726+00:00",
+      "transitions": []
+    },
+    "task-81e27586": {
+      "agent_id": "agent-010",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T10:13:16.793441+00:00",
+      "transitions": []
+    },
+    "task-f26b1ca7": {
+      "agent_id": "agent-e2e",
+      "phase": "TDD",
+      "claimed_at": "2026-01-16T10:13:16.824232+00:00",
+      "transitions": [
+        {
+          "phase": "TDD",
+          "timestamp": "2026-01-16T10:13:16.835420+00:00"
+        }
+      ]
+    },
+    "task-0ed2b2f9": {
+      "agent_id": "agent-001",
+      "phase": "TDD",
+      "claimed_at": "2026-01-16T10:13:17.278860+00:00",
+      "transitions": [
+        {
+          "phase": "TDD",
+          "timestamp": "2026-01-16T10:13:17.298408+00:00"
+        }
+      ]
+    },
+    "task-a7d1d93a": {
+      "agent_id": "agent-001",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T10:13:17.324327+00:00",
+      "transitions": [],
+      "completed_at": "2026-01-16T10:13:17.333252+00:00"
+    },
+    "task-59c3dd94": {
+      "agent_id": "agent-002",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T10:13:17.328718+00:00",
+      "transitions": []
+    },
+    "task-e9c307c6": {
+      "agent_id": "agent-001",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T10:13:17.347568+00:00",
+      "transitions": []
+    },
+    "task-201724a1": {
+      "agent_id": "agent-001",
+      "phase": "TDD",
+      "claimed_at": "2026-01-16T10:13:17.367868+00:00",
+      "transitions": [
+        {
+          "phase": "TDD",
+          "timestamp": "2026-01-16T10:13:17.375246+00:00"
+        }
+      ]
+    },
+    "task-1ebf1f2e": {
+      "agent_id": "agent-001",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T10:13:17.390907+00:00",
+      "transitions": []
+    },
+    "task-63c85015": {
+      "agent_id": "agent-001",
+      "phase": "TDD",
+      "claimed_at": "2026-01-16T10:13:17.412941+00:00",
+      "transitions": [
+        {
+          "phase": "TDD",
+          "timestamp": "2026-01-16T10:13:17.421269+00:00"
+        }
+      ]
+    },
+    "task-a35998f1": {
+      "agent_id": "agent-audit",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T10:13:17.441249+00:00",
+      "transitions": []
+    },
+    "task-e1d72880": {
+      "agent_id": "agent-stats",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T10:13:17.463449+00:00",
+      "transitions": []
+    },
+    "task-95239813": {
+      "agent_id": "agent-events",
+      "phase": "TDD",
+      "claimed_at": "2026-01-16T10:13:17.491379+00:00",
+      "transitions": [
+        {
+          "phase": "TDD",
+          "timestamp": "2026-01-16T10:13:17.499596+00:00"
+        }
+      ]
+    },
+    "task-9895241f": {
+      "agent_id": "agent-history",
+      "phase": "PLAN",
+      "claimed_at": "2026-01-16T10:13:17.514941+00:00",
+      "transitions": []
+    },
+    "task-164afcbc": {
+      "agent_id": "agent-consistency",
+      "phase": "TDD",
+      "claimed_at": "2026-01-16T10:13:17.529847+00:00",
+      "transitions": [
+        {
+          "phase": "TDD",
+          "timestamp": "2026-01-16T10:13:17.537655+00:00"
+        }
+      ]
     }
   },
   "dependencies": {
@@ -1703,15 +2271,23 @@
     ],
     "task-58fc4cae": [
       "task-a4d63876"
+    ],
+    "task-008e8b68": [
+      "task-63d00fb0"
+    ],
+    "task-59c3dd94": [
+      "task-a7d1d93a"
     ]
   },
   "completed": [
-    "task-b0e3963c",
-    "task-a4d63876",
-    "task-39bb8814",
-    "task-d39a76a0",
-    "task-bd719f51",
     "task-58d4b83b",
+    "task-b0e3963c",
+    "task-63d00fb0",
+    "task-d39a76a0",
+    "task-a4d63876",
+    "task-bd719f51",
+    "task-39bb8814",
+    "task-a7d1d93a",
     "task-44b2164f"
   ],
   "blockers": []

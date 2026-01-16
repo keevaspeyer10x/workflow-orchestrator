@@ -5,6 +5,22 @@ All notable changes to the workflow-orchestrator.
 ## [Unreleased]
 
 ### Added
+- **Self-Healing Infrastructure Phase 1**: Detection, Fingerprinting & Config
+  - `src/healing/config.py`: HealingConfig from environment variables (Supabase in Phase 2)
+    - Kill switch support, cost controls, protected paths, timeouts
+  - `src/healing/models.py`: ErrorEvent unified error model, FixAction schema
+  - `src/healing/fingerprint.py`: Stable fingerprinting for error deduplication
+    - Normalizes paths, line numbers, UUIDs, timestamps, memory addresses
+    - Extracts error types from Python, Node, Rust, Go
+    - Fine-grained (16 hex) and coarse (8 hex) fingerprints
+  - `src/healing/detectors/`: 4 error detectors
+    - `WorkflowLogDetector`: Parses .workflow_log.jsonl
+    - `SubprocessDetector`: Parses command stdout/stderr
+    - `TranscriptDetector`: Parses conversation transcripts
+    - `HookDetector`: Parses hook output
+  - `src/healing/accumulator.py`: Session-level error deduplication
+  - 147 unit tests for Phase 1 components
+  - Observation-only (no fixes applied) - Phase 2 adds pattern matching
 - **Self-Healing Infrastructure Phase 0**: Abstraction layer for cross-environment operations
   - `src/healing/environment.py`: Environment detection (LOCAL/CLOUD/CI)
   - `src/healing/adapters/`: Abstract interfaces and implementations

@@ -1,116 +1,77 @@
-# Phase 0: Abstraction Layer - Risk Analysis
+# Risk Analysis: Phase 1 - Detection, Fingerprinting & Config
 
-**Task:** Implement Phase 0 of Self-Healing Infrastructure
 **Date:** 2026-01-16
+**Overall Risk Level:** LOW
 
 ---
 
 ## Risk Summary
 
-| Risk | Impact | Likelihood | Mitigation |
-|------|--------|------------|------------|
-| GitHub API rate limits | Medium | Medium | Implement caching, respect X-RateLimit headers |
-| Credential exposure in logs | High | Low | SecurityScrubber (Phase 2), careful logging |
-| Async/sync mismatch | Medium | Medium | Consistent async throughout, no mixed patterns |
-| SQLite concurrent access | Low | Medium | Use aiosqlite with proper connection management |
-| GitHub Actions timeout | Medium | Low | Configurable timeout with sensible defaults |
+| Risk | Likelihood | Impact | Mitigation | Status |
+|------|------------|--------|------------|--------|
+| Fingerprint collision | Low | Medium | Comprehensive normalization rules | Mitigated |
+| Performance regression | Low | Low | Sync-only for compute code | Mitigated |
+| Breaking Phase 0 | Low | Medium | Additive changes only | Mitigated |
 
 ---
 
-## Detailed Risk Analysis
+## Risk Details
 
-### 1. GitHub API Rate Limits
+### 1. Fingerprint Collision (Low Likelihood, Medium Impact)
 
-**Risk:** GitHub API has rate limits (5000/hour authenticated, 60/hour unauthenticated). Heavy usage could hit limits.
-
-**Impact:** Medium - operations would fail until rate limit resets
-
-**Likelihood:** Medium - depends on usage patterns
+**Risk:** Two different errors could produce the same fingerprint, causing incorrect deduplication.
 
 **Mitigation:**
-- Implement request caching in CacheAdapter
-- Read and respect `X-RateLimit-Remaining` headers
-- Implement exponential backoff on 429 responses
-- Log warnings when approaching limits
+- Use SHA256 for collision resistance
+- Two-tier fingerprint (fine + coarse) reduces false positives
+- Comprehensive normalization rules tested with 100+ variations
+- Coarse fingerprint (8 chars) only for grouping, not dedup
 
-### 2. Credential Exposure
+**Residual Risk:** Acceptable. Fingerprint design follows industry patterns.
 
-**Risk:** GitHub tokens, API keys could be logged or exposed in error messages.
+### 2. Performance Regression (Low Likelihood, Low Impact)
 
-**Impact:** High - security breach
-
-**Likelihood:** Low - if careful with logging
+**Risk:** Adding detection to workflow could slow down operations.
 
 **Mitigation:**
-- Never log raw credentials
-- Use `***` masking for tokens in any output
-- Phase 2 adds SecurityScrubber for comprehensive protection
-- Minimal credential scope (only repo access needed)
+- Sync-only for compute code (no unnecessary async overhead)
+- Detection runs after operations, not blocking
+- Accumulator uses dict for O(1) dedup
 
-### 3. Async/Sync Mismatch
+**Residual Risk:** Minimal. Detection is non-blocking.
 
-**Risk:** Mixing sync and async code can cause event loop issues, deadlocks.
+### 3. Breaking Phase 0 Adapters (Low Likelihood, Medium Impact)
 
-**Impact:** Medium - runtime errors, hangs
-
-**Likelihood:** Medium - common mistake
+**Risk:** Changes could break existing adapter implementations.
 
 **Mitigation:**
-- All adapter methods are async
-- Use `asyncio.run()` at CLI entry points only
-- No `asyncio.get_event_loop().run_until_complete()` patterns
-- Add linting rules for sync/async consistency
+- Phase 1 is additive only (new files)
+- No modifications to existing adapter interfaces
+- Imports from `healing.environment` remain unchanged
 
-### 4. SQLite Concurrent Access
-
-**Risk:** Multiple processes accessing same SQLite file can cause locking issues.
-
-**Impact:** Low - cache misses, not data loss
-
-**Likelihood:** Medium - parallel workflows
-
-**Mitigation:**
-- Use aiosqlite for proper async handling
-- Set `timeout` parameter for busy waiting
-- Use WAL mode for better concurrency
-- Cache is optimization, not critical path
-
-### 5. GitHub Actions Timeout
-
-**Risk:** Workflow dispatch waits for completion, could hang if workflow takes too long.
-
-**Impact:** Medium - blocked operations
-
-**Likelihood:** Low - most workflows complete quickly
-
-**Mitigation:**
-- Configurable timeout (default 10 minutes)
-- Poll with backoff, not tight loop
-- Return partial result on timeout
-- Document expected workflow duration
+**Residual Risk:** None. Phase 1 adds new modules, doesn't modify existing.
 
 ---
 
-## Breaking Change Analysis
+## Dependencies
 
-**Impact:** None
-
-This is a new module (`src/healing/`) with no existing code to break. No changes to existing APIs or behaviors.
-
----
-
-## Rollback Plan
-
-If issues discovered after merge:
-1. Remove `src/healing/` directory
-2. Remove dependencies from `pyproject.toml`
-3. No database migrations to rollback
+- Phase 0 adapters (environment detection) - COMPLETED
+- Python 3.10+ (dataclasses, typing) - Available
+- Standard library only - No new deps needed
 
 ---
 
-## Security Considerations
+## Recommendation
 
-1. **GitHub Token Scope:** Minimal - only `repo` scope needed for Contents/Refs/Pulls API
-2. **No User Input Execution:** ExecutionAdapter commands are predefined, not user-supplied
-3. **File Path Validation:** StorageAdapter should validate paths are within repo
-4. **Rate Limiting:** Built-in protection against runaway API calls
+**PROCEED** - All identified risks are mitigated. Phase 1 is an additive, observation-only change with no breaking modifications.
+
+---
+
+## Workflow Feedback
+
+**Learning captured:** Clarifying questions step asked obvious questions. Future workflows should only ask questions when:
+1. There is genuine uncertainty (< 80% confidence in answer)
+2. The decision has material impact on implementation
+3. The answer cannot be inferred from context or prior art
+
+This feedback should be added to LEARNINGS.md or filed as an issue to improve the workflow template.
