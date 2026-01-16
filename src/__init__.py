@@ -47,7 +47,7 @@ from .enforcement import (
     get_evidence_schema,
 )
 
-__version__ = "1.2.0"
+__version__ = "3.0.0"
 __all__ = [
     # Workflow
     "WorkflowDef",

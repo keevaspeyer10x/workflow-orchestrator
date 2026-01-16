@@ -96,7 +96,7 @@ try:
 except ImportError:
     pass  # ai-tool-bridge not installed
 
-VERSION = "2.0.0"
+VERSION = "3.0.0"
 
 
 # ============================================================================
