@@ -4,6 +4,12 @@ All notable changes to the workflow-orchestrator.
 
 ## [Unreleased]
 
+### Fixed
+- **State file integrity warnings (#94)**: Fixed false-positive integrity check warnings
+  - Root cause: `_version` field included in checksum on save but removed before verification on load
+  - Fix: Added `_version` to excluded fields in `compute_state_checksum`
+  - Added 6 unit tests for checksum computation in `tests/test_state_version.py`
+
 ### Added
 - **Self-Healing Infrastructure Phase 1**: Detection, Fingerprinting & Config
   - `src/healing/config.py`: HealingConfig from environment variables (Supabase in Phase 2)
