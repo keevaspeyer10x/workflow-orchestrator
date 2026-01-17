@@ -165,6 +165,7 @@ class PatternScanner:
         project_root: Path,
         healing_client: Optional["HealingClient"] = None,
         max_file_size: int = 10 * 1024 * 1024,  # 10MB default
+        include_github: bool = True,
     ):
         """Initialize the scanner.
 
@@ -173,11 +174,13 @@ class PatternScanner:
             project_root: Root directory of the project to scan
             healing_client: Optional healing client for recording patterns
             max_file_size: Maximum file size to scan (bytes)
+            include_github: Whether to include GitHub issues in scanning
         """
         self.state_path = state_path
         self.project_root = project_root
         self.healing_client = healing_client
         self.max_file_size = max_file_size
+        self.include_github = include_github
         self._state: Optional[ScanState] = None
         self.fingerprinter = Fingerprinter()
 

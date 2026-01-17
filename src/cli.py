@@ -6252,7 +6252,10 @@ def cmd_heal(args):
         sys.exit(heal_backfill(
             log_dir=getattr(args, 'log_dir', None),
             dry_run=getattr(args, 'dry_run', False),
-            limit=getattr(args, 'limit', None)
+            limit=getattr(args, 'limit', None),
+            scan_only=getattr(args, 'scan_only', False),
+            days=getattr(args, 'days', 30),
+            no_github=getattr(args, 'no_github', False),
         ))
 
     else:
@@ -6882,6 +6885,9 @@ Examples:
     heal_parser.add_argument('--output', '-o', help='Output file for export')
     heal_parser.add_argument('--log-dir', help='Log directory for backfill')
     heal_parser.add_argument('--limit', type=int, help='Limit for backfill')
+    heal_parser.add_argument('--scan-only', action='store_true', help='Only show recommendations, do not process')
+    heal_parser.add_argument('--days', type=int, default=30, help='Only scan files modified in last N days (default: 30)')
+    heal_parser.add_argument('--no-github', action='store_true', help='Skip GitHub issue scanning')
     heal_parser.add_argument('-d', '--dir', help='Working directory')
     heal_parser.set_defaults(func=cmd_heal)
 

@@ -5,6 +5,19 @@ All notable changes to the workflow-orchestrator.
 ## [Unreleased]
 
 ### Added
+- **Self-Healing Infrastructure Phase 7b**: CLI Scanner Integration
+  - `src/healing/cli_heal.py`: New helper functions for CLI integration
+    - `_run_session_scan()`: Session-end scan helper for cmd_finish
+    - `_check_crash_recovery()`: Crash recovery helper for cmd_start
+    - Enhanced `heal_backfill()` with new parameters:
+      - `--scan-only`: Show recommendations without processing
+      - `--days N`: Limit scan to files modified in last N days (default: 30)
+      - `--no-github`: Skip GitHub issue scanning
+  - `src/healing/scanner.py`: Added `include_github` parameter to PatternScanner
+  - `src/cli.py`: Added new CLI flags for heal backfill command
+  - Non-blocking error handling (scanner failures don't block workflow completion)
+  - 11 new tests for CLI scanner integration
+
 - **Self-Healing Infrastructure Phase 7**: Intelligent File Scanning for Backfill
   - Session-end hook architecture (multi-model consensus from Claude, GPT, Gemini, Grok, DeepSeek)
   - `src/healing/scanner.py`: Main scanner module

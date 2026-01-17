@@ -69,6 +69,77 @@ async def _get_healing_client() -> Optional[HealingClient]:
         return None
 
 
+async def _run_session_scan(
+    working_dir: Path,
+    healing_client: Optional[HealingClient],
+) -> Optional["ScanSummary"]:
+    """Run session-end scan for pattern learning.
+
+    Called automatically at the end of cmd_finish to extract patterns
+    from the current session's logs and files.
+
+    Args:
+        working_dir: Project root directory
+        healing_client: Healing client for recording patterns
+
+    Returns:
+        ScanSummary if successful, None if skipped or failed
+    """
+    if healing_client is None:
+        return None
+
+    try:
+        from .scanner import PatternScanner, ScanSummary
+
+        scanner = PatternScanner(
+            state_path=working_dir / ".orchestrator" / "scan_state.json",
+            project_root=working_dir,
+            healing_client=healing_client,
+        )
+
+        summary = await scanner.scan_all()
+        return summary
+
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Session scan failed (non-blocking): {e}")
+        return None
+
+
+async def _check_crash_recovery(working_dir: Path) -> Optional["ScanSummary"]:
+    """Check for and recover orphaned sessions from previous crashes.
+
+    Called at the start of cmd_start to recover any learnings from
+    sessions that didn't complete properly.
+
+    Args:
+        working_dir: Project root directory
+
+    Returns:
+        ScanSummary if recovery was performed, None otherwise
+    """
+    try:
+        from .scanner import PatternScanner, ScanSummary
+
+        scanner = PatternScanner(
+            state_path=working_dir / ".orchestrator" / "scan_state.json",
+            project_root=working_dir,
+        )
+
+        if scanner.has_orphaned_session():
+            summary = await scanner.recover_orphaned()
+            return summary
+
+        return None
+
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"Crash recovery check failed: {e}")
+        return None
+
+
 def heal_status() -> int:
     """Show healing system status.
 
@@ -317,19 +388,26 @@ def heal_export(format: str = "yaml", output: Optional[str] = None) -> int:
 def heal_backfill(
     log_dir: Optional[str] = None,
     dry_run: bool = False,
-    limit: Optional[int] = None
+    limit: Optional[int] = None,
+    scan_only: bool = False,
+    days: int = 30,
+    no_github: bool = False,
 ) -> int:
-    """Process historical workflow logs.
+    """Process historical workflow logs and other error sources.
 
     Args:
         log_dir: Directory containing workflow logs (defaults to current dir)
         dry_run: Preview without processing
         limit: Maximum number of logs to process
+        scan_only: Only show recommendations, don't process
+        days: Only scan files modified in the last N days
+        no_github: Skip GitHub issue scanning
 
     Returns:
         Exit code (0 for success, 1 for error)
     """
     from .backfill import HistoricalBackfill
+    from .scanner import PatternScanner
 
     client = asyncio.run(_get_healing_client())
     if not client:
@@ -342,8 +420,41 @@ def heal_backfill(
         console.print(f"[red]Error: Directory not found: {log_path}[/red]")
         return 1
 
-    backfill = HistoricalBackfill(client)
+    # Create scanner with options
+    scanner = PatternScanner(
+        state_path=log_path / ".orchestrator" / "scan_state.json",
+        project_root=log_path,
+        healing_client=client,
+        include_github=not no_github,
+    )
 
+    # Scan-only mode: show recommendations
+    if scan_only:
+        recommendations = scanner.get_recommendations()
+        if not recommendations:
+            console.print("[yellow]No scannable sources found[/yellow]")
+            return 0
+
+        if RICH_AVAILABLE:
+            table = Table(title="Scannable Sources")
+            table.add_column("Source", style="cyan")
+            table.add_column("Path", style="dim")
+            table.add_column("Recommendation", style="green")
+
+            for rec in recommendations:
+                table.add_row(
+                    rec["source"],
+                    rec["path"],
+                    rec["recommendation"],
+                )
+            console.print(table)
+        else:
+            console.print("Scannable Sources:")
+            for rec in recommendations:
+                console.print(f"  {rec['source']}: {rec['recommendation']}")
+        return 0
+
+    # Dry run mode: show what would be processed
     if dry_run:
         # Count logs without processing
         logs = list(log_path.glob("**/.workflow_log.jsonl"))
@@ -351,6 +462,21 @@ def heal_backfill(
             logs = logs[:limit]
         console.print(f"[yellow]Dry run:[/yellow] Would process {len(logs)} log files")
         return 0
+
+    # Use new scanner if --no-github or non-default days specified
+    if no_github or days != 30:
+        try:
+            summary = asyncio.run(scanner.scan_all(days=days))
+            console.print(f"[green]Scanned {summary.sources_scanned} sources, "
+                         f"extracted {summary.errors_extracted} errors, "
+                         f"created {summary.patterns_created} patterns[/green]")
+            return 0
+        except Exception as e:
+            console.print(f"[red]Error: {e}[/red]")
+            return 1
+
+    # Default behavior: use HistoricalBackfill for backward compatibility
+    backfill = HistoricalBackfill(client)
 
     try:
         count = asyncio.run(backfill.backfill_workflow_logs(log_path, limit=limit))
