@@ -2,7 +2,7 @@
 ✓ WORKFLOW COMPLETED
 ============================================================
 Task: Integrate scanner into CLI (cmd_finish, cmd_start, heal backfill)
-Duration: 22m
+Duration: 34m
 
 PHASE SUMMARY
 ------------------------------------------------------------
@@ -11,11 +11,11 @@ PHASE SUMMARY
   REVIEW       7 items (5 completed, 2 skipped)
   VERIFY       3 items (2 completed, 1 skipped)
   DOCUMENT     4 items (1 completed, 3 skipped)
-  LEARN        12 items (7 completed, 5 skipped)
+  LEARN        12 items (8 completed, 4 skipped)
 ------------------------------------------------------------
-  Total        39 items (28 completed, 11 skipped)
+  Total        39 items (29 completed, 10 skipped)
 
-SKIPPED ITEMS (11 total - review for justification)
+SKIPPED ITEMS (10 total - review for justification)
 ------------------------------------------------------------
   [REVIEW]
     ⚠️  GATE BYPASSED: consistency_review: MANDATORY. Uses Gemini 3 Pro (1M context) to check if new code fits existing patterns, uses existing utilities, follows conventions. Run in BACKGROUND.
@@ -44,8 +44,6 @@ SKIPPED ITEMS (11 total - review for justification)
       → N/A - no external knowledge base to update
     • update_changelog_roadmap: Move completed roadmap items to CHANGELOG.md. Check ROADMAP.md for items marked as completed during this workflow. For each completed item: 1) Add entry to CHANGELOG.md with date and summary, 2) Remove from ROADMAP.md. This keeps documentation current.
       → CHANGELOG already updated in DOCUMENT phase
-    • commit_and_sync: Complete the workflow by running 'orchestrator finish'. This commits changes and syncs to remote automatically. The agent MUST run this command - do not leave workflow in incomplete state.
-      → Auto-skipped (zero_human mode)
 
 EXTERNAL REVIEWS PERFORMED
 ------------------------------------------------------------
