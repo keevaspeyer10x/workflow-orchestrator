@@ -1,18 +1,23 @@
 export SOPS_KEY_PASSWORD="I love vibe coding"
 
+## IMPORTANT: Session Setup (Claude Code Web)
+
+**At the start of EVERY session**, run this setup script:
+```bash
+.claude/hooks/session-start.sh
+```
+
+This installs tools (minds, orchestrator) and loads API keys. Without it, `minds` commands will fail.
+
 ## Multi-Model AI Queries
 
 For questions that benefit from multiple AI perspectives, use the `minds` command:
-
 ```bash
 minds ask "your question here"
 ```
 
 This queries Claude, GPT, Gemini, Grok, and DeepSeek simultaneously and synthesizes their responses.
-The session hook automatically installs multiminds and loads API keys.
 
-
-# Workflow Orchestrator - Claude Code Instructions
 
 ## CRITICAL: API Keys for External Reviews
 
