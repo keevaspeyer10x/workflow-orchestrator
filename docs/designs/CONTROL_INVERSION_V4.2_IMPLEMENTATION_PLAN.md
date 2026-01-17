@@ -1,11 +1,24 @@
 # Control Inversion V4.2 Implementation Plan
 
 **Issue:** #102
-**Status:** Draft (Post-Review Revision)
+**Status:** Ready for Implementation (All blocking issues resolved)
 **Created:** 2026-01-17
 **Reviewed By:** Multi-model consensus (Claude Opus 4.5, GPT-5.2, Grok 4.1, DeepSeek V3.2)
 
 ## Review Summary
+
+### Second Review (Implementation Plan)
+
+The implementation plan was rated **7.5-9/10** with 4 blocking issues identified and now fixed:
+
+| Issue | Status | Fix |
+|-------|--------|-----|
+| Sandbox not enforced in execute_secure() | ✅ FIXED | Added `_execute_in_container()` and conditional sandbox enforcement |
+| Argument validation incomplete | ✅ FIXED | Added `_validate_arguments()` with full YAML rules enforcement |
+| Event store race condition | ✅ FIXED | Uses `BEGIN IMMEDIATE` to acquire write lock before read |
+| SQLite FOR UPDATE doesn't exist | ✅ FIXED | Added `DatabaseAdapter` pattern for SQLite/PostgreSQL compatibility |
+
+### First Review (Design Spec)
 
 The initial design spec was rated **7/10** with the following critical gaps:
 
@@ -58,22 +71,89 @@ class SandboxConfig:
     max_memory_mb: int = 512
     max_cpu_seconds: int = 60
 
-def execute_secure(cmd: SecureCommand) -> CommandResult:
+def execute_secure(cmd: SecureCommand, config: ToolSecurityConfig) -> CommandResult:
     """Execute command in sandbox with shell=False."""
     # Validate executable is in allowlist
-    if cmd.executable not in ALLOWED_EXECUTABLES:
+    if cmd.executable not in config.allowed_executables:
         raise SecurityError(f"Executable not allowed: {cmd.executable}")
+
+    # Validate arguments against per-executable rules
+    exe_name = Path(cmd.executable).name
+    if exe_name in config.argument_rules:
+        rules = config.argument_rules[exe_name]
+        _validate_arguments(cmd.args, rules)
 
     # Validate arguments don't contain shell metacharacters
     for arg in cmd.args:
         if any(c in arg for c in [';', '|', '&', '$', '`', '\n']):
             raise SecurityError(f"Invalid argument: {arg}")
 
-    # Execute with shell=False
+    # ENFORCE SANDBOX if configured
+    if cmd.sandbox.use_container:
+        return _execute_in_container(cmd)
+    else:
+        # Direct execution (only for trusted environments)
+        result = subprocess.run(
+            [cmd.executable] + cmd.args,
+            shell=False,  # CRITICAL: Never shell=True
+            cwd=cmd.working_dir,
+            capture_output=True,
+            timeout=cmd.timeout,
+        )
+        return CommandResult(...)
+
+def _validate_arguments(args: list[str], rules: ArgumentRules) -> None:
+    """Validate arguments against per-executable rules."""
+    for arg in args:
+        # Check denied flags
+        if arg in rules.denied_flags:
+            raise SecurityError(f"Denied flag: {arg}")
+        # Check denied patterns
+        for pattern in rules.denied_patterns:
+            if re.match(pattern, arg):
+                raise SecurityError(f"Argument matches denied pattern: {arg}")
+        # If allowed_flags specified, argument must be in list or be a value
+        if rules.allowed_flags and arg.startswith('-'):
+            if arg not in rules.allowed_flags:
+                raise SecurityError(f"Flag not in allowlist: {arg}")
+    # Check subcommands (first non-flag argument)
+    if rules.allowed_subcommands:
+        subcommand = next((a for a in args if not a.startswith('-')), None)
+        if subcommand and subcommand not in rules.allowed_subcommands:
+            raise SecurityError(f"Subcommand not allowed: {subcommand}")
+
+def _execute_in_container(cmd: SecureCommand) -> CommandResult:
+    """Execute command inside container sandbox."""
+    sandbox = cmd.sandbox
+
+    # Build container command
+    container_cmd = [
+        "docker", "run", "--rm",
+        "--read-only" if sandbox.read_only_rootfs else "",
+        f"--network={sandbox.network_mode}",
+        f"--memory={sandbox.max_memory_mb}m",
+        f"--cpus={sandbox.max_cpu_seconds / 60}",  # Approximate
+    ]
+
+    # Mount allowed paths
+    for path in sandbox.allowed_paths:
+        container_cmd.extend(["-v", f"{path}:{path}"])
+
+    # Add working directory mount
+    container_cmd.extend(["-v", f"{cmd.working_dir}:{cmd.working_dir}", "-w", str(cmd.working_dir)])
+
+    # Add image and command
+    container_cmd.extend([
+        "sandbox-runner:latest",  # Minimal image with common tools
+        cmd.executable, *cmd.args
+    ])
+
+    # Filter empty strings
+    container_cmd = [c for c in container_cmd if c]
+
     result = subprocess.run(
-        [cmd.executable] + cmd.args,
-        shell=False,  # CRITICAL: Never shell=True
-        cwd=cmd.working_dir,
+        container_cmd,
+        shell=False,
         capture_output=True,
         timeout=cmd.timeout,
     )
@@ -344,45 +424,59 @@ class SQLiteEventStore(EventStore):
             """)
 
     async def append(self, stream_id: str, events: list[Event]) -> None:
-        """Append with optimistic concurrency control."""
+        """
+        Append with optimistic concurrency control.
+
+        Uses BEGIN IMMEDIATE to acquire write lock before reading,
+        preventing race conditions between version check and insert.
+        The UNIQUE(stream_id, version) constraint provides final safety.
+        """
         async with aiosqlite.connect(self.db_path) as conn:
-            # Get current max version
-            cursor = await conn.execute(
-                "SELECT MAX(version) FROM events WHERE stream_id = ?",
-                (stream_id,)
-            )
-            row = await cursor.fetchone()
-            current_version = row[0] or 0
+            # BEGIN IMMEDIATE acquires write lock immediately, preventing
+            # race conditions between SELECT and INSERT
+            await conn.execute("BEGIN IMMEDIATE")
 
-            # Verify expected version
-            if events[0].version != current_version + 1:
-                raise ConcurrencyError(
-                    f"Expected version {events[0].version}, "
-                    f"but stream is at {current_version}"
+            try:
+                # Get current max version (now safe - we hold the write lock)
+                cursor = await conn.execute(
+                    "SELECT MAX(version) FROM events WHERE stream_id = ?",
+                    (stream_id,)
                 )
+                row = await cursor.fetchone()
+                current_version = row[0] or 0
 
-            # Insert events
-            for event in events:
-                await conn.execute(
-                    """
-                    INSERT INTO events
-                    (id, stream_id, type, version, timestamp,
-                     correlation_id, causation_id, data, metadata)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        event.id,
-                        stream_id,
-                        event.type,
-                        event.version,
-                        event.timestamp.isoformat(),
-                        event.correlation_id,
-                        event.causation_id,
-                        json.dumps(event.data),
-                        json.dumps(event.metadata),
+                # Verify expected version
+                if events[0].version != current_version + 1:
+                    raise ConcurrencyError(
+                        f"Expected version {events[0].version}, "
+                        f"but stream is at {current_version}"
                     )
-                )
-            await conn.commit()
+
+                # Insert events (UNIQUE constraint is backup protection)
+                for event in events:
+                    await conn.execute(
+                        """
+                        INSERT INTO events
+                        (id, stream_id, type, version, timestamp,
+                         correlation_id, causation_id, data, metadata)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            event.id,
+                            stream_id,
+                            event.type,
+                            event.version,
+                            event.timestamp.isoformat(),
+                            event.correlation_id,
+                            event.causation_id,
+                            json.dumps(event.data),
+                            json.dumps(event.metadata),
+                        )
+                    )
+                await conn.commit()
+            except Exception:
+                await conn.rollback()
+                raise
 ```
 
 ### 1.2 Checkpoint Storage
@@ -512,9 +606,17 @@ def get_token_counter(provider: str) -> TokenCounter:
 
 ```python
 class AtomicBudgetTracker:
-    """Thread-safe budget tracking with persistence."""
+    """
+    Thread-safe budget tracking with persistence.
 
-    def __init__(self, db: Database):
+    SQLite vs PostgreSQL:
+    - SQLite: Uses BEGIN IMMEDIATE for write lock (no FOR UPDATE)
+    - PostgreSQL: Uses FOR UPDATE for row-level locking
+
+    This implementation supports both via database adapter pattern.
+    """
+
+    def __init__(self, db: DatabaseAdapter):
         self.db = db
 
     async def reserve(
@@ -526,12 +628,15 @@ class AtomicBudgetTracker:
         Atomically reserve tokens.
         Returns reservation ID or rejection reason.
         """
-        async with self.db.transaction() as tx:
-            # Lock the budget row
-            budget = await tx.execute(
-                "SELECT * FROM budgets WHERE id = ? FOR UPDATE",
+        # Use database-specific transaction handling
+        async with self.db.exclusive_transaction() as tx:
+            # SELECT without FOR UPDATE - transaction isolation handles it
+            # SQLite: BEGIN IMMEDIATE already holds write lock
+            # PostgreSQL: Use FOR UPDATE via adapter if needed
+            budget = await tx.fetch_one(
+                self.db.select_for_update("budgets", "id = ?"),
                 (budget_id,)
-            ).fetchone()
+            )
 
             if not budget:
                 return ReservationResult(success=False, reason="Budget not found")
@@ -567,11 +672,11 @@ class AtomicBudgetTracker:
 
     async def commit(self, reservation_id: str, actual_tokens: int) -> None:
         """Commit reservation with actual usage."""
-        async with self.db.transaction() as tx:
-            reservation = await tx.execute(
-                "SELECT * FROM reservations WHERE id = ? FOR UPDATE",
+        async with self.db.exclusive_transaction() as tx:
+            reservation = await tx.fetch_one(
+                self.db.select_for_update("reservations", "id = ?"),
                 (reservation_id,)
-            ).fetchone()
+            )
 
             if not reservation:
                 raise ValueError(f"Reservation not found: {reservation_id}")
@@ -595,11 +700,11 @@ class AtomicBudgetTracker:
 
     async def rollback(self, reservation_id: str) -> None:
         """Release reservation without using tokens."""
-        async with self.db.transaction() as tx:
-            reservation = await tx.execute(
+        async with self.db.exclusive_transaction() as tx:
+            reservation = await tx.fetch_one(
                 "SELECT * FROM reservations WHERE id = ?",
                 (reservation_id,)
-            ).fetchone()
+            )
 
             if reservation:
                 await tx.execute(
@@ -610,6 +715,60 @@ class AtomicBudgetTracker:
                     "DELETE FROM reservations WHERE id = ?",
                     (reservation_id,)
                 )
+
+
+class DatabaseAdapter(ABC):
+    """Abstract database adapter for SQLite/PostgreSQL compatibility."""
+
+    @abstractmethod
+    def exclusive_transaction(self) -> AsyncContextManager:
+        """Return transaction context with appropriate locking."""
+        pass
+
+    @abstractmethod
+    def select_for_update(self, table: str, where: str) -> str:
+        """Return SELECT query with appropriate locking syntax."""
+        pass
+
+
+class SQLiteAdapter(DatabaseAdapter):
+    """SQLite adapter - uses BEGIN IMMEDIATE for locking."""
+
+    def __init__(self, db_path: Path):
+        self.db_path = db_path
+
+    @asynccontextmanager
+    async def exclusive_transaction(self):
+        async with aiosqlite.connect(self.db_path) as conn:
+            # BEGIN IMMEDIATE acquires write lock immediately
+            await conn.execute("BEGIN IMMEDIATE")
+            try:
+                yield SQLiteTransaction(conn)
+                await conn.commit()
+            except Exception:
+                await conn.rollback()
+                raise
+
+    def select_for_update(self, table: str, where: str) -> str:
+        # SQLite: No FOR UPDATE, BEGIN IMMEDIATE handles locking
+        return f"SELECT * FROM {table} WHERE {where}"
+
+
+class PostgreSQLAdapter(DatabaseAdapter):
+    """PostgreSQL adapter - uses FOR UPDATE for row locking."""
+
+    def __init__(self, pool: asyncpg.Pool):
+        self.pool = pool
+
+    @asynccontextmanager
+    async def exclusive_transaction(self):
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                yield PostgreSQLTransaction(conn)
+
+    def select_for_update(self, table: str, where: str) -> str:
+        # PostgreSQL: Use FOR UPDATE for row-level locking
+        return f"SELECT * FROM {table} WHERE {where} FOR UPDATE"
 ```
 
 ### 2.3 Acceptance Criteria (Phase 2)
