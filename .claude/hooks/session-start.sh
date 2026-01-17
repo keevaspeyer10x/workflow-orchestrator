@@ -162,6 +162,7 @@ if [ -n "$SOPS_KEY_PASSWORD" ] && [ -z "$SOPS_AGE_KEY" ]; then
         AGE_KEY=$(echo "$SOPS_KEY_PASSWORD" | openssl enc -aes-256-cbc -pbkdf2 -d -in "$REPO_KEY" -pass stdin 2>/dev/null) || true
         if [ -n "$AGE_KEY" ] && [ -n "$CLAUDE_ENV_FILE" ]; then
             echo "export SOPS_AGE_KEY='$AGE_KEY'" >> "$CLAUDE_ENV_FILE"
+            export SOPS_AGE_KEY="$AGE_KEY"  # Also set in current shell for subsequent checks
             echo "SOPS AGE key loaded from $REPO_KEY"
             SOPS_KEY_LOADED=true
         else
@@ -171,6 +172,7 @@ if [ -n "$SOPS_KEY_PASSWORD" ] && [ -z "$SOPS_AGE_KEY" ]; then
         AGE_KEY=$(echo "$SOPS_KEY_PASSWORD" | openssl enc -aes-256-cbc -pbkdf2 -d -in "$GLOBAL_KEY" -pass stdin 2>/dev/null) || true
         if [ -n "$AGE_KEY" ] && [ -n "$CLAUDE_ENV_FILE" ]; then
             echo "export SOPS_AGE_KEY='$AGE_KEY'" >> "$CLAUDE_ENV_FILE"
+            export SOPS_AGE_KEY="$AGE_KEY"  # Also set in current shell for subsequent checks
             echo "SOPS AGE key loaded from global config"
             SOPS_KEY_LOADED=true
         else
@@ -180,6 +182,7 @@ if [ -n "$SOPS_KEY_PASSWORD" ] && [ -z "$SOPS_AGE_KEY" ]; then
         AGE_KEY=$(echo "$SOPS_KEY_PASSWORD" | openssl enc -aes-256-cbc -pbkdf2 -d -in "$LEGACY_KEY" -pass stdin 2>/dev/null) || true
         if [ -n "$AGE_KEY" ] && [ -n "$CLAUDE_ENV_FILE" ]; then
             echo "export SOPS_AGE_KEY='$AGE_KEY'" >> "$CLAUDE_ENV_FILE"
+            export SOPS_AGE_KEY="$AGE_KEY"  # Also set in current shell for subsequent checks
             echo "SOPS AGE key loaded from legacy location"
             SOPS_KEY_LOADED=true
         else
@@ -199,10 +202,12 @@ if [ -z "$SOPS_AGE_KEY" ]; then
     LEGACY_PLAIN=".workflow-orchestrator/keys/age.key"
 
     if [ -f "$GLOBAL_PLAIN" ] && [ -n "$CLAUDE_ENV_FILE" ]; then
-        echo "export SOPS_AGE_KEY='$(cat "$GLOBAL_PLAIN")'" >> "$CLAUDE_ENV_FILE"
+        export SOPS_AGE_KEY="$(cat "$GLOBAL_PLAIN")"
+        echo "export SOPS_AGE_KEY='$SOPS_AGE_KEY'" >> "$CLAUDE_ENV_FILE"
         echo "SOPS AGE key loaded from global unencrypted key (desktop mode)"
     elif [ -f "$LEGACY_PLAIN" ] && [ -n "$CLAUDE_ENV_FILE" ]; then
-        echo "export SOPS_AGE_KEY='$(cat "$LEGACY_PLAIN")'" >> "$CLAUDE_ENV_FILE"
+        export SOPS_AGE_KEY="$(cat "$LEGACY_PLAIN")"
+        echo "export SOPS_AGE_KEY='$SOPS_AGE_KEY'" >> "$CLAUDE_ENV_FILE"
         echo "SOPS AGE key loaded from legacy unencrypted key"
     fi
 fi
