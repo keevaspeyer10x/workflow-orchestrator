@@ -84,22 +84,27 @@ class GateSecurityConfig:
             allowed_subcommands=["status", "diff", "log", "show", "branch"],
             denied_flags=["--force", "-f", "--hard", "--delete", "-D", "--exec"],
         ),
-        # Python - block -c (eval code) and dangerous modules
+        # Python - block -c (eval code) and restrict -m to safe modules
         "python": ArgumentRules(
             denied_flags=["-c", "--command"],
             denied_patterns=[
                 r"^-c$",  # Block -c flag
-                r"^-m\s+(http\.server|SimpleHTTPServer).*",  # No starting servers
             ],
-            allowed_subcommands=["-m"],  # Only allow -m for running modules
+            # Only allow safe, well-known testing/tooling modules
+            allowed_flags=[
+                "-m", "--module",
+                "-v", "-V", "--version",
+            ],
         ),
         "python3": ArgumentRules(
             denied_flags=["-c", "--command"],
             denied_patterns=[
                 r"^-c$",
-                r"^-m\s+(http\.server|SimpleHTTPServer).*",
             ],
-            allowed_subcommands=["-m"],
+            allowed_flags=[
+                "-m", "--module",
+                "-v", "-V", "--version",
+            ],
         ),
         # Pytest - safe test runner
         "pytest": ArgumentRules(
@@ -112,8 +117,10 @@ class GateSecurityConfig:
             denied_patterns=[r"^-e$", r"^--eval$"],
         ),
         # npm - only allow safe subcommands
+        # NOTE: 'install' removed - it can execute lifecycle scripts
+        # Use 'ci --ignore-scripts' for reproducible installs
         "npm": ArgumentRules(
-            allowed_subcommands=["test", "run", "ci", "install", "audit"],
+            allowed_subcommands=["test", "run", "ci", "audit"],
             denied_flags=["--unsafe-perm"],
             denied_patterns=[r".*--exec.*"],
         ),
@@ -204,6 +211,10 @@ class GateEngine:
         self.working_dir = Path(working_dir).resolve()
         self.security_config = security_config or GateSecurityConfig()
 
+        # Validate sandbox configuration
+        if self.security_config.use_sandbox:
+            self._validate_sandbox_config()
+
         # Build tool security config from gate security config
         self._tool_config = ToolSecurityConfig(
             allowed_executables=self.security_config.allowed_executables,
@@ -211,6 +222,37 @@ class GateEngine:
             use_sandbox=self.security_config.use_sandbox,
             sandbox_image=self.security_config.sandbox_image,
         )
+
+    def _validate_sandbox_config(self) -> None:
+        """Validate sandbox configuration for security."""
+        image = self.security_config.sandbox_image
+
+        # Check for placeholder
+        if "placeholder" in image.lower():
+            raise SecurityError(
+                "Sandbox image cannot use placeholder value in production. "
+                "Set GATE_SANDBOX_IMAGE environment variable or configure "
+                "sandbox_image with a real SHA256 digest."
+            )
+
+        # Validate SHA256 digest format
+        if "@sha256:" not in image:
+            raise SecurityError(
+                f"Sandbox image must be pinned by SHA256 digest: {image}. "
+                "Expected format: registry/image@sha256:<64 hex chars>"
+            )
+
+        # Validate digest is proper hex
+        parts = image.split("@sha256:")
+        if len(parts) != 2:
+            raise SecurityError(f"Invalid sandbox image format: {image}")
+
+        digest = parts[1]
+        if len(digest) != 64 or not all(c in "0123456789abcdef" for c in digest.lower()):
+            raise SecurityError(
+                f"Invalid SHA256 digest in sandbox image: {digest}. "
+                "Must be exactly 64 hexadecimal characters."
+            )
 
     def validate_all(self, gates: List[GateSpec]) -> List[GateResult]:
         """
@@ -390,6 +432,14 @@ class GateEngine:
         Find full path to executable if it's in the allowed list.
 
         Returns the full path if found and allowed, None otherwise.
+
+        NOTE: Does NOT check if executable exists to avoid TOCTOU.
+        The execute_secure function will fail if the file doesn't exist.
+        This is intentional - existence checks should happen atomically
+        with execution, not separately.
+
+        When use_sandbox=True, executables exist inside the container,
+        not on the host filesystem.
         """
         # If already a full path, check if allowed
         if name.startswith("/"):
@@ -397,9 +447,11 @@ class GateEngine:
                 return name
             return None
 
-        # Search allowed executables for matching name
+        # Search allowed executables for matching basename
+        # Return the FIRST match to ensure consistent behavior
+        # Multiple matches would be a configuration issue
         for allowed in self.security_config.allowed_executables:
-            if Path(allowed).name == name and Path(allowed).exists():
+            if Path(allowed).name == name:
                 return allowed
 
         return None

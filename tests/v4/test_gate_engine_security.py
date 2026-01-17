@@ -362,3 +362,78 @@ class TestInterpreterArgumentRules:
         # Should fail because bash is not in allowed_executables by default
         assert result.status == GateStatus.FAILED
         assert "not found or not allowed" in result.reason.lower()
+
+
+class TestSandboxValidation:
+    """Test sandbox configuration validation."""
+
+    def setup_method(self):
+        """Create temp directory for tests."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.working_dir = Path(self.temp_dir)
+
+    def teardown_method(self):
+        """Clean up temp directory."""
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_placeholder_sandbox_image_rejected(self):
+        """Test that placeholder sandbox image is rejected when sandbox enabled."""
+        from src.v4.security.execution import SecurityError
+
+        config = GateSecurityConfig(
+            use_sandbox=True,
+            sandbox_image="sandbox-runner@sha256:placeholder",
+        )
+
+        with pytest.raises(SecurityError) as exc:
+            GateEngine(self.working_dir, security_config=config)
+        assert "placeholder" in str(exc.value).lower()
+
+    def test_non_sha256_sandbox_image_rejected(self):
+        """Test that non-SHA256 pinned images are rejected."""
+        from src.v4.security.execution import SecurityError
+
+        config = GateSecurityConfig(
+            use_sandbox=True,
+            sandbox_image="sandbox-runner:latest",  # Tag, not digest
+        )
+
+        with pytest.raises(SecurityError) as exc:
+            GateEngine(self.working_dir, security_config=config)
+        assert "sha256" in str(exc.value).lower()
+
+    def test_invalid_sha256_digest_rejected(self):
+        """Test that invalid SHA256 digests are rejected."""
+        from src.v4.security.execution import SecurityError
+
+        config = GateSecurityConfig(
+            use_sandbox=True,
+            sandbox_image="sandbox-runner@sha256:abc123",  # Too short
+        )
+
+        with pytest.raises(SecurityError) as exc:
+            GateEngine(self.working_dir, security_config=config)
+        assert "64" in str(exc.value) or "hex" in str(exc.value).lower()
+
+    def test_valid_sandbox_image_accepted(self):
+        """Test that valid SHA256 pinned images are accepted."""
+        config = GateSecurityConfig(
+            use_sandbox=True,
+            sandbox_image="myregistry/sandbox-runner@sha256:" + "a" * 64,
+        )
+
+        # Should not raise
+        engine = GateEngine(self.working_dir, security_config=config)
+        assert engine.security_config.use_sandbox is True
+
+    def test_sandbox_disabled_accepts_placeholder(self):
+        """Test that placeholder is OK when sandbox is disabled."""
+        config = GateSecurityConfig(
+            use_sandbox=False,
+            sandbox_image="sandbox-runner@sha256:placeholder",
+        )
+
+        # Should not raise
+        engine = GateEngine(self.working_dir, security_config=config)
+        assert engine.security_config.use_sandbox is False

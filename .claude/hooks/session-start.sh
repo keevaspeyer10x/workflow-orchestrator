@@ -16,29 +16,61 @@ cd "$PROJECT_DIR"
 
 echo "=== Keeva Devtools Session Start ==="
 
-# 1. Auto-cleanup stale worktrees (older than 7 days)
+# Detect OS and architecture
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64) ARCH="amd64" ;;
+    aarch64|arm64) ARCH="arm64" ;;
+esac
+
+# 1. Install SOPS if not available (needed for secrets)
+if ! command -v sops &> /dev/null; then
+    echo "Installing SOPS..."
+    SOPS_VERSION="3.8.1"
+    SOPS_URL="https://github.com/getsops/sops/releases/download/v${SOPS_VERSION}/sops-v${SOPS_VERSION}.${OS}.${ARCH}"
+    mkdir -p "$HOME/.local/bin"
+    curl -sSL "$SOPS_URL" -o "$HOME/.local/bin/sops" 2>/dev/null && chmod +x "$HOME/.local/bin/sops"
+    export PATH="$HOME/.local/bin:$PATH"
+    command -v sops &>/dev/null && echo "  SOPS installed" || echo "  SOPS install failed"
+fi
+
+# 2. Install AGE if not available (needed for SOPS decryption)
+if ! command -v age &> /dev/null; then
+    echo "Installing AGE..."
+    AGE_VERSION="1.1.1"
+    AGE_URL="https://github.com/FiloSottile/age/releases/download/v${AGE_VERSION}/age-v${AGE_VERSION}-${OS}-${ARCH}.tar.gz"
+    mkdir -p "$HOME/.local/bin"
+    TMPDIR=$(mktemp -d)
+    curl -sSL "$AGE_URL" -o "$TMPDIR/age.tar.gz" 2>/dev/null && \
+        tar -xzf "$TMPDIR/age.tar.gz" -C "$TMPDIR" && \
+        cp "$TMPDIR/age/age" "$TMPDIR/age/age-keygen" "$HOME/.local/bin/" && \
+        chmod +x "$HOME/.local/bin/age" "$HOME/.local/bin/age-keygen"
+    rm -rf "$TMPDIR"
+    export PATH="$HOME/.local/bin:$PATH"
+    command -v age &>/dev/null && echo "  AGE installed" || echo "  AGE install failed"
+fi
+
+# 3. Fix cffi issue (known problem in Claude Code Web)
+echo "Checking cffi..."
+pip install -q cffi --force-reinstall 2>/dev/null || true
+
+# 4. Install/update devtools
+echo "Installing devtools..."
+pip install -q --upgrade git+https://github.com/keevaspeyer10x/workflow-orchestrator.git 2>/dev/null || true
+pip install -q --upgrade git+https://github.com/keevaspeyer10x/multiminds.git 2>/dev/null || true
+pip install -q --upgrade git+https://github.com/keevaspeyer10x/ai-tool-bridge.git 2>/dev/null || true
+
+# Verify installations
+command -v orchestrator &>/dev/null && echo "  orchestrator ready" || echo "  orchestrator not found"
+command -v minds &>/dev/null && echo "  minds ready" || echo "  minds not found"
+
+# 5. Auto-cleanup stale worktrees (older than 7 days)
 if command -v orchestrator &> /dev/null; then
-    echo "Cleaning up stale worktrees..."
     orchestrator doctor --cleanup --older-than 7 2>/dev/null || true
 fi
 
-# 2. Update all devtools
-echo "Checking workflow orchestrator..."
-pip install -q --upgrade git+https://github.com/keevaspeyer10x/workflow-orchestrator.git 2>/dev/null || true
-
-echo "Checking ai-tool-bridge..."
-pip install -q --upgrade git+https://github.com/keevaspeyer10x/ai-tool-bridge.git 2>/dev/null || true
-
-echo "Checking multiminds..."
-pip install -q --upgrade multiminds 2>/dev/null || true
-
-# 3. Install aider if not available (for Gemini reviews with repo context)
-if ! command -v aider &> /dev/null; then
-    echo "Installing aider-chat for reviews..."
-    pip install -q aider-chat 2>/dev/null || echo "Note: aider-chat install skipped"
-fi
-
-# 4. Load secrets from simple encrypted file (preferred method)
+# 6. Load secrets from simple encrypted file (preferred method)
 SECRETS_FILE=".secrets.enc"
 
 if [ -f "$SECRETS_FILE" ]; then
