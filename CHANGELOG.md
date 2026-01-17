@@ -5,6 +5,21 @@ All notable changes to the workflow-orchestrator.
 ## [Unreleased]
 
 ### Added
+- **V4.2 Phase 3: LLM Call Interceptor** (Issue #102)
+  - `src/v4/interceptor/`: New module for intercepting LLM API calls with budget tracking
+  - `LLMCallWrapper`: Core wrapper with reserve/commit/rollback pattern
+    - Pre-call: Token estimation and budget reservation
+    - Post-call: Actual token counting and budget commit
+    - On failure: Automatic budget rollback
+    - Support for both sync and streaming responses
+  - Provider adapters with token usage extraction:
+    - `AnthropicAdapter`: Claude API integration
+    - `OpenAIAdapter`: GPT API integration (with OpenRouter support)
+    - `GeminiAdapter`: Google Gemini API integration
+  - `BudgetAwareRetry`: Exponential backoff with same-reservation retry
+  - Integrates with Phase 2 `AtomicBudgetTracker` for atomic operations
+  - 23 new tests covering wrapper, adapters, retry logic, and integration
+
 - **V4.2 Phase 2: Token Budget System** (Issue #102)
   - `src/v4/budget/`: New module for token budget tracking and enforcement
   - Provider-specific token counting:
