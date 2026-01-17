@@ -410,6 +410,19 @@ def cmd_start(args):
         paths.ensure_dirs()  # Create the directory first
         gitignore_path.write_text("*\n")
 
+    # Phase 7c: Check for and recover orphaned sessions from previous crashes
+    try:
+        import asyncio
+        from .healing.config import get_config as get_healing_config
+        healing_config = get_healing_config()
+        if healing_config.enabled:
+            from .healing.cli_heal import _check_crash_recovery
+            recovery_summary = asyncio.run(_check_crash_recovery(working_dir))
+            if recovery_summary and recovery_summary.errors_extracted > 0:
+                print(f"Recovered {recovery_summary.errors_extracted} errors from previous incomplete session")
+    except Exception as e:
+        logger.debug(f"Crash recovery check failed: {e}")
+
     # CORE-025 Phase 4: Handle --isolated flag for worktree isolation
     if isolated:
         from .worktree_manager import WorktreeManager, DirtyWorkingDirectoryError, BranchExistsError
@@ -1573,10 +1586,27 @@ def cmd_finish(args):
         except Exception as e:
             logger.debug(f"Failed to log workflow finish to audit: {e}")
 
+        # Phase 7c: Run session scan for pattern learning (non-blocking)
+        working_dir = Path(args.dir or '.')  # Also used by CORE-025 below
+        try:
+            import asyncio
+            from .healing.config import get_config as get_healing_config
+            healing_config = get_healing_config()
+            if healing_config.enabled:
+                from .healing.cli_heal import _run_session_scan, _get_healing_client
+                healing_client = asyncio.run(_get_healing_client())
+                if healing_client:
+                    scan_summary = asyncio.run(_run_session_scan(working_dir, healing_client))
+                    if scan_summary and scan_summary.errors_extracted > 0:
+                        print(f"Learning: Found {scan_summary.errors_extracted} errors, "
+                              f"created {scan_summary.patterns_created} patterns")
+        except Exception as e:
+            logger.warning(f"Session scan failed (non-blocking): {e}")
+
         # CORE-025 Phase 4: Handle worktree merge for isolated workflows
         worktree_merged = False
         worktree_merge_info = None
-        working_dir = Path(args.dir or '.')
+        # working_dir already defined above for Phase 7c scan
         paths = OrchestratorPaths(base_dir=working_dir)
         session_mgr = SessionManager(paths)
         current_session = session_mgr.get_current_session()
