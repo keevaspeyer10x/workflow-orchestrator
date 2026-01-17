@@ -17,7 +17,7 @@ import os
 import pytest
 import tempfile
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -501,8 +501,8 @@ class TestApprovalSignatures:
             gate_id="gate_1",
             artifact_hash="sha256:abc123",
             required_approvers=["alice", "bob"],
-            created_at=datetime.now(),
-            expires_at=datetime.now() + timedelta(hours=24),
+            created_at=datetime.now(timezone.utc),
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
         )
 
         approval = Approval.create(request, "alice", self.signing_key)
@@ -516,8 +516,8 @@ class TestApprovalSignatures:
             gate_id="gate_1",
             artifact_hash="sha256:abc123",
             required_approvers=["alice"],
-            created_at=datetime.now(),
-            expires_at=datetime.now() + timedelta(hours=24),
+            created_at=datetime.now(timezone.utc),
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
         )
 
         approval = Approval.create(request, "alice", self.signing_key)
@@ -535,8 +535,8 @@ class TestApprovalSignatures:
             gate_id="gate_1",
             artifact_hash="sha256:abc123",
             required_approvers=["alice"],
-            created_at=datetime.now(),
-            expires_at=datetime.now() + timedelta(hours=24),
+            created_at=datetime.now(timezone.utc),
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
         )
 
         approval = Approval.create(request, "alice", self.signing_key)
@@ -599,8 +599,8 @@ class TestReplayProtection:
             gate_id="gate_1",
             artifact_hash="sha256:abc123",
             required_approvers=["alice"],
-            created_at=datetime.now(),
-            expires_at=datetime.now() + timedelta(hours=24),
+            created_at=datetime.now(timezone.utc),
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
         )
 
         # Create approval with nonce
@@ -617,14 +617,15 @@ class TestReplayProtection:
         """Test that expired approvals are rejected."""
         auth = ApprovalAuthenticator(signing_key=b"test-key-32-bytes-long-padding!")
 
+        now = datetime.now(timezone.utc)
         request = ApprovalRequest(
             id="req_123",
             workflow_id="wf_abc",
             gate_id="gate_1",
             artifact_hash="sha256:abc123",
             required_approvers=["alice"],
-            created_at=datetime.now() - timedelta(hours=25),
-            expires_at=datetime.now() - timedelta(hours=1),
+            created_at=now - timedelta(hours=25),
+            expires_at=now - timedelta(hours=1),  # Expired 1 hour ago
         )
 
         approval = Approval.create(request, "alice", auth.signing_key)

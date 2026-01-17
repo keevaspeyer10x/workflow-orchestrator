@@ -16,6 +16,7 @@ from .execution import (
     CommandResult,
     execute_secure,
     SecurityError,
+    TimeoutError,
 )
 from .paths import (
     safe_path,
@@ -41,6 +42,7 @@ __all__ = [
     "CommandResult",
     "execute_secure",
     "SecurityError",
+    "TimeoutError",
     # Paths
     "safe_path",
     "validate_glob_pattern",
