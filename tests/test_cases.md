@@ -1,77 +1,153 @@
-# Test Cases: Intelligent Pattern Filtering
+# Test Cases: Intelligent File Scanning
 
-## 1. Context Extraction Tests (`tests/healing/test_context_extraction.py`)
+## ScanState Tests
 
-### Language Detection
-- `test_detect_language_python` - Python error patterns detected (ModuleNotFoundError, ImportError, .py files)
-- `test_detect_language_javascript` - JavaScript patterns (ReferenceError, npm ERR, .js/.ts files)
-- `test_detect_language_go` - Go patterns (panic:, .go files, goroutine)
-- `test_detect_language_rust` - Rust patterns (error[E], cargo, .rs files)
-- `test_detect_language_file_extension_priority` - File extension takes precedence over pattern matching
-- `test_detect_language_unknown` - Returns None with 0.0 confidence for unknown patterns
+### TC-STATE-001: Load empty state
+**Given**: No state file exists
+**When**: `ScanState.load()` is called
+**Then**: Returns empty state with default values
 
-### Error Category Detection
-- `test_detect_category_dependency` - ModuleNotFoundError, npm ERR 404
-- `test_detect_category_syntax` - SyntaxError, IndentationError
-- `test_detect_category_runtime` - RuntimeError, panic
-- `test_detect_category_network` - ConnectionError, ECONNREFUSED
-- `test_detect_category_permission` - PermissionError, EACCES
+### TC-STATE-002: Load existing state
+**Given**: State file exists with hashes and watermark
+**When**: `ScanState.load()` is called
+**Then**: Returns state with preserved values
 
-### Scoring Functions
-- `test_wilson_score_sample_size` - 1/1 (100%) should score lower than 95/100 (95%)
-- `test_wilson_score_zero_total` - Returns 0.5 (neutral) for no data
-- `test_wilson_score_high_confidence` - 100/100 scores near 0.95
-- `test_recency_score_recent` - Recent success scores ~1.0
-- `test_recency_score_30_days` - 30-day old success scores ~0.5 (half-life)
-- `test_recency_score_none` - Returns 0.5 for unknown last_success
+### TC-STATE-003: Save state atomically
+**Given**: ScanState with data
+**When**: `state.save()` is called
+**Then**: File is written atomically (temp + rename)
 
-### Context Overlap
-- `test_context_overlap_full_match` - Same context returns ~1.0
-- `test_context_overlap_language_match_only` - Language match scores higher than category
-- `test_context_overlap_no_match` - Different contexts score low
-- `test_context_overlap_partial` - Partial match (e.g., same language, different framework)
+### TC-STATE-004: Hash tracking
+**Given**: ScanState with file_hashes
+**When**: `state.is_changed("file.md", new_hash)` is called
+**Then**: Returns True if hash differs, False if same
 
-### Cross-Project Eligibility
-- `test_eligible_meets_all_criteria` - 3+ projects, 5+ successes, 0.7+ Wilson → True
-- `test_ineligible_few_projects` - 2 projects → False
-- `test_ineligible_few_successes` - 4 successes → False
-- `test_ineligible_low_wilson` - 50% success rate → False
+### TC-STATE-005: Session tracking
+**Given**: ScanState with ingested_sessions
+**When**: `state.is_session_ingested("wf_123")` is called
+**Then**: Returns True if in list, False otherwise
 
-## 2. Scored Lookup Tests (`tests/healing/test_scored_lookup.py`)
+## PatternScanner Tests
 
-### Same-Project Lookup
-- `test_same_project_found` - Pattern from same project returns with tier=1
-- `test_same_project_threshold` - Score >= 0.6 required
-- `test_same_project_below_threshold` - Score < 0.6 falls through to cross-project
+### TC-SCAN-001: Scan unchanged file
+**Given**: File with same hash as in state
+**When**: `scanner.scan_all()` is called
+**Then**: File is skipped, no patterns extracted
 
-### Cross-Project Lookup
-- `test_cross_project_found` - Pattern meeting guardrails returns with tier=1
-- `test_cross_project_threshold` - Score >= 0.75 required
-- `test_cross_project_guardrails_enforced` - Pattern not meeting guardrails skipped
-- `test_cross_project_opt_out_respected` - Patterns from opted-out projects filtered
+### TC-SCAN-002: Scan changed file
+**Given**: File with different hash than state
+**When**: `scanner.scan_all()` is called
+**Then**: File is parsed, patterns extracted, hash updated
 
-### Fallback Behavior
-- `test_rpc_failure_fallback` - Falls back to existing lookup on RPC error
-- `test_language_mismatch_penalty` - Cross-project with different language scores lower
+### TC-SCAN-003: Scan new file
+**Given**: File not in state
+**When**: `scanner.scan_all()` is called
+**Then**: File is parsed, patterns extracted, hash added
 
-## 3. Supabase Client Tests (`tests/healing/test_supabase_scoring.py`)
+### TC-SCAN-004: Skip files over size limit
+**Given**: File larger than max_file_size (10MB)
+**When**: `scanner.scan_all()` is called
+**Then**: File is skipped with warning, not error
 
-- `test_lookup_patterns_scored_returns_list` - RPC returns scored patterns
-- `test_record_pattern_application_success` - Records success with context
-- `test_record_pattern_application_failure` - Records failure
-- `test_get_pattern_project_ids` - Returns project list
-- `test_get_project_share_setting_true` - Default is sharing enabled
-- `test_get_project_share_setting_false` - Respects opt-out
+### TC-SCAN-005: Show recommendations
+**Given**: Multiple scannable sources exist
+**When**: `scanner.scan_and_show_recommendations()` is called
+**Then**: Returns list of ScanResult with recommendations
 
-## 4. Detector Integration Tests
+### TC-SCAN-006: Days filter
+**Given**: Files older than 30 days and newer than 30 days
+**When**: `scanner.scan_all(days=30)` is called
+**Then**: Only files modified in last 30 days are scanned
 
-- `test_workflow_log_detector_context` - Context populated in ErrorEvent
-- `test_subprocess_detector_context` - Context populated in ErrorEvent
-- `test_backfill_context_extraction` - Historical errors get context
+### TC-SCAN-007: Deduplication
+**Given**: Pattern already exists in database
+**When**: Same error is scanned again
+**Then**: Occurrence count incremented, no duplicate created
 
-## 5. Opt-Out Tests (`tests/healing/test_opt_out.py`)
+## GitHubIssueParser Tests
 
-- `test_opt_out_config_default_true` - share_patterns defaults to True
-- `test_opt_out_config_false` - Can set share_patterns to False
-- `test_opted_out_patterns_not_returned` - Cross-project lookup excludes opted-out patterns
-- `test_same_project_ignores_opt_out` - Same-project lookup still works when opted-out
+### TC-GH-001: Parse closed issues
+**Given**: Mock gh CLI output with closed issues
+**When**: `parser.fetch_closed_issues()` is called
+**Then**: Returns list of issue dicts
+
+### TC-GH-002: Filter by labels
+**Given**: Issues with various labels
+**When**: `parser.fetch_closed_issues(labels=["bug"])` is called
+**Then**: Only issues with "bug" label returned
+
+### TC-GH-003: Extract errors from body
+**Given**: Issue body with Python traceback
+**When**: `parser.extract_errors(issue)` is called
+**Then**: Returns ErrorEvent with parsed traceback
+
+### TC-GH-004: Handle gh not installed
+**Given**: gh CLI not in PATH
+**When**: `parser.fetch_closed_issues()` is called
+**Then**: Returns empty list with warning logged
+
+### TC-GH-005: Watermark filtering
+**Given**: Issues before and after watermark date
+**When**: `parser.fetch_closed_issues(since=watermark)` is called
+**Then**: Only issues closed after watermark returned
+
+## Integration Tests
+
+### TC-INT-001: End-to-end scan
+**Given**: Repo with LEARNINGS.md, workflow logs, and GitHub issues
+**When**: Full scan is performed
+**Then**: All sources scanned, patterns stored, state updated
+
+### TC-INT-002: Crash recovery
+**Given**: Previous session didn't complete (no state update)
+**When**: New session starts
+**Then**: Orphaned logs from previous session are ingested
+
+### TC-INT-003: Re-run idempotency
+**Given**: Scan already completed
+**When**: Scan is run again
+**Then**: No new patterns created, occurrence counts may increment
+
+## CLI Tests
+
+### TC-CLI-001: backfill with scan
+**Given**: `orchestrator heal backfill`
+**When**: Command executed
+**Then**: Scan runs first, shows recommendations, then backfills
+
+### TC-CLI-002: backfill --scan-only
+**Given**: `orchestrator heal backfill --scan-only`
+**When**: Command executed
+**Then**: Only shows recommendations, no backfill
+
+### TC-CLI-003: backfill --days 90
+**Given**: `orchestrator heal backfill --days 90`
+**When**: Command executed
+**Then**: Scans sources from last 90 days
+
+### TC-CLI-004: backfill --no-github
+**Given**: `orchestrator heal backfill --no-github`
+**When**: Command executed
+**Then**: Skips GitHub issue scanning
+
+## Edge Cases
+
+### TC-EDGE-001: Empty LEARNINGS.md
+**Given**: LEARNINGS.md exists but is empty
+**When**: Scan is performed
+**Then**: No errors, file marked as scanned
+
+### TC-EDGE-002: Malformed JSON in state
+**Given**: State file has invalid JSON
+**When**: `ScanState.load()` is called
+**Then**: Returns empty state, logs warning
+
+### TC-EDGE-003: No scannable sources
+**Given**: Repo with no logs or LEARNINGS.md
+**When**: Scan is performed
+**Then**: Empty result, no errors
+
+### TC-EDGE-004: GitHub API error
+**Given**: GitHub API returns error
+**When**: Scan is performed
+**Then**: Local sources still scanned, warning logged for GitHub

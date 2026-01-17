@@ -1,90 +1,189 @@
-# Implementation Plan: Intelligent Pattern Filtering
-
-**Task**: Complete intelligent pattern filtering implementation per docs/handoffs/intelligent-pattern-filtering-implementation.md
+# Intelligent File Scanning for Backfill
 
 ## Overview
-Implement Phase 6: Cross-Project Pattern Relevance - enable patterns learned in one repo to help another while respecting context relevance.
 
-**Key Decision**: Cross-project lookup enabled by default with guardrails (3+ projects, 5+ successes, 0.7+ Wilson score).
+Add intelligent file scanning to the healing backfill system that:
+1. Automatically discovers learnable content at session end
+2. Provides recommendations for each source found
+3. Handles deduplication gracefully on re-runs
+4. Integrates with ongoing healing workflow (not periodic backfill)
 
-**Added Requirement**: Allow repos to opt-out of sharing their learnings with other projects.
+## Architecture: Session-End Hook with Incremental Scanning
 
-## Pre-existing Components (Already Implemented)
-- **SQL Migration**: `migrations/002_intelligent_pattern_filtering.sql` already run
-- **RPC Functions**: `lookup_patterns_scored()`, `record_pattern_application()`, `is_eligible_for_cross_project()` in migration
-- **PatternContext**: Dataclass in `src/healing/models.py`
-- **Context Extraction**: Full module at `src/healing/context_extraction.py`
+Based on multi-model consensus (Claude, GPT, Gemini, Grok, DeepSeek), we use a **session-end hook** architecture that triggers at `orchestrator finish`.
 
-## Multi-Model Review Feedback (Addressed)
-1. **Opt-out semantics clarified**: `share_patterns: false` means "don't share MY patterns with others" (provider opt-out). Consumers always receive cross-project patterns unless they opt out separately.
-2. **Error handling**: Added graceful fallback to same-project-only on RPC failures
-3. **Observability**: Added logging for cross-project matches, guardrail rejections
+```
+┌─────────────────────────────────────────────────────┐
+│              Session End Hook (Primary)             │
+│  • Scan session artifacts (manifest-driven)         │
+│  • Check LEARNINGS.md hash                          │
+│  • GitHub issues since watermark                    │
+│  • Update state file + pattern store                │
+└─────────────────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────┐
+│         Crash Recovery at Session Start             │
+│  • If previous session didn't complete, ingest its  │
+│    orphaned logs before proceeding                  │
+└─────────────────────────────────────────────────────┘
+```
 
-## Implementation Tasks
+## Components
 
-### 1. Update Supabase Client (`src/healing/supabase_client.py`)
-- Add `lookup_patterns_scored()` method - calls RPC function to get scored patterns
-- Add `record_pattern_application()` method - calls RPC to track per-project usage
-- Add `get_pattern_project_ids()` method - returns list of projects using a pattern
-- Add `get_project_share_setting()` method - check if project opted out
-- **Error handling**: Return empty results on RPC failures, log warnings
+### 1. ScanState (State Tracking)
 
-### 2. Update HealingClient (`src/healing/client.py`)
-- Add thresholds: `SAME_PROJECT_THRESHOLD = 0.6`, `CROSS_PROJECT_THRESHOLD = 0.75`
-- Modify `lookup()` to use scored results with tiered matching:
-  - Tier 1a: Same project exact match (score >= 0.6)
-  - Tier 1b: Cross-project exact match (score >= 0.75, passes guardrails)
-  - Tier 2: RAG with language filtering
-  - Tier 3: Causality
-- Add `_lookup_scored()` helper method
-- **Add support for opt-out projects** - filter out patterns from opted-out repos
-- **Observability**: Log cross-project matches, guardrail rejections, score thresholds
-- **Fallback**: On RPC failure, fall back to existing same-project lookup
+Portable JSON file at `.orchestrator/scan_state.json`:
 
-### 3. Update Detectors (all 4 detectors)
-- `workflow_log.py`: Add context extraction in `_parse_event()`
-- `subprocess.py`: Add context extraction in `_parse_output()`
-- `transcript.py`: Add context extraction in `_parse_content()`
-- `hook.py`: Add context extraction in `_parse_hook_output()`
+```json
+{
+  "last_scan": "2026-01-17T12:00:00Z",
+  "file_hashes": {
+    "LEARNINGS.md": "a1b2c3d4...",
+    ".workflow_log.jsonl": "e5f6g7h8..."
+  },
+  "github_watermark": "2026-01-14T00:00:00Z",
+  "ingested_sessions": ["wf_abc123", "wf_def456"]
+}
+```
 
-### 4. Update Backfill (`src/healing/backfill.py`)
-- Add context extraction in `_extract_error()` method
+### 2. PatternSource Protocol
 
-### 5. Update record_fix_result (`src/healing/supabase_client.py`)
-- Modify to call `record_pattern_application()` RPC
-- Accept optional `PatternContext` parameter
+Each source implements incremental scanning:
 
-### 6. Add Opt-Out Configuration
-- Add `share_patterns: bool = True` to HealingConfig
-- Store opt-out preference in Supabase `healing_config` table
-- Filter opted-out patterns in cross-project lookups
-- **Schema**: Add `share_patterns BOOLEAN DEFAULT TRUE` to `healing_config`
+```python
+class PatternSource(Protocol):
+    def scan_incremental(self, state: ScanState) -> list[ScanResult]
+    def get_recommendation(self) -> str
+```
 
-### 7. Update `__init__.py` exports
-- Export `PatternContext`, `extract_context`, and scoring functions
+### 3. Sources to Scan
 
-### 8. Write Tests
-- `test_context_extraction.py`: Language detection, category detection, Wilson score, overlap
-- `test_scored_lookup.py`: Same-project priority, cross-project guardrails, language filtering
-- `test_opt_out.py`: Opt-out config respected, opted-out patterns not shared
+| Source | Parser | Recommendation Logic |
+|--------|--------|----------------------|
+| `.workflow_log.jsonl` | WorkflowLogDetector | "High value - structured error events" |
+| `LEARNINGS.md` | TranscriptDetector | "High value - documented errors and fixes" |
+| `.wfo_logs/*.log` | TranscriptDetector | "Medium value - parallel agent errors" |
+| `.orchestrator/sessions/*` | TranscriptDetector | "Medium value - session transcripts (last 30 days)" |
+| GitHub closed issues | GitHubIssueParser (new) | "High value - resolved bugs with labels: bug, error, fix" |
 
-## Execution Decision
+### 4. Scanner Module
 
-**Sequential execution** - dependencies between steps require ordered implementation:
-1. Supabase client methods must exist before HealingClient can use them
-2. Context extraction must be imported before detectors can use it
-3. Tests depend on all functionality being in place
+New file: `src/healing/scanner.py`
 
-### Parallel Opportunity Analysis
-- **Could parallelize**: 4 detector updates are independent of each other
-- **Estimated total work**: 4-6 hours
-- **Decision**: Sequential execution because:
-  - Dependencies between major components (Supabase → HealingClient)
-  - Moderate scope doesn't justify coordination overhead
-  - Single session can catch issues early and adjust
-  - Tests should follow implementation to verify correctness
+```python
+@dataclass
+class ScanResult:
+    source: str           # "workflow_log", "learnings_md", "github_issue"
+    path: str             # File path or issue URL
+    errors_found: int     # Number of errors extracted
+    recommendation: str   # Why this source is valuable
 
-## Risk Mitigation
-- All changes backward compatible (new columns have defaults)
-- Opt-out defaults to sharing (current behavior)
-- Cross-project requires passing guardrails
+@dataclass
+class ScanSummary:
+    sources_scanned: list[ScanResult]
+    errors_extracted: int
+    patterns_created: int
+    patterns_updated: int  # Existing patterns with incremented count
+
+class PatternScanner:
+    def scan_all(self, days: int = 30) -> ScanSummary
+    def scan_and_show_recommendations(self) -> list[ScanResult]
+```
+
+### 5. Integration Points
+
+#### A. Session-End Hook (in `cmd_finish`)
+
+```python
+# In cli.py cmd_finish(), after workflow completion:
+if healing_enabled:
+    scanner = PatternScanner(client)
+    summary = await scanner.scan_all()
+    if summary.errors_extracted > 0:
+        click.echo(f"Learning: Found {summary.errors_extracted} errors, "
+                   f"created {summary.patterns_created} new patterns")
+```
+
+#### B. Crash Recovery (in `cmd_start`)
+
+```python
+# In cli.py cmd_start(), at session start:
+scanner = PatternScanner(client)
+if scanner.has_orphaned_session():
+    click.echo("Recovering learnings from previous incomplete session...")
+    await scanner.recover_orphaned()
+```
+
+#### C. Manual Trigger (CLI)
+
+```bash
+# Existing backfill command enhanced with scanning:
+orchestrator heal backfill              # Scan + backfill (default)
+orchestrator heal backfill --scan-only  # Just show recommendations
+orchestrator heal backfill --days 90    # Scan last 90 days
+orchestrator heal backfill --no-github  # Skip GitHub API
+```
+
+## Deduplication Strategy
+
+Already handled by existing infrastructure:
+
+1. **Fingerprinting**: Each error gets a unique fingerprint (SHA256 of type + normalized message + stack frame)
+2. **Upsert on record**: `record_historical_error()` checks if fingerprint exists
+3. **Increment vs Insert**: Existing patterns get `occurrence_count++`, new patterns are inserted
+
+Re-running backfill on same files is safe - it just increments occurrence counts.
+
+## GitHub Integration
+
+New parser using `gh` CLI:
+
+```python
+class GitHubIssueParser:
+    def fetch_closed_issues(self, since: datetime, labels: list[str]) -> list[dict]:
+        """Fetch closed issues since watermark with bug/error/fix labels."""
+        cmd = f"gh issue list --state closed --json title,body,labels,closedAt"
+        # Filter by labels and date
+
+    def extract_errors(self, issue: dict) -> list[ErrorEvent]:
+        """Parse issue body for error patterns (stack traces, error messages)."""
+        # Use TranscriptDetector-style regex parsing
+```
+
+## Files to Create/Modify
+
+### New Files
+- `src/healing/scanner.py` - Main scanner module (~200 lines)
+- `src/healing/github_parser.py` - GitHub issue parser (~100 lines)
+- `tests/healing/test_scanner.py` - Scanner tests (~150 lines)
+- `tests/healing/test_github_parser.py` - GitHub parser tests (~80 lines)
+
+### Modified Files
+- `src/healing/backfill.py` - Integrate scanner as default behavior
+- `src/cli.py` - Add scan integration to cmd_finish, cmd_start
+- `src/healing/__init__.py` - Export new modules
+
+## Execution Plan
+
+**Sequential execution** - This is a single cohesive feature with tight dependencies:
+1. Scanner depends on state tracking
+2. GitHub parser depends on scanner infrastructure
+3. CLI integration depends on scanner
+4. Tests depend on all components
+
+## Test Strategy
+
+1. **Unit tests for ScanState**: Load, save, hash tracking
+2. **Unit tests for scanner**: Mock sources, verify incremental behavior
+3. **Unit tests for GitHub parser**: Mock gh CLI output
+4. **Integration test**: End-to-end scan with real files
+
+## Acceptance Criteria
+
+1. ✅ `orchestrator finish` automatically scans for learnable content
+2. ✅ `orchestrator heal backfill` shows recommendations before processing
+3. ✅ Re-running backfill doesn't create duplicates
+4. ✅ GitHub closed issues are scanned (with --days flag)
+5. ✅ State file tracks what's been processed
+6. ✅ Crash recovery ingests orphaned sessions

@@ -5,6 +5,26 @@ All notable changes to the workflow-orchestrator.
 ## [Unreleased]
 
 ### Added
+- **Self-Healing Infrastructure Phase 7**: Intelligent File Scanning for Backfill
+  - Session-end hook architecture (multi-model consensus from Claude, GPT, Gemini, Grok, DeepSeek)
+  - `src/healing/scanner.py`: Main scanner module
+    - `ScanState`: Persisted state tracking with file hashes, GitHub watermark, session tracking
+    - `ScanResult` / `ScanSummary`: Data classes for scan results
+    - `PatternScanner`: Incremental hash-based file scanning
+      - `scan_all()`: Scan all sources with configurable days filter
+      - `get_recommendations()`: Get recommendations for scannable sources
+      - `has_orphaned_session()` / `recover_orphaned()`: Crash recovery
+    - Sources: `.workflow_log.jsonl`, `LEARNINGS.md`, `.wfo_logs/`, `.orchestrator/sessions/`
+    - Error extraction from text and JSONL formats using existing detector patterns
+  - `src/healing/github_parser.py`: GitHub closed issues parser
+    - `GitHubIssueParser`: Fetches closed issues via `gh` CLI
+    - Filters by bug-related labels (bug, error, fix, crash, exception, failure)
+    - Extracts error patterns from issue bodies (Python, Node, Rust, Go)
+    - Watermark-based incremental fetching with date filtering
+  - Deduplication via fingerprinting (existing infrastructure)
+  - 34 new tests for scanner and GitHub parser
+  - Designed for seamless integration at `orchestrator finish`
+
 - **Self-Healing Infrastructure Phase 6**: Intelligent Pattern Filtering
   - Cross-project pattern relevance scoring with Wilson score
   - `src/healing/context_extraction.py`: Context extraction module

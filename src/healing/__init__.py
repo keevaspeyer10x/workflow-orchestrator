@@ -102,6 +102,10 @@ from .flakiness import FlakinessDetector, FlakinessResult
 from .cache_optimizer import CacheOptimizer
 from .backfill import HistoricalBackfill
 
+# Phase 7 - Scanner
+from .scanner import PatternScanner, ScanState, ScanResult, ScanSummary
+from .github_parser import GitHubIssueParser
+
 __all__ = [
     # Phase 0
     "Environment",
@@ -207,4 +211,10 @@ __all__ = [
     "CacheOptimizer",
     # Phase 5 - Backfill
     "HistoricalBackfill",
+    # Phase 7 - Scanner
+    "PatternScanner",
+    "ScanState",
+    "ScanResult",
+    "ScanSummary",
+    "GitHubIssueParser",
 ]
