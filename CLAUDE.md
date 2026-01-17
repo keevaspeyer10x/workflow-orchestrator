@@ -1,13 +1,5 @@
+export SECRETS_PASSWORD="keeva2026"
 export SOPS_KEY_PASSWORD="I love vibe coding"
-
-## IMPORTANT: Session Setup (Claude Code Web)
-
-**At the start of EVERY session**, run this setup script:
-```bash
-.claude/hooks/session-start.sh
-```
-
-This installs tools (minds, orchestrator) and loads API keys. Without it, `minds` commands will fail.
 
 ## Multi-Model AI Queries
 
