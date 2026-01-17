@@ -1,3 +1,5 @@
+export SOPS_KEY_PASSWORD="I love vibe coding"
+
 # Workflow Orchestrator - Claude Code Instructions
 
 ## CRITICAL: API Keys for External Reviews
