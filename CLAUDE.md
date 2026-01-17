@@ -1,5 +1,17 @@
 export SOPS_KEY_PASSWORD="I love vibe coding"
 
+## Multi-Model AI Queries
+
+For questions that benefit from multiple AI perspectives, use the `minds` command:
+
+```bash
+minds ask "your question here"
+```
+
+This queries Claude, GPT, Gemini, Grok, and DeepSeek simultaneously and synthesizes their responses.
+The session hook automatically installs multiminds and loads API keys.
+
+
 # Workflow Orchestrator - Claude Code Instructions
 
 ## CRITICAL: API Keys for External Reviews
