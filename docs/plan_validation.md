@@ -1,90 +1,94 @@
 # Plan Validation Review
 
-**Task:** Implement V4.2 Phase 3: LLM Call Interceptor
-**Verdict:** APPROVED_WITH_NOTES
+**Task:** Implement V4.2 Phase 4: Chat Mode
+**Verdict:** APPROVED
 
-## Checkpoint Review
+## 10-Point Checkpoint Review
 
 ### 1. Request Completeness ✅
-- All requirements from user prompt addressed:
-  - [x] LLMCallWrapper that intercepts all LLM API calls
-  - [x] Pre-call: budget check, token estimation, reservation
-  - [x] Post-call: actual token counting, budget commit/rollback
-  - [x] Supports both sync and async call patterns
-  - [x] AnthropicAdapter for Claude API
-  - [x] OpenAIAdapter for OpenAI API
-  - [x] Common interface for token extraction
-  - [x] Automatic retry with budget awareness
+**Status**: PASS
+- All components from task specification are covered:
+  - [x] SafeContextManager (context.py)
+  - [x] SummaryValidator (validator.py)
+  - [x] ChatSession (session.py)
+  - [x] Message types (models.py)
+  - [x] Meta-commands (commands.py)
+- Integration points documented (EventStore, TokenCounter, LLMCallWrapper)
 
 ### 2. Requirements ✅
-- Functional requirements clearly defined
-- Non-functional requirements (performance, reliability) implicit but covered
-- Acceptance criteria defined in plan.md
+**Status**: PASS
+- Acceptance criteria from task spec mapped to implementation:
+  - Session persistence → EventStore integration
+  - Meta-commands → commands.py handler
+  - Context summarization → SafeContextManager
+  - Checkpoint/restore → CheckpointStore integration
+  - Crash recovery → event replay
+  - Pinned messages → pinned list in prepare_context
+  - Budget enforcement → LLMCallWrapper integration
 
 ### 3. Security ✅
-- No new attack surfaces introduced
-- Uses existing secure budget module (Phase 2)
-- API keys handled by provider clients (not by interceptor)
-- No secrets in logs or responses
+**Status**: PASS
+- Meta-commands use fixed allowlist (no shell execution)
+- No user input passed to eval/exec
+- Path traversal N/A (no file operations)
+- Secrets: LLM API keys managed by LLMCallWrapper (already secure)
 
 ### 4. Risk ✅
-- 5 risks identified with mitigations in risk_analysis.md
-- Residual risks documented and acceptable
-- No critical or high-severity unmitigated risks
+**Status**: PASS
+- 5 risks identified with mitigations in docs/risk_analysis.md
+- All HIGH/CRITICAL risks have implemented mitigations
+- Residual risks documented
 
 ### 5. Objective-Driven Optimality ✅
-- Design directly addresses the objective (intercept LLM calls with budget tracking)
-- No unnecessary complexity
-- Uses existing infrastructure (AtomicBudgetTracker, TokenCounter)
+**Status**: PASS
+- Design matches V4.2 spec from implementation plan
+- Uses existing Phase 1-3 components (no reinventing)
+- Minimal new code for maximum functionality
 
 ### 6. Dependencies ✅
-- Dependencies on Phase 2 budget module (completed)
-- External dependencies: anthropic, openai libraries (optional, graceful fallback)
-- No circular dependencies
+**Status**: PASS
+- Phase 1: AsyncEventStore, CheckpointStore ✓
+- Phase 2: TokenCounter, AtomicBudgetTracker ✓
+- Phase 3: LLMCallWrapper, LLMRequest, LLMResponse ✓
+- External: aiosqlite (already installed), re (stdlib)
 
-### 7. Edge Cases ⚠️ (Note)
-**Identified edge cases:**
-- Budget exactly at limit when call starts
-- Streaming response interrupted mid-way
-- API returns no usage information
-- Concurrent calls racing for last tokens
-
-**Note:** Plan should explicitly handle "API returns no usage" case with fallback to estimation.
+### 7. Edge Cases ✅
+**Status**: PASS
+- Empty message list → return as-is
+- No messages to summarize → return as-is
+- All messages pinned → no summarization possible
+- Validation fails → fallback to truncation
+- Budget exhausted → graceful error message
+- Invalid checkpoint ID → clear error
 
 ### 8. Testing ✅
-- Test cases defined in plan.md
-- Unit tests for wrapper and adapters
-- Integration tests with mocked LLM
-- All tests use mocks (no real API calls in tests)
+**Status**: PASS
+- TDD approach: write tests first
+- Unit tests for each component
+- Integration tests for session lifecycle
+- Crash recovery test included
 
 ### 9. Implementability ✅
-- Clear file structure defined
-- Code patterns shown in plan
-- Builds on existing, tested modules
-- Reasonable scope (4 files)
+**Status**: PASS
+- All dependencies available
+- Clear module boundaries
+- Linear implementation order
+- ~500 LOC estimated per component
 
 ### 10. Operational Readiness ✅
-- Logging for debugging included via logger
-- Graceful degradation (fallback counters)
-- No breaking changes to existing APIs
+**Status**: PASS
+- Logging: Use existing logger pattern
+- Metrics: Token usage tracked by budget system
+- Monitoring: Validation failures logged
+- Deployment: Same as existing V4 modules
+
+## Verdict: APPROVED
+
+Plan is ready for implementation. All 10 checkpoints pass.
 
 ## Notes for Implementation
 
-1. **Handle missing usage:** When API response doesn't include usage (rare but possible), fall back to estimation and log warning:
-   ```python
-   def extract_usage(self, response: Any) -> TokenUsage:
-       if not hasattr(response, 'usage') or response.usage is None:
-           logger.warning("No usage in response, using estimation")
-           return self._estimate_usage(response)
-       ...
-   ```
-
-2. **Streaming budget tracking:** For streaming, consider updating budget progressively or at completion only. Plan states "completion only" which is simpler.
-
-## Verdict
-
-**APPROVED_WITH_NOTES**
-
-The plan is sound and addresses all requirements. Implementation should ensure:
-- Fallback when API response lacks usage data
-- Clear logging for debugging budget flow
+1. Start with models.py (no dependencies)
+2. Validator before context (context uses validator)
+3. Commands before session (session uses commands)
+4. Write tests alongside each module (TDD)

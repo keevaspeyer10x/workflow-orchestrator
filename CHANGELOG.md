@@ -5,6 +5,27 @@ All notable changes to the workflow-orchestrator.
 ## [Unreleased]
 
 ### Added
+- **V4.2 Phase 4: Chat Mode** (Issue #102)
+  - `src/v4/chat/`: New module for persistent chat sessions with crash recovery
+  - `ChatSession`: Main session manager with:
+    - Persistent message storage via EventStore (Phase 1 integration)
+    - Budget enforcement via AtomicBudgetTracker (Phase 2 integration)
+    - LLM calls via LLMCallWrapper (Phase 3 integration)
+    - Auto-checkpoint at configurable intervals (message count or time)
+    - Manual checkpoint/restore for session management
+    - Crash recovery via event replay
+  - `SafeContextManager`: Context management with safety guarantees
+    - Deterministic compression with validation
+    - Pinned messages preserved (never summarized)
+    - Recent messages always kept
+    - Fallback to truncation if summarization fails validation
+  - `SummaryValidator`: Regex-based entity extraction (no LLM calls)
+    - File paths, function names, URLs, decisions
+    - Validates summaries preserve critical information
+  - Meta-commands: `/status`, `/checkpoint`, `/restore`, `/pin`, `/history`
+  - Data models: Message, MessageRole, ChatEvent, SessionConfig, ValidationResult
+  - 49 new tests covering session, context, validator, commands, and models
+
 - **V4.2 Phase 3: LLM Call Interceptor** (Issue #102)
   - `src/v4/interceptor/`: New module for intercepting LLM API calls with budget tracking
   - `LLMCallWrapper`: Core wrapper with reserve/commit/rollback pattern

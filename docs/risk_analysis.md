@@ -1,89 +1,92 @@
-# V4.2 Phase 3: Risk Analysis
+# V4.2 Phase 4: Chat Mode Risk Analysis
+
+## Risk Assessment
+
+### Risk 1: Lossy Summarization Corrupts Session State
+**Severity**: High
+**Probability**: Medium
+**Impact**: Users lose critical context, decisions, or code references
+
+**Mitigation**:
+- SummaryValidator performs deterministic validation before accepting summaries
+- If validation fails, fallback to truncation (preserves recent + pinned)
+- Pinned messages are NEVER summarized
+- Last 20 messages always preserved
+
+**Residual Risk**: Regex-based extraction may miss domain-specific entities
+**Monitoring**: Log validation failures and fallback counts
+
+### Risk 2: Event Store Corruption Prevents Recovery
+**Severity**: Critical
+**Probability**: Low
+**Impact**: Session cannot be recovered, all history lost
+
+**Mitigation**:
+- Use SQLite WAL mode for crash safety
+- Checkpoints every 20 messages provide recovery points
+- Event append uses optimistic concurrency control
+- Test crash recovery explicitly
+
+**Residual Risk**: Hardware failure during write
+**Monitoring**: Verify checkpoint count on session load
+
+### Risk 3: Budget Exhaustion Mid-Conversation
+**Severity**: Medium
+**Probability**: Medium
+**Impact**: Session stops responding, user frustrated
+
+**Mitigation**:
+- Pre-check budget before LLM calls
+- Graceful error message explaining budget status
+- `/status` command shows remaining budget
+- Summarization reduces context size, saving tokens
+
+**Residual Risk**: Long responses may exceed reservation
+**Monitoring**: Log budget overruns
+
+### Risk 4: Meta-command Injection
+**Severity**: Medium
+**Probability**: Low
+**Impact**: Unintended command execution
+
+**Mitigation**:
+- Commands only parsed at message start
+- Command names are fixed allowlist
+- Arguments validated before execution
+- Commands don't execute shell operations
+
+**Residual Risk**: None identified
+**Monitoring**: Log all command executions
+
+### Risk 5: Recursive Summarization Loops
+**Severity**: Medium
+**Probability**: Low
+**Impact**: Infinite loop consuming tokens
+
+**Mitigation**:
+- Summarization only triggers above 70% threshold
+- Summary itself is not re-summarized (marked as SYSTEM)
+- Maximum one summarization pass per prepare_context call
+- Budget reservation prevents runaway spending
+
+**Residual Risk**: None with current design
+**Monitoring**: Log summarization trigger counts
 
 ## Risk Matrix
 
-| # | Risk | Severity | Likelihood | Impact | Mitigation |
-|---|------|----------|------------|--------|------------|
-| 1 | Token estimation significantly different from actual usage | Medium | Medium | Budget tracking inaccurate | Use provider-specific counters with API fallback; add 10% buffer in reservation |
-| 2 | Reservation timeout during long-running streaming calls | Medium | Low | Call fails mid-stream | Set appropriate timeouts based on max_tokens; streaming updates budget progressively |
-| 3 | Concurrent calls exhaust budget unexpectedly | Medium | Medium | Multiple calls proceed when budget nearly exhausted | Atomic operations in Phase 2 handle this; `BEGIN IMMEDIATE` ensures serialization |
-| 4 | API client library changes break adapters | Low | Low | Adapters fail to extract token usage | Version-pin dependencies; abstract interface allows quick adapter updates |
-| 5 | Retry loop causes budget overrun | Medium | Low | Budget consumed by failed retries | Same-reservation approach prevents this; max retry limit of 3 |
+| Risk | Severity | Probability | Score | Mitigation Status |
+|------|----------|-------------|-------|-------------------|
+| Lossy Summarization | High | Medium | 6 | Designed |
+| Event Store Corruption | Critical | Low | 6 | Uses Phase 1 |
+| Budget Exhaustion | Medium | Medium | 4 | Uses Phase 2/3 |
+| Meta-command Injection | Medium | Low | 2 | Designed |
+| Recursive Summarization | Medium | Low | 2 | Designed |
 
-## Risk Details
+## Dependencies
 
-### 1. Token Estimation Mismatch
-
-**Description:** The estimated token count before an LLM call may differ from the actual tokens used.
-
-**Consequences:**
-- Over-estimation: Unnecessarily blocks calls when budget available
-- Under-estimation: Budget exceeded after call completes
-
-**Mitigation:**
-- Use provider-specific counters (ClaudeTokenCounter, OpenAITokenCounter)
-- Add configurable buffer (default 10%) to reservations
-- Commit actual usage (not estimated) to track accurately
-
-### 2. Reservation Timeout
-
-**Description:** Long-running LLM calls (especially streaming with high max_tokens) may exceed the default 5-minute reservation timeout.
-
-**Consequences:**
-- Reservation expires mid-call
-- Budget rollback triggers while call still active
-- Tracking becomes inaccurate
-
-**Mitigation:**
-- Calculate timeout based on max_tokens (roughly 50-100 tokens/sec)
-- For streaming: update reservation as chunks arrive
-- Make timeout configurable in InterceptorConfig
-
-### 3. Concurrent Budget Exhaustion
-
-**Description:** Multiple concurrent calls each pass pre-check but together exceed budget.
-
-**Consequences:**
-- Budget overrun
-- Billing surprises
-
-**Mitigation:**
-- Phase 2's `AtomicBudgetTracker` uses `BEGIN IMMEDIATE` for SQLite
-- Reservations are atomic - concurrent reserve() calls serialize
-- Budget check includes both `used` and `reserved` amounts
-
-### 4. API Library Changes
-
-**Description:** Updates to `anthropic` or `openai` Python packages may change response structure.
-
-**Consequences:**
-- Token extraction fails
-- Usage not tracked
-
-**Mitigation:**
-- Pin specific versions in requirements
-- Abstract `LLMAdapter` interface allows quick updates
-- Fallback to estimation counter on extraction failure
-
-### 5. Retry Budget Overrun
-
-**Description:** Multiple retry attempts each consuming budget could exhaust it quickly.
-
-**Consequences:**
-- Budget depleted by transient failures
-- Legitimate calls blocked
-
-**Mitigation:**
-- Same reservation used for all retries (not new reservation per retry)
-- Maximum 3 retries by default
-- Exponential backoff reduces API load
-
-## Residual Risks
-
-After mitigations, the following residual risks remain:
-
-1. **Estimation accuracy:** Even with provider-specific counters, some edge cases (complex tool use, images) may have higher variance
-2. **Network failures:** If budget commit fails after successful LLM call, usage may be undertracked
-3. **Clock skew:** Reservation expiration relies on system time; significant clock drift could cause issues
-
-These risks are acceptable given the scope and will be monitored during initial deployment.
+| Dependency | Risk if Missing | Fallback |
+|------------|-----------------|----------|
+| SQLiteAsyncEventStore | No persistence | In-memory only |
+| TokenCounter | Inaccurate budgets | Estimation |
+| LLMCallWrapper | No LLM calls | N/A (critical) |
+| CheckpointStore | No crash recovery | Replay all events |
