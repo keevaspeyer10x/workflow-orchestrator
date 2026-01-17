@@ -1,4 +1,4 @@
-export SECRETS_PASSWORD="keeva2026"
+export SECRETS_PASSWORD="I love vibe coding"
 export SOPS_KEY_PASSWORD="I love vibe coding"
 
 ## Multi-Model AI Queries
