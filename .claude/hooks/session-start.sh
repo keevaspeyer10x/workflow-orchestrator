@@ -104,6 +104,29 @@ if [ -f "$SECRETS_FILE" ]; then
                 echo "$OPENAI_API_KEY" | codex login --with-api-key 2>/dev/null && \
                     echo "Codex CLI logged in" || true
             fi
+
+            # Install and authenticate gh CLI if GITHUB_TOKEN is available
+            if [ -n "$GITHUB_TOKEN" ]; then
+                # Install gh CLI if not available
+                if ! command -v gh &> /dev/null; then
+                    echo "Installing GitHub CLI..."
+                    GH_VERSION="2.63.2"
+                    GH_URL="https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz"
+                    TMPDIR=$(mktemp -d)
+                    curl -sSL "$GH_URL" -o "$TMPDIR/gh.tar.gz" 2>/dev/null && \
+                        tar -xzf "$TMPDIR/gh.tar.gz" -C "$TMPDIR" && \
+                        cp "$TMPDIR/gh_${GH_VERSION}_linux_amd64/bin/gh" "$HOME/.local/bin/" && \
+                        chmod +x "$HOME/.local/bin/gh"
+                    rm -rf "$TMPDIR"
+                    export PATH="$HOME/.local/bin:$PATH"
+                fi
+
+                # Authenticate gh CLI
+                if command -v gh &> /dev/null; then
+                    echo "$GITHUB_TOKEN" | gh auth login --with-token 2>/dev/null && \
+                        echo "  gh CLI authenticated" || echo "  gh CLI auth failed"
+                fi
+            fi
         fi
     else
         echo "Note: Encrypted secrets found but SECRETS_PASSWORD not set"
