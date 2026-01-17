@@ -54,6 +54,7 @@ healing = [
 
 [project.scripts]
 orchestrator = "src.cli:main"
+minds = "src.minds_cli:main"
 
 [project.urls]
 Homepage = "https://github.com/keevaspeyer10x/workflow-orchestrator"
