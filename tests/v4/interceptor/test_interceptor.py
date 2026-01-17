@@ -49,13 +49,6 @@ def budget_tracker():
 
 
 @pytest.fixture
-async def budget_with_tokens(budget_tracker):
-    """Create a budget with 10,000 tokens."""
-    await budget_tracker.create_budget("test_budget", limit=10000)
-    return budget_tracker
-
-
-@pytest.fixture
 def token_counter():
     """Create estimation token counter for testing."""
     return EstimationTokenCounter()
@@ -338,10 +331,14 @@ class TestBudgetAwareRetry:
 class TestLLMCallWrapper:
     """Tests for LLMCallWrapper."""
 
+    async def _setup_test_budget(self, budget_tracker, budget_id: str = "test_budget", limit: int = 10000):
+        """Helper to create a test budget with standard configuration."""
+        await budget_tracker.create_budget(budget_id, limit=limit)
+
     @pytest.mark.asyncio
-    async def test_successful_call_with_budget(self, budget_with_tokens, token_counter, sample_request):
+    async def test_successful_call_with_budget(self, budget_tracker, token_counter, sample_request):
         """Test successful call tracks budget correctly."""
-        budget_tracker = budget_with_tokens
+        await self._setup_test_budget(budget_tracker)
 
         # Create mock adapter
         adapter = MagicMock(spec=LLMAdapter)
@@ -393,9 +390,9 @@ class TestLLMCallWrapper:
         adapter.call.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_rollback_on_api_error(self, budget_with_tokens, token_counter, sample_request):
+    async def test_rollback_on_api_error(self, budget_tracker, token_counter, sample_request):
         """Test budget rollback on API error."""
-        budget_tracker = budget_with_tokens
+        await self._setup_test_budget(budget_tracker)
 
         adapter = MagicMock(spec=LLMAdapter)
         adapter.call = AsyncMock(side_effect=Exception("API Error"))
@@ -416,9 +413,9 @@ class TestLLMCallWrapper:
         assert status.reserved == 0
 
     @pytest.mark.asyncio
-    async def test_retry_uses_same_reservation(self, budget_with_tokens, token_counter, sample_request):
+    async def test_retry_uses_same_reservation(self, budget_tracker, token_counter, sample_request):
         """Test retries use the same reservation."""
-        budget_tracker = budget_with_tokens
+        await self._setup_test_budget(budget_tracker)
 
         # Track reservation IDs
         reservation_ids = []
@@ -457,9 +454,9 @@ class TestLLMCallWrapper:
         assert len(reservation_ids) == 1
 
     @pytest.mark.asyncio
-    async def test_streaming_call(self, budget_with_tokens, token_counter, sample_request):
+    async def test_streaming_call(self, budget_tracker, token_counter, sample_request):
         """Test streaming call tracks budget at completion."""
-        budget_tracker = budget_with_tokens
+        await self._setup_test_budget(budget_tracker)
 
         async def mock_stream() -> AsyncIterator[StreamChunk]:
             yield StreamChunk(content="Hello")
@@ -499,13 +496,17 @@ class TestIntegration:
 
     @pytest.mark.asyncio
     async def test_budget_depletion_over_multiple_calls(self, budget_tracker, token_counter):
-        """Test budget depletes correctly over multiple calls."""
-        # Create budget of 1000 tokens
-        await budget_tracker.create_budget("limited_budget", limit=1000)
+        """Test budget depletes correctly over multiple calls with realistic buffer."""
+        # Budget calculation with 10% buffer:
+        # - Each call reserves: (estimated_input + max_tokens) * 1.1
+        # - Estimated input for "Hi" is ~1 token, max_tokens=300
+        # - Reservation per call: (1 + 300) * 1.1 = ~331 tokens
+        # - With 1400 token limit: can reserve 4 calls (4 * 331 = 1324), 5th fails
+        await budget_tracker.create_budget("limited_budget", limit=1400)
 
         adapter = MagicMock(spec=LLMAdapter)
 
-        # Each call uses 300 tokens
+        # Each call uses 300 tokens total (100 input + 200 output)
         def make_response():
             return LLMResponse(
                 content="Response",
@@ -516,26 +517,34 @@ class TestIntegration:
 
         adapter.call = AsyncMock(side_effect=[make_response() for _ in range(5)])
 
+        # Default config with 10% buffer - realistic behavior
+        config = InterceptorConfig(budget_buffer_percent=0.1)
         wrapper = LLMCallWrapper(
             budget_tracker=budget_tracker,
             token_counter=token_counter,
             adapter=adapter,
             budget_id="limited_budget",
+            config=config,
         )
 
         request = LLMRequest(
             messages=[{"role": "user", "content": "Hi"}],
             model="test",
+            max_tokens=300,
         )
 
-        # First 3 calls should succeed
-        for i in range(3):
+        # First 4 calls should succeed
+        # After each call, budget.used += 300 (actual), reservation released
+        for i in range(4):
             await wrapper.call(request)
 
-        # Check budget
+        # Check budget - 4 calls * 300 tokens actual = 1200 used
         status = await budget_tracker.get_status("limited_budget")
-        assert status.used == 900
+        assert status.used == 1200
 
-        # 4th call should fail (only 100 tokens left, need ~300)
+        # 5th call should fail:
+        # - Available: 1400 - 1200 = 200 tokens
+        # - Need to reserve: ~331 tokens (with buffer)
+        # - 200 < 331, so blocked
         with pytest.raises(BudgetExhaustedError):
             await wrapper.call(request)
