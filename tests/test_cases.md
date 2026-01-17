@@ -1,83 +1,118 @@
-# V4.2 Phase 2: Token Budget System - Test Cases
+# V4.2 Phase 3: LLM Call Interceptor - Test Cases
 
-## TokenCounter Tests
+## 1. LLMCallWrapper Tests
 
-### ClaudeTokenCounter
-| ID | Test Case | Expected Result |
-|----|-----------|-----------------|
-| TC-01 | count() with valid text | Returns accurate token count via API |
-| TC-02 | count() when API unavailable | Falls back to EstimationTokenCounter |
-| TC-03 | count_messages() with message array | Returns count including overhead |
-| TC-04 | count() with empty string | Returns 0 |
+### 1.1 Successful Call with Budget Tracking
+- **Setup:** Create budget with 10,000 tokens, mock LLM to return 500 tokens used
+- **Action:** Call wrapper with request
+- **Assert:**
+  - Budget reserved before call
+  - LLM called with correct request
+  - Budget committed with actual usage (500)
+  - Response returned correctly
 
-### OpenAITokenCounter
-| ID | Test Case | Expected Result |
-|----|-----------|-----------------|
-| TC-05 | count() matches tiktoken | Token count matches direct tiktoken call |
-| TC-06 | count_messages() includes overhead | Count includes 3 tokens/msg + 3 reply |
-| TC-07 | count() with unicode | Handles unicode correctly |
+### 1.2 Budget Exhaustion Blocks Call
+- **Setup:** Create budget with 100 tokens, request estimated at 500 tokens
+- **Action:** Call wrapper
+- **Assert:**
+  - BudgetExhaustedError raised
+  - No LLM call made
+  - No budget changes
 
-### EstimationTokenCounter
-| ID | Test Case | Expected Result |
-|----|-----------|-----------------|
-| TC-08 | count() uses ~4 chars/token | len(text) / 4 rounded |
-| TC-09 | count_messages() with overhead | Includes message overhead estimate |
+### 1.3 Rollback on API Error
+- **Setup:** Create budget with 10,000 tokens, mock LLM to raise APIError
+- **Action:** Call wrapper
+- **Assert:**
+  - Reservation created
+  - LLM called and failed
+  - Reservation rolled back
+  - Budget unchanged
 
-## AtomicBudgetTracker Tests
+### 1.4 Retry with Same Reservation
+- **Setup:** Create budget, mock LLM to fail first call, succeed second
+- **Action:** Call wrapper with retries enabled
+- **Assert:**
+  - Single reservation created
+  - Two LLM calls made (retry)
+  - Reservation committed on success
+  - Budget reflects single usage
 
-### Reserve Operations
-| ID | Test Case | Expected Result |
-|----|-----------|-----------------|
-| TC-10 | reserve() within budget | Returns success with reservation_id |
-| TC-11 | reserve() exceeding budget | Returns failure with reason |
-| TC-12 | reserve() at exact limit | Returns success |
-| TC-13 | Multiple reserves totaling over limit | Last reserve fails |
+### 1.5 Streaming Call Budget Tracking
+- **Setup:** Create budget, mock streaming LLM response
+- **Action:** Call streaming wrapper, consume all chunks
+- **Assert:**
+  - Budget reserved before stream starts
+  - All chunks received
+  - Budget committed at stream end
 
-### Commit Operations
-| ID | Test Case | Expected Result |
-|----|-----------|-----------------|
-| TC-14 | commit() valid reservation | Updates used, clears reservation |
-| TC-15 | commit() invalid reservation | Raises ValueError |
-| TC-16 | commit() with different actual tokens | Uses actual, not reserved |
+## 2. Provider Adapter Tests
 
-### Rollback Operations
-| ID | Test Case | Expected Result |
-|----|-----------|-----------------|
-| TC-17 | rollback() valid reservation | Releases reserved tokens |
-| TC-18 | rollback() invalid reservation | No error (idempotent) |
+### 2.1 Anthropic Token Extraction
+- **Setup:** Mock Anthropic response with usage object
+- **Action:** Call adapter.extract_usage()
+- **Assert:**
+  - Returns correct input_tokens
+  - Returns correct output_tokens
 
-### Concurrency Tests
-| ID | Test Case | Expected Result |
-|----|-----------|-----------------|
-| TC-19 | Concurrent reserves same budget | All succeed or fail atomically |
-| TC-20 | Concurrent reserves different budgets | All succeed independently |
-| TC-21 | Reserve during commit | No race condition |
+### 2.2 OpenAI Token Extraction
+- **Setup:** Mock OpenAI response with usage object
+- **Action:** Call adapter.extract_usage()
+- **Assert:**
+  - Returns correct prompt_tokens as input
+  - Returns correct completion_tokens as output
 
-## Budget Events Tests
+### 2.3 Missing Usage Fallback
+- **Setup:** Mock response without usage field
+- **Action:** Call adapter.extract_usage()
+- **Assert:**
+  - Falls back to estimation
+  - Warning logged
 
-| ID | Test Case | Expected Result |
-|----|-----------|-----------------|
-| TC-22 | BUDGET_CREATED on init | Event recorded with limit |
-| TC-23 | TOKENS_RESERVED on reserve | Event includes reservation_id |
-| TC-24 | TOKENS_COMMITTED on commit | Event includes actual_tokens |
-| TC-25 | TOKENS_RELEASED on rollback | Event includes released_tokens |
-| TC-26 | BUDGET_EXHAUSTED at limit | Event when budget exhausted |
+### 2.4 Streaming Response Handling
+- **Setup:** Mock streaming response with chunks
+- **Action:** Iterate adapter.call_streaming()
+- **Assert:**
+  - All chunks yielded
+  - Final chunk includes usage
 
-## Integration Tests
+## 3. Integration Tests
 
-| ID | Test Case | Expected Result |
-|----|-----------|-----------------|
-| TC-27 | Full reserve -> commit cycle | Tokens moved to used |
-| TC-28 | Full reserve -> rollback cycle | Tokens returned to available |
-| TC-29 | Reservation timeout | Reserved tokens released after timeout |
-| TC-30 | Budget status accuracy | Status reflects all operations |
-| TC-31 | Persist across restart | Budget survives process restart |
+### 3.1 End-to-End with Mocked LLM
+- **Setup:** Full interceptor stack with mocked adapter
+- **Action:** Execute multiple calls
+- **Assert:**
+  - Budget tracks correctly across calls
+  - Reservation IDs unique
+  - Usage events recorded
 
-## Acceptance Criteria Mapping
+### 3.2 Budget Depletion Over Multiple Calls
+- **Setup:** Budget of 1000 tokens, calls using ~300 each
+- **Action:** Make 4 calls
+- **Assert:**
+  - First 3 calls succeed
+  - 4th call blocked (budget exhausted)
 
-| Criterion | Test Cases |
-|-----------|------------|
-| Token counting accurate within 5% per provider | TC-01, TC-05, TC-08 |
-| Concurrent updates don't cause overdraft | TC-19, TC-20, TC-21 |
-| Reservation timeout releases tokens | TC-29 |
-| Budget events recorded | TC-22 through TC-26 |
+### 3.3 Concurrent Calls
+- **Setup:** Budget of 1000 tokens
+- **Action:** Launch 3 concurrent calls (~400 tokens each)
+- **Assert:**
+  - At most 2 calls succeed
+  - Third blocked or succeeds based on timing
+  - No budget overrun
+
+## 4. Retry Logic Tests
+
+### 4.1 Exponential Backoff
+- **Setup:** Mock LLM to fail 2 times then succeed
+- **Action:** Call with retry
+- **Assert:**
+  - Delays increase exponentially
+  - Success on 3rd attempt
+
+### 4.2 Max Retries Exceeded
+- **Setup:** Mock LLM to always fail
+- **Action:** Call with max_retries=3
+- **Assert:**
+  - 3 attempts made
+  - Final error raised
+  - Budget rolled back

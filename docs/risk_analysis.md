@@ -1,94 +1,89 @@
-# V4.2 Phase 2: Token Budget System - Risk Analysis
+# V4.2 Phase 3: Risk Analysis
 
-## Risk Summary
+## Risk Matrix
 
-| Risk | Severity | Probability | Mitigation |
-|------|----------|-------------|------------|
-| Anthropic API Dependency | High | Medium | EstimationTokenCounter fallback |
-| Concurrency Bugs | High | Low | BEGIN IMMEDIATE locking |
-| tiktoken Version Compatibility | Medium | Low | Pin version |
-| Reservation Timeout | Medium | Medium | Background cleanup |
-| Schema Migration | Low | Low | Auto-create tables |
+| # | Risk | Severity | Likelihood | Impact | Mitigation |
+|---|------|----------|------------|--------|------------|
+| 1 | Token estimation significantly different from actual usage | Medium | Medium | Budget tracking inaccurate | Use provider-specific counters with API fallback; add 10% buffer in reservation |
+| 2 | Reservation timeout during long-running streaming calls | Medium | Low | Call fails mid-stream | Set appropriate timeouts based on max_tokens; streaming updates budget progressively |
+| 3 | Concurrent calls exhaust budget unexpectedly | Medium | Medium | Multiple calls proceed when budget nearly exhausted | Atomic operations in Phase 2 handle this; `BEGIN IMMEDIATE` ensures serialization |
+| 4 | API client library changes break adapters | Low | Low | Adapters fail to extract token usage | Version-pin dependencies; abstract interface allows quick adapter updates |
+| 5 | Retry loop causes budget overrun | Medium | Low | Budget consumed by failed retries | Same-reservation approach prevents this; max retry limit of 3 |
 
-## High Risk
+## Risk Details
 
-### 1. Anthropic API Dependency
+### 1. Token Estimation Mismatch
 
-**Description**: ClaudeTokenCounter requires API call for accurate counting.
+**Description:** The estimated token count before an LLM call may differ from the actual tokens used.
 
-**Impact**: If API unavailable, token counting fails.
+**Consequences:**
+- Over-estimation: Unnecessarily blocks calls when budget available
+- Under-estimation: Budget exceeded after call completes
 
-**Mitigation**:
-- EstimationTokenCounter as automatic fallback
-- Warning log when falling back
-- No blocking behavior - system remains functional
+**Mitigation:**
+- Use provider-specific counters (ClaudeTokenCounter, OpenAITokenCounter)
+- Add configurable buffer (default 10%) to reservations
+- Commit actual usage (not estimated) to track accurately
 
-### 2. Concurrency Bugs
+### 2. Reservation Timeout
 
-**Description**: Race conditions in budget tracking could cause overdraft.
+**Description:** Long-running LLM calls (especially streaming with high max_tokens) may exceed the default 5-minute reservation timeout.
 
-**Impact**: Budget limits not enforced, billing issues.
+**Consequences:**
+- Reservation expires mid-call
+- Budget rollback triggers while call still active
+- Tracking becomes inaccurate
 
-**Mitigation**:
-- SQLite BEGIN IMMEDIATE locking (proven in Phase 1)
-- Reservation pattern prevents concurrent overdraft
-- Comprehensive concurrent test suite
+**Mitigation:**
+- Calculate timeout based on max_tokens (roughly 50-100 tokens/sec)
+- For streaming: update reservation as chunks arrive
+- Make timeout configurable in InterceptorConfig
 
-## Medium Risk
+### 3. Concurrent Budget Exhaustion
 
-### 3. tiktoken Version Compatibility
+**Description:** Multiple concurrent calls each pass pre-check but together exceed budget.
 
-**Description**: OpenAI tokenizer encoding may change between versions.
+**Consequences:**
+- Budget overrun
+- Billing surprises
 
-**Impact**: Minor token count drift affecting budget accuracy.
+**Mitigation:**
+- Phase 2's `AtomicBudgetTracker` uses `BEGIN IMMEDIATE` for SQLite
+- Reservations are atomic - concurrent reserve() calls serialize
+- Budget check includes both `used` and `reserved` amounts
 
-**Mitigation**:
-- Pin tiktoken version in requirements.txt
-- Use specific encoding name (cl100k_base)
-- Document expected accuracy tolerance
+### 4. API Library Changes
 
-### 4. Reservation Timeout
+**Description:** Updates to `anthropic` or `openai` Python packages may change response structure.
 
-**Description**: Expired reservations must release reserved tokens.
+**Consequences:**
+- Token extraction fails
+- Usage not tracked
 
-**Impact**: Tokens stuck in limbo, reduced available budget.
+**Mitigation:**
+- Pin specific versions in requirements
+- Abstract `LLMAdapter` interface allows quick updates
+- Fallback to estimation counter on extraction failure
 
-**Mitigation**:
-- Default 5-minute reservation timeout
-- Explicit timeout check on commit/status
-- Background cleanup task (future enhancement)
+### 5. Retry Budget Overrun
 
-## Low Risk
+**Description:** Multiple retry attempts each consuming budget could exhaust it quickly.
 
-### 5. Schema Migration
+**Consequences:**
+- Budget depleted by transient failures
+- Legitimate calls blocked
 
-**Description**: New database tables required (budgets, reservations).
+**Mitigation:**
+- Same reservation used for all retries (not new reservation per retry)
+- Maximum 3 retries by default
+- Exponential backoff reduces API load
 
-**Impact**: First-time setup complexity.
+## Residual Risks
 
-**Mitigation**:
-- Auto-create tables on first use (existing pattern from Phase 1)
-- No migration needed for greenfield deployments
+After mitigations, the following residual risks remain:
 
-## Impact Analysis
+1. **Estimation accuracy:** Even with provider-specific counters, some edge cases (complex tool use, images) may have higher variance
+2. **Network failures:** If budget commit fails after successful LLM call, usage may be undertracked
+3. **Clock skew:** Reservation expiration relies on system time; significant clock drift could cause issues
 
-### Backward Compatibility
-
-- ✅ No changes to existing V4 modules
-- ✅ New tables are isolated (budgets, reservations)
-- ✅ Budget tracking is opt-in
-
-### New Dependencies
-
-| Dependency | Purpose | Version |
-|------------|---------|---------|
-| anthropic | Claude token counting | >=0.37.0 |
-| tiktoken | OpenAI token counting | >=0.7.0 |
-| aiosqlite | Async DB (existing) | >=0.17.0 |
-
-### Performance Impact
-
-- Claude counting: +100-300ms per count (API call)
-- OpenAI counting: <1ms (local)
-- Estimation: <1ms (local)
-- Budget operations: <10ms (SQLite)
+These risks are acceptable given the scope and will be monitored during initial deployment.
