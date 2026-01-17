@@ -5,6 +5,19 @@ All notable changes to the workflow-orchestrator.
 ## [Unreleased]
 
 ### Added
+- **V4.2 Phase 2: Token Budget System** (Issue #102)
+  - `src/v4/budget/`: New module for token budget tracking and enforcement
+  - Provider-specific token counting:
+    - `ClaudeTokenCounter`: Uses Anthropic's count_tokens API
+    - `OpenAITokenCounter`: Uses tiktoken library
+    - `EstimationTokenCounter`: Fallback (~4 chars/token)
+  - `AtomicBudgetTracker`: Thread-safe budget tracking with SQLite persistence
+    - Atomic reserve/commit/rollback pattern for token management
+    - BEGIN IMMEDIATE locking for concurrency safety
+    - Reservation timeout with automatic cleanup
+  - Budget events integration with event store (BUDGET_CREATED, TOKENS_RESERVED, etc.)
+  - 51 new tests covering concurrency, provider counting, and event sourcing
+
 - **Control Inversion V4** (Issue #100): Orchestrator-driven workflow execution
   - New `orchestrator run` command for V4 workflow execution
   - `src/v4/models.py`: Complete data models (PhaseType, GateType, WorkflowStatus, gates, phases, state)
