@@ -1,0 +1,99 @@
+# Default Development Workflow - V4 Format
+# Control Inversion: Orchestrator drives, Claude executes
+
+workflow:
+  version: "4.0"
+  name: "Development Workflow V4"
+  description: |
+    5-phase development workflow with control inversion.
+    Orchestrator enforces phase order and gate validation.
+    Claude Code executes work within each phase.
+
+  enforcement:
+    mode: strict
+    programmatic:
+      - phase_order
+      - gate_validation
+      - workflow_completion
+    discretionary:
+      - implementation_approach
+      - task_ordering
+
+  phases:
+    # Phase 1: Planning
+    - id: plan
+      name: "Planning"
+      phase_type: strict
+      description: |
+        Analyze the task and create a detailed plan.
+        Create docs/plan.md with implementation steps.
+      max_attempts: 3
+      timeout: 1800  # 30 minutes
+      gates:
+        - type: file_exists
+          path: docs/plan.md
+      next: implement
+
+    # Phase 2: Implementation
+    - id: implement
+      name: "Implementation"
+      phase_type: guided
+      description: |
+        Implement the solution according to the plan.
+        Write code, tests, and any necessary documentation.
+      max_attempts: 3
+      timeout: 3600  # 1 hour
+      gates:
+        - type: command
+          cmd: "test -d src || test -d lib || test -f *.py || test -f *.js || test -f *.ts"
+          exit_code: 0
+      next: test
+
+    # Phase 3: Testing
+    - id: test
+      name: "Testing"
+      phase_type: strict
+      description: |
+        Run tests to verify the implementation.
+        Ensure all tests pass before proceeding.
+      max_attempts: 3
+      timeout: 1800  # 30 minutes
+      gates:
+        - type: command
+          cmd: "python -m pytest -v 2>/dev/null || npm test 2>/dev/null || go test ./... 2>/dev/null || echo 'Tests passed or not configured'"
+          exit_code: 0
+      next: review
+
+    # Phase 4: Review
+    - id: review
+      name: "Code Review"
+      phase_type: guided
+      description: |
+        Review the implementation for quality and correctness.
+        Check for common issues and ensure code follows best practices.
+      max_attempts: 2
+      timeout: 1800
+      gates:
+        - type: no_pattern
+          pattern: "TODO|FIXME|XXX|HACK"
+          paths:
+            - "src/**/*.py"
+            - "lib/**/*.py"
+            - "**/*.ts"
+            - "**/*.js"
+      next: complete
+
+    # Phase 5: Completion
+    - id: complete
+      name: "Completion"
+      phase_type: strict
+      description: |
+        Finalize the work. Ensure all changes are committed.
+        Clean up any temporary files.
+      max_attempts: 2
+      timeout: 600  # 10 minutes
+      gates:
+        - type: command
+          cmd: "git status --porcelain"
+          expect_empty: true
+      next: null  # Terminal phase

@@ -6317,6 +6317,74 @@ def cmd_issues(args):
         sys.exit(1)
 
 
+def cmd_run(args):
+    """
+    orchestrator run - Execute workflow with control inversion (V4).
+
+    The orchestrator drives; Claude Code executes within bounds.
+    """
+    from pathlib import Path
+    from src.v4.parser import parse_workflow, WorkflowParseError
+    from src.v4.state import StateStore, find_active_workflow
+    from src.v4.gate_engine import GateEngine
+    from src.executor import WorkflowExecutor
+    from src.runners.claude_code import ClaudeCodeRunner
+
+    working_dir = Path(args.dir or '.').resolve()
+    workflow_file = Path(args.workflow)
+
+    # Parse workflow
+    try:
+        spec = parse_workflow(workflow_file)
+    except WorkflowParseError as e:
+        print(f"Error parsing workflow: {e}")
+        return 1
+
+    # Check for existing active workflow
+    if not args.resume:
+        active = find_active_workflow(working_dir)
+        if active:
+            print(f"Error: Active workflow {active} exists in this directory.")
+            print(f"Use 'orchestrator run --resume {active}' to resume")
+            print(f"Or clean up with 'rm -rf .orchestrator/v4/'")
+            return 1
+
+    # Initialize components
+    state_store = StateStore(working_dir)
+    gate_engine = GateEngine(working_dir)
+    runner = ClaudeCodeRunner(
+        working_dir=working_dir,
+        timeout=args.timeout or 3600
+    )
+
+    executor = WorkflowExecutor(
+        workflow_spec=spec,
+        runner=runner,
+        state_store=state_store,
+        gate_engine=gate_engine
+    )
+
+    # Run or resume
+    if args.resume:
+        result = executor.resume(args.resume)
+    else:
+        if not args.task:
+            print("Error: --task is required for new workflows")
+            return 1
+        result = executor.run(args.task)
+
+    # Report result
+    print(f"\nWorkflow {result.status.value}")
+    print(f"Phases completed: {', '.join(result.phases_completed)}")
+    print(f"Duration: {result.total_duration_seconds:.1f}s")
+
+    if result.error_message:
+        print(f"Error: {result.error_message}")
+        return 1
+
+    return 0
+
+
 def main():
     # V3 Phase 0: Log operator mode for audit
     log_mode_detection()
@@ -6360,6 +6428,36 @@ Examples:
     start_parser.add_argument('--isolated', action='store_true',
                               help='Create git worktree for isolated execution (CORE-025)')
     start_parser.set_defaults(func=cmd_start)
+
+    # Run command (V4 Control Inversion - Issue #100)
+    run_parser = subparsers.add_parser(
+        'run',
+        help='Execute workflow with control inversion (V4) - orchestrator drives execution'
+    )
+    run_parser.add_argument(
+        'workflow',
+        help='Path to workflow YAML file'
+    )
+    run_parser.add_argument(
+        '-t', '--task',
+        help='Task description (required for new workflows)'
+    )
+    run_parser.add_argument(
+        '-r', '--resume',
+        help='Resume workflow by ID'
+    )
+    run_parser.add_argument(
+        '-d', '--dir',
+        default='.',
+        help='Working directory (default: current)'
+    )
+    run_parser.add_argument(
+        '--timeout',
+        type=int,
+        default=3600,
+        help='Phase timeout in seconds (default: 3600)'
+    )
+    run_parser.set_defaults(func=cmd_run)
 
     # Init command
     init_parser = subparsers.add_parser('init', help='Initialize workflow.yaml in current directory')

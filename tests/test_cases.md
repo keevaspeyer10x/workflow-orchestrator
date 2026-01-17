@@ -1,57 +1,137 @@
-# Test Cases: CLI Scanner Integration
+# Control Inversion V4 - Test Cases
 
-## cmd_finish Integration
+## Acceptance Tests
 
-### TC-FIN-001: Scanner called on successful finish
-**Given**: Workflow completes successfully, healing enabled
-**When**: cmd_finish runs
-**Then**: Scanner.scan_all() is called
+These tests MUST pass before the feature is complete. They verify the core control inversion requirements.
 
-### TC-FIN-002: Scanner error doesn't block finish
-**Given**: Scanner raises exception
-**When**: cmd_finish runs
-**Then**: Workflow completes, warning logged
+### 1. test_workflow_completes_even_if_llm_doesnt_call_finish
 
-### TC-FIN-003: Scanner skipped when healing disabled
-**Given**: Healing not configured (no Supabase)
-**When**: cmd_finish runs
-**Then**: Scanner not called, no error
+**Purpose:** Core requirement - orchestrator guarantees completion.
 
-## cmd_start Integration
+**Setup:**
+- Mock LLM runner that doesn't call any completion commands
+- Simple workflow with one phase (no gates)
 
-### TC-START-001: Crash recovery checked on start
-**Given**: Orphaned session exists
-**When**: cmd_start runs
-**Then**: recover_orphaned() called, message shown
+**Verification:**
+- Workflow completes successfully
+- State is marked as COMPLETED
+- LLM never called "finish" but workflow still finished
 
-### TC-START-002: No action when no orphaned sessions
-**Given**: No orphaned sessions
-**When**: cmd_start runs
-**Then**: No recovery message
+**Code:**
+```python
+def test_workflow_completes_even_if_llm_doesnt_call_finish():
+    runner = MockRunner()  # Returns success but no orchestrator calls
+    executor = WorkflowExecutor(spec, runner, state_store, gate_engine)
+    result = executor.run("Test task")
 
-### TC-START-003: Recovery error doesn't block start
-**Given**: Recovery raises exception
-**When**: cmd_start runs
-**Then**: Workflow starts normally, debug log
+    assert result.status == WorkflowStatus.COMPLETED
+    assert "phase1" in result.phases_completed
+```
 
-## heal_backfill Enhancement
+### 2. test_llm_cannot_skip_phases
 
-### TC-BF-001: --scan-only shows recommendations
-**Given**: `orchestrator heal backfill --scan-only`
-**When**: Command runs
-**Then**: Shows recommendations table, no processing
+**Purpose:** Phase order is enforced programmatically.
 
-### TC-BF-002: --days parameter passed to scanner
-**Given**: `orchestrator heal backfill --days 90`
-**When**: Command runs
-**Then**: scanner.scan_all(days=90) called
+**Setup:**
+- Workflow with 3 phases: phase1 → phase2 → phase3
+- Mock runner that executes each phase
 
-### TC-BF-003: --no-github skips GitHub
-**Given**: `orchestrator heal backfill --no-github`
-**When**: Command runs
-**Then**: GitHub parser not invoked
+**Verification:**
+- All phases executed in order
+- No phases skipped
+- Runner called exactly 3 times
 
-### TC-BF-004: Default behavior unchanged
-**Given**: `orchestrator heal backfill` (no new flags)
-**When**: Command runs
-**Then**: Existing behavior preserved
+**Code:**
+```python
+def test_llm_cannot_skip_phases():
+    runner = MockRunner()
+    executor = WorkflowExecutor(spec, runner, state_store, gate_engine)
+    result = executor.run("Test task")
+
+    assert result.phases_completed == ["phase1", "phase2", "phase3"]
+    assert runner.call_count == 3
+```
+
+### 3. test_gates_validated_by_code_not_llm
+
+**Purpose:** Gate validation is done by code, not LLM self-report.
+
+**Setup:**
+- Workflow with file_exists gate
+- Mock runner that claims success but doesn't create the file
+- Max attempts = 1 (fail immediately)
+
+**Verification:**
+- Workflow fails because gate check (by code) fails
+- LLM's success claim is irrelevant
+
+**Code:**
+```python
+def test_gates_validated_by_code_not_llm():
+    runner = MockRunner()  # Claims success
+    # But file doesn't exist
+    executor = WorkflowExecutor(spec, runner, state_store, gate_engine)
+    result = executor.run("Test task")
+
+    assert result.status == WorkflowStatus.FAILED
+```
+
+### 4. test_finalize_always_called
+
+**Purpose:** mark_complete() is always called, even on failure.
+
+**Setup:**
+- Workflow with command gate that always fails (exit 1)
+- Max attempts = 1
+
+**Verification:**
+- Workflow fails
+- State is marked as FAILED (not stuck in RUNNING)
+- completed_at timestamp is set
+
+**Code:**
+```python
+def test_finalize_always_called():
+    runner = MockRunner()
+    executor = WorkflowExecutor(spec, runner, state_store, gate_engine)
+    result = executor.run("Test task")
+
+    assert result.status == WorkflowStatus.FAILED
+    state = state_store.load(result.workflow_id)
+    assert state.status == WorkflowStatus.FAILED
+    assert state.completed_at is not None
+```
+
+## Unit Tests
+
+### Gate Engine Tests
+
+1. `test_file_exists_gate_passes` - File exists → pass
+2. `test_file_exists_gate_fails` - File missing → fail
+3. `test_command_gate_passes` - Exit 0 → pass
+4. `test_command_gate_fails_exit_code` - Exit 1 → fail
+5. `test_command_gate_timeout` - Timeout → fail
+6. `test_no_pattern_gate_passes` - Pattern not found → pass
+7. `test_no_pattern_gate_fails` - Pattern found → fail
+8. `test_json_valid_gate_passes` - Valid JSON → pass
+9. `test_json_valid_gate_fails` - Invalid JSON → fail
+
+### State Store Tests
+
+1. `test_state_initialize` - Creates new state
+2. `test_state_save_load` - Persistence works
+3. `test_state_locking` - Concurrent access blocked
+4. `test_state_atomic_write` - Crash-safe writes
+
+### Parser Tests
+
+1. `test_parse_simple_workflow` - Basic YAML parses
+2. `test_parse_with_gates` - Gates are parsed correctly
+3. `test_parse_invalid_yaml` - Error on invalid YAML
+4. `test_parse_missing_required` - Error on missing fields
+
+## Integration Tests
+
+1. `test_full_workflow_execution` - End-to-end with real runner (manual)
+2. `test_resume_interrupted_workflow` - Resume after crash
+3. `test_concurrent_workflows` - Multiple workflows in same directory fail

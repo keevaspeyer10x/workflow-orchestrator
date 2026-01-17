@@ -1,104 +1,126 @@
-# CLI Integration for Scanner
+# Control Inversion V4 Implementation Plan
+
+**Issue:** #100
+**Date:** 2026-01-17
+**Status:** PLANNING
 
 ## Overview
 
-Integrate the Phase 7 PatternScanner into CLI commands to provide seamless pattern learning.
+Implement full control inversion so the orchestrator **drives** workflow execution rather than relying on LLM to remember commands.
 
-## Integration Points
+### Key Principle
+> The orchestrator DRIVES; Claude Code EXECUTES within bounds.
 
-### 1. cmd_finish (cli.py:1492)
+## Scope
 
-Add auto-scan after successful workflow completion:
+### IN SCOPE (V4.1):
+- `orchestrator run` command (core executor)
+- `ClaudeCodeRunner` (subprocess-based, NOT API)
+- Basic gates: `file_exists`, `command`, `no_pattern`, `json_valid`
+- One complete workflow: `workflows/default_v4.yaml`
+- State management in `.orchestrator/v4/`
 
-```python
-# After workflow completion, before final message
-if healing_enabled():
-    try:
-        from .healing.scanner import PatternScanner
-        scanner = PatternScanner(
-            state_path=working_dir / ".orchestrator" / "scan_state.json",
-            project_root=working_dir,
-            healing_client=await _get_healing_client(),
-        )
-        summary = await scanner.scan_all()
-        if summary.errors_extracted > 0:
-            print(f"Learning: Found {summary.errors_extracted} errors, "
-                  f"created {summary.patterns_created} patterns")
-    except Exception as e:
-        logger.warning(f"Scanner failed (non-blocking): {e}")
+### OUT OF SCOPE (V4.2 - Issue #101):
+- `orchestrator chat` command
+- `ClaudeAPIRunner` (API mode)
+- `external_reviews` gate
+- `human_approval` gate
+- `min_coverage` gate
+- Token budget tracking
+- Tool allow/deny enforcement
+
+## File Structure
+
+```
+workflow-orchestrator/
+├── src/
+│   ├── cli.py                         # EXISTING - ADD run command
+│   ├── executor.py                    # NEW - Core executor
+│   ├── runners/                       # NEW directory
+│   │   ├── __init__.py
+│   │   ├── base.py                   # Runner interface
+│   │   └── claude_code.py            # Subprocess runner
+│   └── v4/                            # NEW directory
+│       ├── __init__.py
+│       ├── models.py                 # All dataclasses
+│       ├── state.py                  # State management
+│       ├── parser.py                 # YAML parsing
+│       └── gate_engine.py            # Gate validation
+├── workflows/                         # NEW directory
+│   └── default_v4.yaml               # Migrated workflow
+└── tests/
+    └── test_executor.py              # Executor tests
 ```
 
-Key points:
-- Non-blocking: Errors logged but don't fail workflow
-- Only runs if healing is enabled
-- Shows summary if patterns found
+## Implementation Steps
 
-### 2. cmd_start (cli.py:379)
+### Step 1: Create src/v4/ directory structure
+1. Create `src/v4/__init__.py`
+2. Create `src/v4/models.py` - All dataclasses (PhaseType, GateType, WorkflowStatus, etc.)
+3. Create `src/v4/state.py` - StateStore with file locking
+4. Create `src/v4/parser.py` - YAML parser with validation
+5. Create `src/v4/gate_engine.py` - Programmatic gate validation
 
-Add crash recovery check at session start:
+### Step 2: Create src/runners/ directory
+1. Create `src/runners/__init__.py`
+2. Create `src/runners/base.py` - AgentRunner interface
+3. Create `src/runners/claude_code.py` - ClaudeCodeRunner (subprocess)
 
-```python
-# At start of cmd_start, after working_dir setup
-if healing_enabled():
-    try:
-        from .healing.scanner import PatternScanner
-        scanner = PatternScanner(
-            state_path=working_dir / ".orchestrator" / "scan_state.json",
-            project_root=working_dir,
-        )
-        if scanner.has_orphaned_session():
-            print("Recovering learnings from previous incomplete session...")
-            summary = await scanner.recover_orphaned()
-            if summary.errors_extracted > 0:
-                print(f"Recovered {summary.errors_extracted} errors")
-    except Exception as e:
-        logger.debug(f"Crash recovery check failed: {e}")
-```
+### Step 3: Implement Core Executor
+1. Create `src/executor.py` - WorkflowExecutor class with main control loop
 
-### 3. heal_backfill (cli_heal.py:317)
+### Step 4: CLI Integration
+1. Add `cmd_run` function to `src/cli.py`
+2. Add `setup_run_parser` to register the command
+3. Add appropriate imports
 
-Enhance with new flags:
+### Step 5: Create Default Workflow
+1. Create `workflows/` directory
+2. Create `workflows/default_v4.yaml`
 
-```python
-def heal_backfill(
-    log_dir: Optional[str] = None,
-    dry_run: bool = False,
-    limit: Optional[int] = None,
-    scan_only: bool = False,      # NEW: Just show recommendations
-    days: int = 30,                # NEW: Limit to last N days
-    no_github: bool = False,       # NEW: Skip GitHub issue scanning
-) -> int:
-```
+### Step 6: Create Tests
+1. Create `tests/test_executor.py` with acceptance tests
 
-Implementation:
-- `--scan-only`: Call `scanner.get_recommendations()` and display table
-- `--days N`: Pass to `scanner.scan_all(days=N)`
-- `--no-github`: Skip GitHubIssueParser (add flag to scanner)
+### Step 7: Verification
+1. Run pytest to verify tests pass
+2. Manual test: `orchestrator run workflows/default_v4.yaml --task "Test task"`
 
-## Files to Modify
+## Execution Strategy
 
-| File | Change |
-|------|--------|
-| `src/cli.py` | Add scanner calls to cmd_finish, cmd_start |
-| `src/healing/cli_heal.py` | Enhance heal_backfill with new flags |
-| `src/healing/scanner.py` | Add `include_github` parameter |
+**Decision: SEQUENTIAL execution**
 
-## Execution Plan
+**Reason:** The components have dependencies:
+- models.py must exist before state.py, parser.py, gate_engine.py
+- base.py must exist before claude_code.py
+- All v4/ and runners/ modules must exist before executor.py
+- All modules must exist before CLI integration
 
-**Sequential execution** - Small, focused changes with shared context.
+The spec provides complete code for each module, so sequential creation following the dependency order is most reliable.
 
-1. Add `include_github` parameter to scanner.scan_all()
-2. Modify heal_backfill with new flags
-3. Add scanner to cmd_finish
-4. Add crash recovery to cmd_start
-5. Write tests
-6. Verify
+## Acceptance Criteria
 
-## Test Cases
+From the spec - these tests MUST pass:
 
-1. cmd_finish calls scanner (mock scanner, verify call)
-2. cmd_start checks for orphaned sessions (mock scanner)
-3. heal_backfill --scan-only shows recommendations
-4. heal_backfill --days 90 passes days parameter
-5. heal_backfill --no-github skips GitHub
-6. Scanner errors don't block workflow completion
+1. **test_workflow_completes_even_if_llm_doesnt_call_finish** - Orchestrator guarantees completion
+2. **test_llm_cannot_skip_phases** - Phase order is enforced programmatically
+3. **test_gates_validated_by_code_not_llm** - Gate validation done by code
+4. **test_finalize_always_called** - mark_complete() always called
+
+## Risks
+
+| Risk | Mitigation |
+|------|------------|
+| CLI integration conflicts | Add new command without modifying existing |
+| State file conflicts with existing .orchestrator/ | Use separate `.orchestrator/v4/` directory |
+| Import errors | Follow dependency order, test imports |
+| Test failures | Follow spec exactly, debug incrementally |
+
+## Dependencies
+
+No new dependencies required. Uses stdlib:
+- `subprocess` - Running Claude Code
+- `json` - State serialization
+- `fcntl` - File locking (Unix)
+- `re` - Pattern matching
+- `pathlib` - Path handling
+- `pyyaml` - Already in project for YAML parsing

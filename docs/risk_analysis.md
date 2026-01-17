@@ -1,46 +1,72 @@
-# Risk Analysis: CLI Scanner Integration
+# Control Inversion V4 - Risk Analysis
 
-## Risk Matrix
+## Risk Assessment Matrix
 
-| Risk | Severity | Likelihood | Mitigation |
-|------|----------|------------|------------|
-| Scanner slows cmd_finish | LOW | LOW | Non-blocking, <1s typical |
-| Scanner error blocks workflow | MEDIUM | LOW | Try/except, log warning only |
-| Healing not configured | LOW | MEDIUM | Graceful skip if no client |
-| Crash recovery false positive | LOW | LOW | Session state tracking |
+| Risk | Severity | Likelihood | Mitigation | Residual Risk |
+|------|----------|------------|------------|---------------|
+| CLI integration conflicts | Medium | Low | Add new command without modifying existing commands | Low |
+| State file conflicts with existing .orchestrator/ | Medium | Low | Use separate `.orchestrator/v4/` directory | Low |
+| Import errors from circular dependencies | Medium | Medium | Follow strict dependency order in implementation | Low |
+| Test failures due to spec deviations | Medium | Medium | Follow spec exactly, debug incrementally | Low |
+| CommandGate security (shell injection) | High | Low | Use controlled inputs, defer allowlist to V4.2/Issue #75 | Medium |
+| File locking failures on non-Unix | Medium | Low | fcntl is Unix-only; document limitation | Low |
+| Claude Code subprocess timeout | Low | Medium | Configurable timeout with sensible default (1 hour) | Low |
 
 ## Detailed Analysis
 
-### 1. Performance Impact
+### 1. CLI Integration Conflicts
+**Risk:** The existing cli.py is large (~270KB). Adding a new command could conflict with existing code.
 
-**Risk**: Scanner adds latency to cmd_finish.
+**Mitigation:**
+- Add `cmd_run` as a new function (no modification to existing functions)
+- Add parser registration at the end of the subparsers section
+- No changes to existing command behavior
 
-**Mitigation**:
-- Incremental scanning (hash-based skip)
-- Typical scan: <1s for most repos
-- Non-blocking: errors logged, not raised
+### 2. State File Conflicts
+**Risk:** The existing orchestrator uses `.orchestrator/` directory for various state files.
 
-### 2. Error Handling
+**Mitigation:**
+- V4 state lives in `.orchestrator/v4/state_{workflow_id}.json`
+- Completely separate from existing V3 state files
+- Both can coexist without interference
 
-**Risk**: Scanner error could block workflow completion.
+### 3. Import Errors
+**Risk:** The new modules have dependencies on each other.
 
-**Mitigation**:
-- All scanner calls wrapped in try/except
-- Errors logged at warning level
-- Workflow continues regardless
+**Mitigation:**
+- Follow strict creation order: models.py → state.py → parser.py → gate_engine.py → runners/ → executor.py → cli.py
+- Test imports after each module creation
 
-### 3. Configuration
+### 4. CommandGate Security
+**Risk:** The CommandGate executes shell commands which could be exploited.
 
-**Risk**: Healing not configured in environment.
+**Mitigation:**
+- Commands come from YAML workflow files (not user input)
+- Workflow files are controlled by repository owner
+- Timeout limits prevent runaway processes
+- Issue #75 tracks allowlist approach for additional security (V4.2)
 
-**Mitigation**:
-- Check healing_enabled() before scanner calls
-- Gracefully skip if no Supabase config
-- No error messages for expected missing config
+### 5. Platform Compatibility
+**Risk:** Uses `fcntl` for file locking which is Unix-only.
 
-## Rollback Plan
+**Mitigation:**
+- Document as Unix-only feature
+- Windows users won't get file locking protection
+- Not a blocking issue for initial release
 
-If issues found:
-1. Set `ORCHESTRATOR_SKIP_SCAN=1` to disable
-2. Or remove scanner calls from cmd_finish/cmd_start
-3. No database changes to revert
+## Impact Assessment
+
+### Positive Impacts
+1. **Reliability:** LLM cannot forget to complete workflow
+2. **Consistency:** Gates validated programmatically
+3. **Auditability:** Clear state tracking with checkpoints
+4. **Extensibility:** Clean architecture for V4.2 additions
+
+### Negative Impacts
+1. **Learning curve:** Users need to learn `orchestrator run` command
+2. **Backward compatibility:** Doesn't replace existing passive mode (yet)
+3. **Platform limitation:** File locking Unix-only
+
+## Acceptance
+
+This risk analysis is acceptable. The primary risks are mitigated and the benefits outweigh the residual risks.
