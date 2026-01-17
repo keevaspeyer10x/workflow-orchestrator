@@ -102,6 +102,7 @@ This single command:
 | `init` | Initialize workflow.yaml in current directory |
 | `start "task"` | Begin a new workflow |
 | `status` | Check current state (AI should do this constantly) |
+| `run <workflow.yaml> -t "task"` | Execute workflow with control inversion (V4) - orchestrator drives |
 | `complete <item> --notes "..."` | Mark item done (runs verification) |
 | `skip <item> --reason "..."` | Skip with documented reason |
 | `approve-item <item>` | Human approval for manual gates |

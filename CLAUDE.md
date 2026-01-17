@@ -495,6 +495,7 @@ The merged result is automatically pushed to remote after the worktree merge.
 |---------|---------|
 | `orchestrator status` | Show current workflow state |
 | `orchestrator start "task"` | Start new workflow |
+| `orchestrator run <workflow> -t "task"` | Execute workflow with control inversion (V4) |
 | `orchestrator complete <id>` | Mark item complete |
 | `orchestrator skip <id>` | Skip optional item |
 | `orchestrator advance` | Move to next phase |

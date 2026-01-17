@@ -5,6 +5,19 @@ All notable changes to the workflow-orchestrator.
 ## [Unreleased]
 
 ### Added
+- **Control Inversion V4** (Issue #100): Orchestrator-driven workflow execution
+  - New `orchestrator run` command for V4 workflow execution
+  - `src/v4/models.py`: Complete data models (PhaseType, GateType, WorkflowStatus, gates, phases, state)
+  - `src/v4/state.py`: State persistence with file locking and atomic writes
+  - `src/v4/parser.py`: YAML workflow parsing with validation
+  - `src/v4/gate_engine.py`: Programmatic gate validation (file_exists, command, no_pattern, json_valid)
+  - `src/runners/base.py`: AgentRunner interface
+  - `src/runners/claude_code.py`: Claude Code subprocess runner
+  - `src/executor.py`: Core WorkflowExecutor with control inversion loop
+  - `workflows/default_v4.yaml`: Default 5-phase V4 workflow
+  - 17 new tests for executor, gates, state, and parser
+  - Key principle: Orchestrator drives execution, LLM cannot skip phases or bypass gates
+
 - **Self-Healing Infrastructure Phase 7b**: CLI Scanner Integration
   - `src/healing/cli_heal.py`: New helper functions for CLI integration
     - `_run_session_scan()`: Session-end scan helper for cmd_finish
